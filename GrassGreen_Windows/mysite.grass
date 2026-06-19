@@ -1,0 +1,50 @@
+* Тест условий и изменения цвета в твоем синтаксисе
+!GrassWeb!
+!GREEN_WWW1!
+
+box-start
+    * Даем ID нашему заголовку
+    id(status_text)
+    color(#aaaaaa)
+    thick()
+    G2 Введите пин-код:
+
+    * Даем ID полю ввода пароля
+    id(password_input)
+    size(300, 20)
+    round-ob(8)
+    glass()
+    enter = Ваш пароль...
+
+    * Даем ID кнопке
+    id(btn_login)
+    round-ob(8)
+    neon(#00ffcc)
+    button = Войти
+box-end
+
+* =========================================
+* ЛОГИКА GRASSGREEN
+* =========================================
+script-start
+
+    id(btn_login):
+    on-click
+    
+        * Считываем пароль через компактную команду val() и проверяем через CHEK
+        chek(val(password_input) == "1234")
+            
+            * Если пароль верный, красим текст в зеленый неон
+            id(status_text):
+            repaint-color(#00ffcc)
+            
+        else
+            * Иначе красим текст в красный неон
+            id(status_text):
+            repaint-color(#ff0055)
+            
+        end-chek
+        
+    end-click
+
+script-end

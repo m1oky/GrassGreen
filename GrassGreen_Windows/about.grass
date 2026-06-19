@@ -1,0 +1,38 @@
+* Современный и чистый сайт - О нас
+!GrassWeb!
+!GREEN_WWW1!
+
+* Навигационное меню
+row-start
+  thick()
+  color(#ffffff)
+  G2 Моё Портфолио
+  
+  color(#aaaaaa)
+  link(index.grass) = Главная
+
+  color(#00ffcc)
+  thick()
+  link(about.grass) = О нас
+row-end
+
+box-start
+  thick()
+  color(#ffcc00)
+  G2 Мой стек технологий
+  
+  color(#ffffff)
+  G4 1. C++ (Разработка собственного движка)
+  G4 2. GrassGreen (Кастомный синтаксис)
+  G4 3. Web Sockets и серверные технологии
+
+  row-start
+    round-ob(8)
+    border(2, #ffcc00)
+    bg(#0b0b0f)
+    color(#ffcc00)
+    * ВОЗВРАЩАЕМСЯ НА ГЛАВНУЮ
+    flip(index.grass)
+    button = Вернуться назад
+  row-end
+box-end
