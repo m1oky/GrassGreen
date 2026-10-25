@@ -1,46 +1,49 @@
 <div align="center">
 
-  <img src="GrassGreen/logo.svg" alt="GrassGreen Logo" width="130" height="130" />
+  <img src="GrassGreen/logo.svg" alt="GrassGreen Logo" width="120" height="120" />
 
-  # 🌿 GrassGreen Programming Language
-  ### *Высокопроизводительный байт-код язык с синтаксисом C++ и встроенным компилятором в автономные .exe*
+  # GrassGreen
 
-  [![Version](https://img.shields.io/badge/GrassGreen-v3.0.0-00ffcc?style=for-the-badge&logo=visual-studio-code&logoColor=white)](https://github.com)
-  [![Standard](https://img.shields.io/badge/C%2B%2B-20-blue?style=for-the-badge&logo=c%2B%2B)](https://isocpp.org/)
-  [![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows)](https://microsoft.com)
-  [![Arch](https://img.shields.io/badge/Arch-x64-brightgreen?style=for-the-badge)](https://github.com)
+  **Экспериментальный компилируемый язык программирования со стек-машиной (Stack VM) и встроенным PE-пакером.**
 
-  <p align="center">
-    <b>GrassGreen</b> — это независимый компилируемый язык программирования со стек-машиной (Stack VM), упаковщиком PE .exe файлов, встроенным графическим интерфейсом Fluent UI, квантовым эмулятором и поддержкой синтаксиса в стиле C++.
-  </p>
+  [![C++20](https://img.shields.io/badge/Language-C%2B%2B20-00599C?style=flat-square&logo=c%2B%2B)](https://isocpp.org/)
+  [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?style=flat-square&logo=windows)](https://microsoft.com)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
 </div>
 
 ---
 
-## ⚡ Главные возможности
+**GrassGreen** — пет-проект независимого языка программирования, написанный с нуля на C++20 без внешних библиотек и зависимостей. 
 
-- 🚀 **Ультра-компактный байт-код:** бинарный размер скрипта занимает от 40 до 300 байт.
-- 📦 **Встроенный PE-Packer:** упаковка любого `.grass` файла в самостоятельный `.exe`, работающий на любом ПК с Windows без установки интерпертатора.
-- 💻 **Эргономика C++:** поддержка классической точки входа `int main() {}`, процедур `take`, циклов `for`, потоков `cout` / `cin` и строгого разбора через `{}`.
-- 🎨 **Нативная экосистема VS Code:** автоматическая привязка фирменного векторного логотипа `.svg`, синтаксической подсветки, автодополнения и компиляции по `Ctrl + Shift + B`.
-- 🧮 **Модульность:** библиотеки для квантовых расчётов (`!CoreMath!`), плавной графики (`!FastMath!`), управления сырой ОЗУ (`!memory!`) и базы данных (`!database!`).
+Компилятор транслирует исходный код в компактный кастомный байт-код, который либо исполняется встроенной стек-машиной (VM), либо линкуется с рантаймом в самостоятельный бинарный `.exe` файл под Windows (PE-формат).
 
 ---
 
-## 📂 Структура проекта
+## 🛠 Технические особенности
 
-```text
-GrassGreen/
-├── bin/                 # Скомпилированный компилятор (grassc.exe) и утилиты
-├── src/                 # Исходный код C++ (ядро компилятора, ВМ, модули)
-│   ├── grassc.cpp       # Главный компилятор, парсер и виртуальная машина
-│   ├── FastMath.cpp     # Быстрая математика и интерполяция
-│   ├── CoreMath.cpp     # Квантовый эмулятор и крипто-функции
-│   ├── GrassMemory.cpp  # Менеджер оперативной памяти
-│   ├── GrassRandom.cpp  # Генератор псевдослучайных последовательностей
-│   └── GrassWeb.cpp     # Веб-сервер и рендерер страниц
-├── docs/                # Словари и документация команд
-├── examples/            # Примеры рабочих программ (.grass)
-├── logo.svg             # Официальная векторная иконка языка
-└── README.md            # Документация проекта
+* **Стек-машина (Stack VM):** выполнение через набор собственных опкодов (`OP_PUSH`, `OP_ADD`, `OP_JUMP_IF_FALSE`, `OP_CALL_BUILTIN` и др.).
+* **Автономные бинарники:** встроенный PE-пакер сшивает байт-код с готовым рантаймом. На целевой системе не требуются установленные интерпретаторы, Python или MSVC Redistributable.
+* **Монолитное ядро:** системные модули (математика, прямое выделение памяти в куче, WinAPI диалоги) встроены прямо в диспетчер инструкций ВМ без накладных расходов на внешний FFI.
+* **Синтаксис:** C-подобная структура программы с точкой входа `int main()`, процедурами `take`, циклом `for` и строгой блочной областью видимости `{}`.
+
+---
+
+## 💻 Примеры кода
+
+### 1. Базовый синтаксис и вычисления
+
+```cpp
+!GrassGreen!
+
+int main() {
+    take counter = 0;
+    
+    // Цикл от 0 до 10
+    for (take i = 0; i < 10; i++) {
+        counter = counter + i;
+    }
+    
+    cout << "Результат суммы: " << counter << endl;
+    return 0;
+}
