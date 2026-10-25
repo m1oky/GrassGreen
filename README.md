@@ -1,6 +1,6 @@
 <div align="center">
 
-  <img src="logo.svg" alt="GrassGreen Logo" width="130" height="130" />
+  <img src="GrassGreen/logo.svg" alt="GrassGreen Logo" width="130" height="130" />
 
   # 🌿 GrassGreen Programming Language
   ### *Высокопроизводительный байт-код язык с синтаксисом C++ и встроенным компилятором в автономные .exe*
