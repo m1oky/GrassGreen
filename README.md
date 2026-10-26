@@ -1,6 +1,6 @@
 <div align="center">
 
-  <img src="GrassGreen-v-3-1-0/logo.svg" alt="GrassGreen Logo" width="120" height="120" />
+  <img src="logo.svg" alt="GrassGreen Logo" width="120" height="120" />
 
   # GrassGreen Programming Language
   ### *Высокопроизводительный стек-ориентированный язык системного уровня с компиляцией в нативный Win32 PE-байт-код*
@@ -8,10 +8,10 @@
   [![Standard](https://img.shields.io/badge/Language_Standard-C%2B%2B20-00599C?style=flat-square&logo=c%2B%2B)](https://isocpp.org/)
   [![Platform](https://img.shields.io/badge/Platform-Windows_x64-0078D6?style=flat-square&logo=windows)](https://microsoft.com)
   [![Architecture](https://img.shields.io/badge/VM-Zero--Allocation_Stack_Engine-00ffcc?style=flat-square)](#архитектура-ядра)
-  [![Version](https://img.shields.io/badge/Release-v3.0.1-brightgreen?style=flat-square)](https://github.com/m1oky/GrassGreen)
+  [![Version](https://img.shields.io/badge/Release-v3.2.0-brightgreen?style=flat-square)](https://github.com/m1oky/GrassGreen)
 
   <p align="center">
-    <b>GrassGreen</b> — независимый компилируемый язык программирования. Включает собственную виртуальную машину (Stack VM) с прямой диспетчеризацией опкодов, инкрементальный PE-Packer для генерации автономных <code>.exe</code>, модульный GUI-движок на базе Win32/GDI+, встроенный reactive-web сервер и модули прямого управления памятью.
+    <b>GrassGreen</b> — независимый компилируемый язык программирования. Включает собственную виртуальную машину (Stack VM) с прямой диспетчеризацией опкодов, инкрементальный PE-Packer для генерации автономных <code>.exe</code>, модульный GUI-движок на базе Win32/GDI+, сетевой стек TCP/HTTP (<code>!GrassNet!</code>), встроенный reactive-web сервер и модули прямого управления памятью.
   </p>
 
 </div>
@@ -45,7 +45,7 @@
 
 | Язык / Среда | Время выполнения | Относительная скорость |
 | :--- | :---: | :---: |
-| **GrassGreen v3.0.1 (Stack VM)** | **6.00 ms** | **1.0x (Baseline)** |
+| **GrassGreen v3.2.0 (Stack VM)** | **6.00 ms** | **1.0x (Baseline)** |
 | CPython 3.12 (Standard) | 92.40 ms | ~15.4x медленнее |
 | NodeJS v20 (V8 JIT Warmup) | 14.10 ms | ~2.3x медленнее |
 
@@ -61,6 +61,7 @@
 !GrassGreen!    // Обязательный заголовок базового языка
 !time!          // Подключение модуля точных таймеров
 !FastMath!      // Подключение модуля векторной математики
+!GrassNet!      // Подключение сетевого стека TCP/IP и HTTP
 ```
 
 ---
@@ -136,7 +137,7 @@ int main() {
         theme("dark");
         glass();
 
-        label "Компилятор GrassGreen v3.0" {
+        label "Компилятор GrassGreen v3.2" {
             id(lbl_status);
             window-ob(0, 40);
             size(500, 32);
@@ -341,6 +342,53 @@ script-end
 
 ---
 
+### 10. `!GrassNet!` (Сетевой стек TCP/IP, HTTP/HTTPS клиент и сокет-сервер)
+Нативный сетевой модуль на базе **WinSock2** и **WinINet** с поддержкой прямых литералов IPv4-адресов без кавычек (`127.0.0.1`), декларативных блоков конфигурации `agent` и `create_serv()`, а также фильтрации входящих пакетов на уровне сокета.
+
+* **`agent { browser "..."; device "..."; }`** — конфигурация заголовков `User-Agent` и системного профиля клиента для исходящих запросов.
+* **`API("token")`** — автоматическая инъекция Bearer-токенов и `X-API-Key` в HTTP/HTTPS заголовки.
+* **`connect(host, [port])`** — установка прямого TCP-соединения с таймаут-контролем.
+* **`send(url, [method], [body])`** — выполнение HTTP/HTTPS запросов с поддержкой TLS.
+* **`create_serv() { port: ...; IP: ...; password: ...; certainIP: ...; }`** — развертывание неблокирующего TCP-сервера с привязкой к интерфейсу и аппаратным белым списком `certainIP`.
+* **`accept()` / `async`** — опрос дескрипторов через `select()` и синхронизация сетевых потоков.
+* **`ping(host)` / `resolve_ip(domain)` / `local_ip()` / `download(url, path)` / `net_status()` / `net_close()`** — диагностические и транспортные примитивы.
+
+```cpp
+!GrassGreen!
+!GrassNet!
+
+int main() {
+    cout << "Локальный интерфейс: " << local_ip() << endl;
+
+    agent {
+        browser "GrassGreenBot/3.2";
+        device "Windows 10 x64; ProDesk";
+    }
+
+    API("gg_secret_api_token_2026");
+
+    string target_ip = resolve_ip("example.com");
+    if (connect("example.com", 80)) {
+        cout << "Узел " << target_ip << " доступен | RTT: " << ping("example.com", 80) << " ms" << endl;
+    }
+
+    create_serv() {
+        port: 8443;
+        IP: 127.0.0.1;
+        password: 1234;
+        certainIP: 127.0.0.1;
+    }
+
+    async;
+    cout << "Очередь сокета: " << accept() << endl;
+
+    net_close();
+    return 0;
+}
+```
+
+---
+
 ## Сборка компилятора из исходников
 
 Для сборки используется компилятор MinGW-w64 (GCC с поддержкой стандарта C++20):
@@ -350,6 +398,7 @@ g++ -std=c++20 -O3 -s \
   src/grassc.cpp \
   src/GrassSyntax.cpp \
   src/GrassTime.cpp \
+  src/GrassNet.cpp \
   src/gui_engine.cpp \
   src/GrassWeb.cpp \
   src/GSE.cpp \
@@ -358,7 +407,7 @@ g++ -std=c++20 -O3 -s \
   src/GrassMemory.cpp \
   src/GrassRandom.cpp \
   -o bin/grassc.exe \
-  -lgdiplus -lgdi32 -lcomctl32 -lwinmm -lws2_32 -lurlmon
+  -lgdiplus -lgdi32 -lcomctl32 -lwinmm -lws2_32 -lwininet -lurlmon
 ```
 
 ### Развертывание окружения в VS Code
@@ -380,14 +429,17 @@ g++ -std=c++20 -O3 -s \
 ## Структура файлов проекта
 
 ```text
-GrassGreen-v-3-0-1/
+GrassGreen-v-3-2-0/
 ├── bin/
 │   └── grassc.exe           # Готовый нативный компилятор, VM и упаковщик
 ├── docs/                    # Техническая документация функций и сигнатур
 │   ├── coremath.txt
 │   ├── fastmath.txt
 │   ├── gdb.txt
+│   ├── GrassNet.txt
 │   ├── interface.txt
+│   ├── library.txt
+│   ├── main.txt
 │   ├── memory.txt
 │   ├── random.txt
 │   ├── time.txt
@@ -397,12 +449,14 @@ GrassGreen-v-3-0-1/
 │   ├── config.gdb           # Бинарная конфигурационная база данных
 │   ├── math.grass           # Комплексный тест CoreMath и FastMath
 │   ├── memory.grass         # Проверка граничных условий и лимитов кучи
+│   ├── net_test.grass       # Тестирование TCP/HTTP стека и сокет-сервера
 │   ├── test_gui.grass       # Оконное приложение Fluent Win32
 │   └── test_web.grass       # Реактивный веб-интерфейс на сокетах
 ├── src/                     # Исходный код C++
 │   ├── CoreMath.cpp / .h    # Квантовый эмулятор кубитов
 │   ├── FastMath.cpp / .h    # Оптимизированная тригонометрия и lerp
 │   ├── GrassMemory.cpp / .h # Менеджер кучи и аллокатор блоков
+│   ├── GrassNet.cpp / .h    # Сетевой стек WinSock2 / WinINet
 │   ├── GrassRandom.cpp / .h # PRNG на базе mt19937
 │   ├── GrassSyntax.cpp / .h # Модульный лексер и генератор байт-кода
 │   ├── GrassTime.cpp / .h   # Модуль высокоточных часов
