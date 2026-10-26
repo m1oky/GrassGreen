@@ -1,6 +1,6 @@
 <div align="center">
 
-  <img src="logo.svg" alt="GrassGreen Logo" width="120" height="120" />
+  <img src="GrassGreen-v-3-2-0/logo.svg" alt="GrassGreen Logo" width="120" height="120" />
 
   # GrassGreen Programming Language
   ### *Высокопроизводительный стек-ориентированный язык системного уровня с компиляцией в нативный Win32 PE-байт-код*
