@@ -1,0 +1,17 @@
+!GrassGreen!
+!sys!
+
+int main() {
+    cout << "=== [GrassGreen v3.4.0 System Diagnostics] ===" << endl;
+    cout << "Имя ПК: " << pc_name() << " | Пользователь: " << user_name() << endl;
+    cout << "Разрешение экрана: " << screen_w() << "x" << screen_h() << endl;
+    cout << "Потоков CPU: " << cpu_cores() << endl;
+    cout << "ОЗУ: свободно " << ram_free_mb() << " MB из " << ram_total_mb() << " MB" << endl;
+    cout << "Аптайм Windows: " << uptime_sec() << " сек" << endl;
+
+    // Тест буфера обмена (Clipboard)
+    clip_set("GrassGreen Engine 2026");
+    cout << "Скопировано в буфер обмена: " << clip_get() << endl;
+
+    return 0;
+}
