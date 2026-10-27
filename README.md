@@ -1,6 +1,6 @@
 <div align="center">
 
-  <img src="GrassGreen-v-3-2-0/logo.svg" alt="GrassGreen Logo" width="120" height="120" />
+  <img src="GrassGreen-v-3-4-0/logo.svg" alt="GrassGreen Logo" width="120" height="120" />
 
   # GrassGreen Programming Language
   ### *Высокопроизводительный стек-ориентированный язык системного уровня с компиляцией в нативный Win32 PE-байт-код*
@@ -8,10 +8,10 @@
   [![Standard](https://img.shields.io/badge/Language_Standard-C%2B%2B20-00599C?style=flat-square&logo=c%2B%2B)](https://isocpp.org/)
   [![Platform](https://img.shields.io/badge/Platform-Windows_x64-0078D6?style=flat-square&logo=windows)](https://microsoft.com)
   [![Architecture](https://img.shields.io/badge/VM-Zero--Allocation_Stack_Engine-00ffcc?style=flat-square)](#архитектура-ядра)
-  [![Version](https://img.shields.io/badge/Release-v3.2.0-brightgreen?style=flat-square)](https://github.com/m1oky/GrassGreen)
+  [![Version](https://img.shields.io/badge/Release-v3.4.0-brightgreen?style=flat-square)](https://github.com/m1oky/GrassGreen)
 
   <p align="center">
-    <b>GrassGreen</b> — независимый компилируемый язык программирования. Включает собственную виртуальную машину (Stack VM) с прямой диспетчеризацией опкодов, инкрементальный PE-Packer для генерации автономных <code>.exe</code>, модульный GUI-движок на базе Win32/GDI+, сетевой стек TCP/HTTP (<code>!GrassNet!</code>), встроенный reactive-web сервер и модули прямого управления памятью.
+    <b>GrassGreen</b> — независимый компилируемый язык программирования. Включает собственную виртуальную машину (Stack VM) с прямой диспетчеризацией опкодов, инкрементальный PE-Packer для генерации автономных <code>.exe</code>, модульный GUI-движок на базе Win32/GDI+, нативный сетевой стек (<code>!GrassNet!</code>), парсер JSON данных (<code>!json!</code>), системный модуль мониторинга ОС и буфера обмена (<code>!sys!`</code>), встроенный reactive-web сервер и инструменты прямого управления памятью.
   </p>
 
 </div>
@@ -45,7 +45,7 @@
 
 | Язык / Среда | Время выполнения | Относительная скорость |
 | :--- | :---: | :---: |
-| **GrassGreen v3.2.0 (Stack VM)** | **6.00 ms** | **1.0x (Baseline)** |
+| **GrassGreen v3.4.0 (Stack VM)** | **6.00 ms** | **1.0x (Baseline)** |
 | CPython 3.12 (Standard) | 92.40 ms | ~15.4x медленнее |
 | NodeJS v20 (V8 JIT Warmup) | 14.10 ms | ~2.3x медленнее |
 
@@ -60,13 +60,14 @@
 ```text
 !GrassGreen!    // Обязательный заголовок базового языка
 !time!          // Подключение модуля точных таймеров
-!FastMath!      // Подключение модуля векторной математики
 !GrassNet!      // Подключение сетевого стека TCP/IP и HTTP
+!json!          // Подключение сериализации и парсинга JSON
+!sys!           // Подключение мониторинга Windows и буфера обмена
 ```
 
 ---
 
-## Документация и спецификация библиотек
+## Документация и спецификация библиотек (12 модулей)
 
 ### 1. `!GrassGreen!` (Базовое ядро и управляющие конструкции)
 Предоставляет стандартную C++ семантику: типы `take`, `int`, `string`, управление потоками ввода-вывода `cout` / `cin`, циклы `for`, `while`, ветвления `if` / `else`.
@@ -137,7 +138,7 @@ int main() {
         theme("dark");
         glass();
 
-        label "Компилятор GrassGreen v3.2" {
+        label "Компилятор GrassGreen v3.4" {
             id(lbl_status);
             window-ob(0, 40);
             size(500, 32);
@@ -361,7 +362,7 @@ int main() {
     cout << "Локальный интерфейс: " << local_ip() << endl;
 
     agent {
-        browser "GrassGreenBot/3.2";
+        browser "GrassGreenBot/3.4";
         device "Windows 10 x64; ProDesk";
     }
 
@@ -389,9 +390,77 @@ int main() {
 
 ---
 
+### 11. `!json!` (Сериализация, генерация и парсинг данных JSON)
+Высокоскоростной легковесный модуль парсинга и сборки JSON-пакетов для обмена данными с внешними Web API и сетевыми сервисами без внешних библиотек.
+
+* **`json_get(json_str, "key.subkey")`** — рекурсивное извлечение значения поля или вложенного объекта.
+* **`json_set(json_str, key, value)`** — создание нового ключа или обновление существующего в JSON строке.
+* **`json_valid(json_str)`** — аппаратная валидация структуры JSON (проверка баланса скобок и синтаксиса).
+* **`json_minify(json_str)`** — сжатие JSON строки с удалением всех незначимых пробелов и переводов строк.
+* **`json_clear()` / `json_add(k, v)` / `json_add_num(k, num)` / `json_build()`** — потоковый билдер JSON-объектов.
+
+```cpp
+!GrassGreen!
+!json!
+
+int main() {
+    // Построение JSON документа
+    json_clear();
+    json_add("project", "GrassGreen");
+    json_add("author", "m1oky");
+    json_add_num("version", 3.4);
+
+    string payload = json_build();
+    cout << "JSON Payload: " << payload << endl;
+
+    // Чтение значений по ключу
+    string author = json_get(payload, "author");
+    cout << "Разработчик: " << author << " | Валидность: " << json_valid(payload) << endl;
+
+    // Обновление структуры
+    string updated = json_set(payload, "status", "production");
+    cout << "Обновлено: " << updated << endl;
+    return 0;
+}
+```
+
+---
+
+### 12. `!sys!` (Системный мониторинг Windows, буфер обмена и железо)
+Прямое взаимодействие с подсистемами ОС Windows через вызовы Win32 API для диагностики аппаратного обеспечения, чтения системных метрик и работы с буфером обмена.
+
+* **`clip_set(text)`** — копирование текстовой строки в глобальный буфер обмена Windows (`Ctrl + C`).
+* **`clip_get()`** — чтение содержимого буфера обмена Windows (`Ctrl + V`).
+* **`screen_w()` / `screen_h()`** — определение физического разрешения основного дисплея в пикселях.
+* **`pc_name()` / `user_name()`** — сетевое имя ПК и учетная запись текущего пользователя ОС.
+* **`cpu_cores()`** — количество активных логических потоков процессора.
+* **`ram_total_mb()` / `ram_free_mb()`** — мониторинг общего объема и свободной физической памяти (ОЗУ).
+* **`uptime_sec()`** — время непрерывной работы операционной системы Windows в секундах.
+* **`get_env(var_name)`** — чтение значения системных переменных окружения Windows (например `"PATH"`, `"TEMP"`).
+
+```cpp
+!GrassGreen!
+!sys!
+
+int main() {
+    cout << "Узел: " << pc_name() << " | Пользователь: " << user_name() << endl;
+    cout << "Дисплей: " << screen_w() << "x" << screen_h() << endl;
+    cout << "Потоков CPU: " << cpu_cores() << endl;
+    cout << "ОЗУ: свободно " << ram_free_mb() << " MB из " << ram_total_mb() << " MB" << endl;
+    cout << "Аптайм Windows: " << uptime_sec() << " сек" << endl;
+
+    // Работа с системным буфером обмена (Clipboard)
+    clip_set("GrassGreen Engine 2026");
+    cout << "Скопировано в буфер: " << clip_get() << endl;
+    return 0;
+}
+```
+
+---
+
 ## Сборка компилятора из исходников
 
-Для сборки используется компилятор MinGW-w64 (GCC с поддержкой стандарта C++20):
+Для сборки компилятора используется MinGW-w64 (GCC с поддержкой стандарта C++20):
 
 ```bash
 g++ -std=c++20 -O3 -s \
@@ -399,6 +468,8 @@ g++ -std=c++20 -O3 -s \
   src/GrassSyntax.cpp \
   src/GrassTime.cpp \
   src/GrassNet.cpp \
+  src/GrassJson.cpp \
+  src/GrassSys.cpp \
   src/gui_engine.cpp \
   src/GrassWeb.cpp \
   src/GSE.cpp \
@@ -421,7 +492,7 @@ g++ -std=c++20 -O3 -s \
 Команда автоматически:
 1. Зарегистрирует векторные SVG-иконки для `.grass` (`logo.svg`) и баз данных `.gdb` (`gdb_logo.svg`).
 2. Установит модуль TextMate-грамматики подсветки синтаксиса в расширения редактора.
-3. Добавит шаблоны сниппетов для сигнатур `int main()`, блоков `window { ... }` и циклов `for`.
+3. Добавит шаблоны сниппетов для сигнатур `int main()`, блоков `window { ... }`, `agent { ... }` и `create_serv()`.
 4. Настроит горячую сборку текущего открытого скрипта по нажатию **`Ctrl + Shift + B`**.
 
 ---
@@ -429,7 +500,7 @@ g++ -std=c++20 -O3 -s \
 ## Структура файлов проекта
 
 ```text
-GrassGreen-v-3-2-0/
+GrassGreen-v-3-4-0/
 ├── bin/
 │   └── grassc.exe           # Готовый нативный компилятор, VM и упаковщик
 ├── docs/                    # Техническая документация функций и сигнатур
@@ -438,27 +509,33 @@ GrassGreen-v-3-2-0/
 │   ├── gdb.txt
 │   ├── GrassNet.txt
 │   ├── interface.txt
+│   ├── json.txt
 │   ├── library.txt
 │   ├── main.txt
 │   ├── memory.txt
 │   ├── random.txt
+│   ├── sys.txt
 │   ├── time.txt
 │   └── WEB.txt
 ├── examples/                # Комплект эталонных тестовых сценариев
 │   ├── benchmark.grass      # Стресс-тест циклов (30 000 итераций)
 │   ├── config.gdb           # Бинарная конфигурационная база данных
+│   ├── json_test.grass      # Парсинг и компоновка пакетов JSON
 │   ├── math.grass           # Комплексный тест CoreMath и FastMath
 │   ├── memory.grass         # Проверка граничных условий и лимитов кучи
 │   ├── net_test.grass       # Тестирование TCP/HTTP стека и сокет-сервера
+│   ├── sys_test.grass       # Мониторинг параметров железа и буфер обмена
 │   ├── test_gui.grass       # Оконное приложение Fluent Win32
 │   └── test_web.grass       # Реактивный веб-интерфейс на сокетах
 ├── src/                     # Исходный код C++
 │   ├── CoreMath.cpp / .h    # Квантовый эмулятор кубитов
 │   ├── FastMath.cpp / .h    # Оптимизированная тригонометрия и lerp
+│   ├── GrassJson.cpp / .h   # Сериализация и парсер JSON
 │   ├── GrassMemory.cpp / .h # Менеджер кучи и аллокатор блоков
 │   ├── GrassNet.cpp / .h    # Сетевой стек WinSock2 / WinINet
 │   ├── GrassRandom.cpp / .h # PRNG на базе mt19937
 │   ├── GrassSyntax.cpp / .h # Модульный лексер и генератор байт-кода
+│   ├── GrassSys.cpp / .h    # Win32 системный мониторинг и буфер обмена
 │   ├── GrassTime.cpp / .h   # Модуль высокоточных часов
 │   ├── GrassWeb.cpp / .h    # Встроенный HTTP-сервер
 │   ├── GSE.cpp / .h         # Движок базы данных Grass Storage Engine
