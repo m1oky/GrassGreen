@@ -1,0 +1,28 @@
+!GrassGreen!
+!proc!
+
+int main() {
+    cout << "=== ТЕСТИРОВАНИЕ БИБЛИОТЕКИ !proc! ===" << endl;
+
+    take target = "explorer.exe";
+    take pid = proc_find(target);
+
+    cout << "Ищем процесс: " << target << endl;
+    cout << "Результат PID: " << pid << endl;
+
+    if (pid != -1) {
+        take alive = proc_exists(pid);
+        cout << "Проверка активности (1 = живой): " << alive << endl;
+
+        take ram = proc_mem(pid);
+        cout << "Потребление памяти: " << ram << " MB" << endl;
+    } else {
+        cout << "Ошибка: explorer.exe не найден!" << endl;
+    }
+
+    cout << "--- Проверка несуществующего процесса ---" << endl;
+    take fake_pid = proc_find("fake_process_999.exe");
+    cout << "Fake PID (должно вернуть -1): " << fake_pid << endl;
+
+    return 0;
+}

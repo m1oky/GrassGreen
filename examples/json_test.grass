@@ -1,0 +1,28 @@
+!GrassGreen!
+!json!
+
+int main() {
+    cout << "=== [GrassGreen v3.3.0 JSON Test] ===" << endl;
+
+    // 1. Создание JSON объекта
+    json_clear();
+    json_add("project", "GrassGreen");
+    json_add("author", "m1oky");
+    json_add_num("version", 3.3);
+    json_add("status", "active");
+
+    string payload = json_build();
+    cout << "Собранный JSON: " << payload << endl;
+    cout << "Валидность: " << json_valid(payload) << endl;
+
+    // 2. Чтение данных из JSON
+    string author = json_get(payload, "author");
+    string ver = json_get(payload, "version");
+    cout << "Автор: " << author << " | Версия: " << ver << endl;
+
+    // 3. Модификация поля
+    string updated = json_set(payload, "status", "released");
+    cout << "Обновленный JSON: " << updated << endl;
+
+    return 0;
+}

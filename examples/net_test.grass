@@ -1,0 +1,40 @@
+!GrassGreen!
+!GrassNet!
+
+int main() {
+    cout << "=== [GrassNet v3.1 Network Suite] ===" << endl;
+    cout << "Локальный IP компьютера: " << local_ip() << endl;
+
+    // 1. Создаём собственного веб-агента
+    agent
+    {
+        browser "GrassGreenBot/3.1";
+        device "Windows 10 x64; ProDesk";
+    }
+
+    // 2. Подключаем API-токен проекта
+    API("gg_secret_api_token_2026");
+
+    // 3. Проверяем DNS и пинг
+    string gh_ip = resolve_ip("example.com");
+    cout << "IP домена example.com: " << gh_ip << endl;
+
+    if (connect("example.com", 80)) {
+        cout << "Прямое TCP-соединение с example.com установлено! Пинг: " << ping("example.com", 80) << " ms" << endl;
+    }
+
+    // 4. Поднимаем собственный защищённый сервер
+    create_serv()
+    {
+        port: 8443;
+        IP: 127.0.0.1;
+        password: 1234;
+        certainIP: 127.0.0.1;
+    }
+
+    async;
+    cout << "Статус прослушивания сервера: " << accept() << endl;
+
+    net_close();
+    return 0;
+}

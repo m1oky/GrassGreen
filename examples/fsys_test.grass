@@ -1,0 +1,23 @@
+!GrassGreen!
+!fsys!
+
+int main() {
+    cout << "=== ТЕСТИРОВАНИЕ БИБЛИОТЕКИ !fsys! ===" << endl;
+
+    take folder = "test_dir";
+    take ok = fs_mkdir(folder);
+    cout << "Создание папки '" << folder << "': " << ok << endl;
+
+    take check_dir = fs_is_dir(folder);
+    cout << "Это папка (1 = да): " << check_dir << endl;
+
+    take src_file = "bin/grassc.exe";
+    take f_size = fs_size(src_file);
+    cout << "Размер файла " << src_file << ": " << f_size << " байт" << endl;
+
+    cout << "Список файлов в папке bin:" << endl;
+    take list_out = fs_list("bin");
+    cout << list_out << endl;
+
+    return 0;
+}
