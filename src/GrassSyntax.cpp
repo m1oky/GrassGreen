@@ -54,8 +54,9 @@ vector<GrassToken> Lexer::tokenize() {
             continue;
         }
 
-        // Однострочный комментарий * в начале строки или //
-        if ((c == '*' && at_line_start) || (c == '/' && pos + 1 < src.size() && src[pos + 1] == '/')) {
+        // Однострочный комментарий * в начале строки или // (игнорируем, если перед ними двоеточие, как в http:// и https://)
+        if ((c == '*' && at_line_start) || 
+            (c == '/' && pos + 1 < src.size() && src[pos + 1] == '/' && !(pos > 0 && src[pos - 1] == ':'))) {
             while (pos < src.size() && src[pos] != '\n') pos++;
             continue;
         }
@@ -325,6 +326,22 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
     else if (fn == "fs_mkdir" || fn == "fs_is_dir" || fn == "fs_size" ||
              fn == "fs_copy"  || fn == "fs_list") {
         requireLib("fsys", "!fsys!", fn + "()", line);
+    }
+    // 13. Проверка библиотеки !tg!
+    else if (fn == "tg_init" || fn == "tg_poll" || fn == "tg_get_user" ||
+             fn == "tg_get_chat_id" || fn == "tg_get_msg_id" || fn == "tg_get_callback" ||
+             fn == "tg_send" || fn == "tg_reply" || fn == "tg_send_btn" ||
+             fn == "tg_send_inline" || fn == "tg_send_webapp" || fn == "tg_send_photo" ||
+             fn == "tg_send_dice" || fn == "tg_edit" || fn == "tg_del") {
+        requireLib("tg", "!tg!", fn + "()", line);
+    }
+    // 14. Проверка библиотеки !2DGraphics!
+    else if (fn == "gfx_init" || fn == "gfx_running" || fn == "gfx_clear" ||
+             fn == "gfx_rect" || fn == "gfx_circle"  || fn == "gfx_line" ||
+             fn == "gfx_text" || fn == "gfx_key"     || fn == "gfx_mouse_x" ||
+             fn == "gfx_mouse_y" || fn == "gfx_mouse_down" || fn == "gfx_collide" ||
+             fn == "gfx_frame" || fn == "gfx_close") {
+        requireLib("2DGraphics", "!2DGraphics!", fn + "()", line);
     }
 }
 
@@ -763,6 +780,10 @@ void BytecodeCompiler::parseStatement() {
             included_libs.insert("sys");
         } else if (lib == "!json!") {
             included_libs.insert("json");
+        } else if (lib == "!tg!") {
+            included_libs.insert("tg");
+        } else if (lib == "!2DGraphics!") {
+            included_libs.insert("2DGraphics");
         } else if (lib == "!proc!") {
             included_libs.insert("proc");
         } else if (lib == "!fsys!") {

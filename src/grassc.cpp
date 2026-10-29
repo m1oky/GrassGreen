@@ -28,6 +28,8 @@
 #include "GrassSys.h"
 #include "GrassProc.h"
 #include "GrassFsys.h"
+#include "GrassTg.h"
+#include "Grass2DGraphics.h"
 
 using namespace std;
 namespace fs = std::filesystem;
@@ -369,6 +371,134 @@ public:
                     else if (fn == "time") { push(GrassValue::Num(GrassTime::timestamp())); }
                     else if (fn == "get_date") { push(GrassValue::Str(GrassTime::get_date())); }
                     else if (fn == "get_time_str") { push(GrassValue::Str(GrassTime::get_time_str())); }
+
+                    // ===== БИБЛИОТЕКА !2DGraphics! =====
+                    else if (fn == "gfx_init" && argc >= 3) {
+                        std::string title = args[0].toString();
+                        int w = (int)std::stod(args[1].toString());
+                        int h = (int)std::stod(args[2].toString());
+                        push(GrassValue::Num(Grass2DGraphics::init(title, w, h) ? 1.0 : 0.0));
+                    }
+                    else if (fn == "gfx_running") {
+                        push(GrassValue::Num(Grass2DGraphics::running() ? 1.0 : 0.0));
+                    }
+                    else if (fn == "gfx_clear" && argc >= 1) {
+                        Grass2DGraphics::clear(args[0].toString());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "gfx_rect" && argc >= 5) {
+                        int x = (int)std::stod(args[0].toString());
+                        int y = (int)std::stod(args[1].toString());
+                        int w = (int)std::stod(args[2].toString());
+                        int h = (int)std::stod(args[3].toString());
+                        Grass2DGraphics::rect(x, y, w, h, args[4].toString());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "gfx_circle" && argc >= 4) {
+                        int x = (int)std::stod(args[0].toString());
+                        int y = (int)std::stod(args[1].toString());
+                        int r = (int)std::stod(args[2].toString());
+                        Grass2DGraphics::circle(x, y, r, args[3].toString());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "gfx_line" && argc >= 6) {
+                        int x1 = (int)std::stod(args[0].toString());
+                        int y1 = (int)std::stod(args[1].toString());
+                        int x2 = (int)std::stod(args[2].toString());
+                        int y2 = (int)std::stod(args[3].toString());
+                        int w  = (int)std::stod(args[5].toString());
+                        Grass2DGraphics::line(x1, y1, x2, y2, args[4].toString(), w);
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "gfx_text" && argc >= 5) {
+                        int x = (int)std::stod(args[0].toString());
+                        int y = (int)std::stod(args[1].toString());
+                        std::string t = args[2].toString();
+                        int sz = (int)std::stod(args[3].toString());
+                        Grass2DGraphics::text(x, y, t, sz, args[4].toString());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "gfx_key" && argc >= 1) {
+                        push(GrassValue::Num(Grass2DGraphics::key(args[0].toString()) ? 1.0 : 0.0));
+                    }
+                    else if (fn == "gfx_mouse_x") {
+                        push(GrassValue::Num((double)Grass2DGraphics::mouse_x()));
+                    }
+                    else if (fn == "gfx_mouse_y") {
+                        push(GrassValue::Num((double)Grass2DGraphics::mouse_y()));
+                    }
+                    else if (fn == "gfx_mouse_down" && argc >= 1) {
+                        push(GrassValue::Num(Grass2DGraphics::mouse_down(args[0].toString()) ? 1.0 : 0.0));
+                    }
+                    else if (fn == "gfx_collide" && argc >= 8) {
+                        double x1 = std::stod(args[0].toString());
+                        double y1 = std::stod(args[1].toString());
+                        double w1 = std::stod(args[2].toString());
+                        double h1 = std::stod(args[3].toString());
+                        double x2 = std::stod(args[4].toString());
+                        double y2 = std::stod(args[5].toString());
+                        double w2 = std::stod(args[6].toString());
+                        double h2 = std::stod(args[7].toString());
+                        push(GrassValue::Num(Grass2DGraphics::collide(x1, y1, w1, h1, x2, y2, w2, h2) ? 1.0 : 0.0));
+                    }
+                    else if (fn == "gfx_frame") {
+                        int fps = (argc >= 1) ? (int)std::stod(args[0].toString()) : 60;
+                        Grass2DGraphics::frame(fps);
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "gfx_close") {
+                        Grass2DGraphics::close();
+                        push(GrassValue::Num(1.0));
+                    }
+
+                    // ===== РАСШИРЕННАЯ БИБЛИОТЕКА !tg! =====
+                    else if (fn == "tg_init" && argc >= 1) {
+                        GrassTg::init(args[0].toString());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "tg_poll") {
+                        int timeout_val = (argc >= 1) ? (int)std::stod(args[0].toString()) : 2;
+                        push(GrassValue::Str(GrassTg::poll(timeout_val)));
+                    }
+                    else if (fn == "tg_get_user") {
+                        push(GrassValue::Str(GrassTg::get_user()));
+                    }
+                    else if (fn == "tg_get_chat_id") {
+                        push(GrassValue::Str(GrassTg::get_chat_id()));
+                    }
+                    else if (fn == "tg_get_msg_id") {
+                        push(GrassValue::Str(GrassTg::get_msg_id()));
+                    }
+                    else if (fn == "tg_get_callback") {
+                        push(GrassValue::Str(GrassTg::get_callback()));
+                    }
+                    else if (fn == "tg_send" && argc >= 2) {
+                        push(GrassValue::Num(GrassTg::send(args[0].toString(), args[1].toString()) ? 1.0 : 0.0));
+                    }
+                    else if (fn == "tg_reply" && argc >= 1) {
+                        push(GrassValue::Num(GrassTg::reply(args[0].toString()) ? 1.0 : 0.0));
+                    }
+                    else if (fn == "tg_send_btn" && argc >= 3) {
+                        push(GrassValue::Num(GrassTg::send_btn(args[0].toString(), args[1].toString(), args[2].toString()) ? 1.0 : 0.0));
+                    }
+                    else if (fn == "tg_send_inline" && argc >= 3) {
+                        push(GrassValue::Num(GrassTg::send_inline(args[0].toString(), args[1].toString(), args[2].toString()) ? 1.0 : 0.0));
+                    }
+                    else if (fn == "tg_send_webapp" && argc >= 4) {
+                        push(GrassValue::Num(GrassTg::send_webapp(args[0].toString(), args[1].toString(), args[2].toString(), args[3].toString()) ? 1.0 : 0.0));
+                    }
+                    else if (fn == "tg_send_photo" && argc >= 3) {
+                        push(GrassValue::Num(GrassTg::send_photo(args[0].toString(), args[1].toString(), args[2].toString()) ? 1.0 : 0.0));
+                    }
+                    else if (fn == "tg_send_dice" && argc >= 2) {
+                        push(GrassValue::Num(GrassTg::send_dice(args[0].toString(), args[1].toString()) ? 1.0 : 0.0));
+                    }
+                    else if (fn == "tg_edit" && argc >= 3) {
+                        push(GrassValue::Num(GrassTg::edit(args[0].toString(), args[1].toString(), args[2].toString()) ? 1.0 : 0.0));
+                    }
+                    else if (fn == "tg_del" && argc >= 2) {
+                        push(GrassValue::Num(GrassTg::del(args[0].toString(), args[1].toString()) ? 1.0 : 0.0));
+                    }
 
                     // ===== БИБЛИОТЕКА !fsys! =====
                     else if (fn == "fs_mkdir" && argc >= 1) {

@@ -1,0 +1,43 @@
+!GrassGreen!
+!tg!
+
+int main() {
+    take token = "9173148338:AAHHaG-mUs4ONUO6JPDft9oBUVwk97P6VJw";
+    tg_init(token);
+
+    cout << "========================================" << endl;
+    cout << "  GrassGreen Bot запущен и слушает чат  " << endl;
+    cout << "========================================" << endl;
+
+    while (1) {
+        take msg = tg_poll(2);
+
+        if (msg != "") {
+            take user = tg_get_user();
+            take chat = tg_get_chat_id();
+
+            cout << "[LOG] Сообщение от @" << user << ": " << msg << endl;
+
+            if (msg == "/start") {
+                tg_send_btn(chat, "Привет! Выбери команду:", "Меню|Бросить кубик|Инлайн кнопки");
+            }
+            else if (msg == "Бросить кубик") {
+                tg_send_dice(chat, "🎲");
+            }
+            else if (msg == "Инлайн кнопки") {
+                tg_send_inline(chat, "Нажми на нужную кнопку:", "🔥 Огонь=fire|🚀 Ракета=rocket");
+            }
+            else if (msg == "[BUTTON]:fire") {
+                tg_reply("Ты нажал инлайн-кнопку ОГНЯ! 🔥");
+            }
+            else if (msg == "[BUTTON]:rocket") {
+                tg_reply("Ракета запущена! 🚀");
+            }
+            else {
+                tg_reply("Ты написал: " + msg);
+            }
+        }
+    }
+
+    return 0;
+}

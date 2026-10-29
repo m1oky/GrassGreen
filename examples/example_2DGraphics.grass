@@ -1,0 +1,12 @@
+!GrassGreen!
+!2DGraphics!
+
+int main() {
+    create_canvas(800, 600);
+    fill_color("#00ffcc");
+    draw_rectangle(100, 100, 200, 150);
+    draw_circle(400, 300, 50);
+    draw_line(100, 100, 700, 500);
+    save_image("output.png");
+    return 0;
+}

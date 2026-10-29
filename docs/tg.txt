@@ -1,0 +1,26 @@
+### Модуль интеграции с Telegram API
+
+Модуль `!tg!` позволяет создавать ботов и отправлять сообщения через Telegram API.
+
+#### Функции модуля
+
+- **`telegram_init(token)`**: Инициализация сессии с указанным API-токеном.
+- **`send_message(chat_id, text)`**: Отправка текстового сообщения в указанный чат.
+- **`get_updates()`**: Получение обновлений (новых сообщений, событий) от Telegram API.
+- **`send_photo(chat_id, photo_path)`**: Отправка изображения в указанный чат.
+- **`send_document(chat_id, document_path)`**: Отправка документа в указанный чат.
+
+#### Пример использования
+
+```cpp
+!GrassGreen!
+!tg!
+
+int main() {
+    telegram_init("PRIVATE_TELEGRAM_BOT_API_TOKEN");
+    send_message(12345678, "Привет от GrassGreen!");
+    send_photo(12345678, "path/to/image.jpg");
+    send_document(12345678, "path/to/document.txt");
+    return 0;
+}
+```

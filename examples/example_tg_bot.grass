@@ -1,0 +1,10 @@
+!GrassGreen!
+!tg!
+
+int main() {
+    telegram_init("PRIVATE_TELEGRAM_BOT_API_TOKEN");
+    send_message(12345678, "Привет от GrassGreen!");
+    send_photo(12345678, "path/to/image.jpg");
+    send_document(12345678, "path/to/document.txt");
+    return 0;
+}

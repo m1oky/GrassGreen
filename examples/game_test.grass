@@ -1,0 +1,59 @@
+!GrassGreen!
+!2DGraphics!
+
+int main() {
+    gfx_init("GrassGreen 2D Engine Demo", 800, 600);
+
+    take px = 380;
+    take py = 280;
+    take speed = 6;
+
+    take target_x = 150;
+    take target_y = 150;
+    take score = 0;
+
+    while (gfx_running()) {
+        // Управление клавиатурой (WASD + стрелочки)
+        if (gfx_key("A") || gfx_key("LEFT"))  { px = px - speed; }
+        if (gfx_key("D") || gfx_key("RIGHT")) { px = px + speed; }
+        if (gfx_key("W") || gfx_key("UP"))    { py = py - speed; }
+        if (gfx_key("S") || gfx_key("DOWN"))  { py = py + speed; }
+
+        // Очистка кадра темным неоновым цветом
+        gfx_clear("#0d1117");
+
+        // Отрисовка декоративной рамки и сетки
+        gfx_line(20, 70, 780, 70, "#1f2937", 2);
+
+        // Отрисовка цели (розовый круг)
+        gfx_circle(target_x, target_y, 25, "#ff007a");
+
+        // Проверка столкновения игрока с целью (AABB)
+        take hit = gfx_collide(px, py, 40, 40, target_x - 25, target_y - 25, 50, 50);
+        if (hit == 1) {
+            score = score + 1;
+            target_x = 100 + (score * 70);
+            if (target_x > 700) { target_x = 120; }
+            target_y = 100 + (score * 50);
+            if (target_y > 500) { target_y = 150; }
+        }
+
+        // Отрисовка игрока (зеленый неоновый квадрат)
+        gfx_rect(px, py, 40, 40, "#00ffcc");
+
+        // Отрисовка текста интерфейса
+        gfx_text(25, 20, "GrassGreen 2D Graphics Engine", 24, "#ffffff");
+        gfx_text(600, 24, "Score: 10", 22, "#00ffcc");
+        gfx_text(25, 560, "Controls: WASD or Arrows | ESC to exit", 16, "#6b7280");
+
+        // Выход по нажатию клавиши ESC
+        if (gfx_key("ESC")) {
+            gfx_close();
+        }
+
+        // 60 кадров в секунду без мерцания
+        gfx_frame(60);
+    }
+
+    return 0;
+}
