@@ -25,7 +25,7 @@
 
 ---
 
-**GrassGreen** — независимый компилируемый язык программирования. В комплекте: собственная виртуальная машина (Stack VM) с прямой диспетчеризацией опкодов, инкрементальный PE-Packer для генерации автономных `.exe`, модульный GUI-движок на базе Win32/GDI+, сетевой стек, парсер JSON, управление процессами, файловая система, мониторинг ОС и буфера обмена, встроенный reactive-web сервер и инструменты прямого управления памятью.
+**GrassGreen** — независимый компилируемый язык программирования. В комплекте: собственная виртуальная машина (Stack VM) с прямой диспетчеризацией опкодов, инкрементальный PE-Packer для генерации автономных `.exe`, модульный GUI-движок на базе Win32/GDI+, сетевой стек, парсер JSON, управление процессами, файловая система, мониторинг ОС и буфера обмена, встроенный reactive-web сервер, интеграция с Telegram API, 2D-графика и инструменты прямого управления памятью.
 
 ## ✨ Возможности
 
@@ -34,6 +34,7 @@
 | ⚡ **Быстрая Stack VM**<br><sub>Прямая диспетчеризация опкодов, предвыделенный стек вызовов</sub> | 📦 **Автономные `.exe`**<br><sub>Инкрементальный PE-Packer, сборка за ~1.45 ms</sub> | 🪟 **GUI-движок**<br><sub>Win32 / GDI+, скругления, ClearType, без мерцания</sub> |
 | 🌐 **Сетевой стек**<br><sub>`!GrassNet!`: TCP/IP, HTTP/HTTPS, сокет-сервер</sub> | 🗄️ **Встроенная БД**<br><sub>`!database!`: Key-Value движок GSE с шифрованием</sub> | 🕸️ **Web-раннер**<br><sub>`!GrassWeb!`: `.grass` DSL → HTML5/CSS3/ES6</sub> |
 | 🧾 **JSON без библиотек**<br><sub>`!json!`: парсинг, сборка, валидация</sub> | 🖥️ **Системный доступ**<br><sub>`!sys!`, `!proc!`, `!fsys!`, `!memory!`</sub> | 🧪 **Математика**<br><sub>`!FastMath!` и `!CoreMath!` (кубиты, GCD)</sub> |
+| 🤖 **Telegram-боты** 🆕<br><sub>`!tg!`: сообщения, фото, документы</sub> | 🎨 **2D-графика** 🆕<br><sub>`!2DGraphics!`: примитивы, заливка, экспорт</sub> | 🔧 **VS Code из коробки**<br><sub>`grassc install`: иконки, подсветка, сниппеты</sub> |
 
 ---
 
@@ -106,13 +107,15 @@ flowchart TD
 !sys!           // Мониторинг Windows и буфер обмена
 !proc!          // Управление процессами и инспекция памяти
 !fsys!          // Расширенная файловая система и директории
+!tg!            // Интеграция с Telegram API
+!2DGraphics!    // 2D-графика: примитивы, заливка, сохранение
 ```
 
 ---
 
 ## 🧩 Модули
 
-14 встроенных модулей. Нажми на модуль, чтобы увидеть функции и пример.
+16 встроенных модулей (`!tg!` и `!2DGraphics!` добавлены в v3.6). Нажми на модуль, чтобы увидеть функции и пример.
 
 | № | Модуль | Назначение |
 | :-: | :--- | :--- |
@@ -130,6 +133,8 @@ flowchart TD
 | 12 | `!sys!` | Мониторинг Windows, буфер обмена, железо |
 | 13 | `!proc!` | Управление процессами |
 | 14 | `!fsys!` | Файловая система и директории |
+| 15 | `!tg!` 🆕 | Интеграция с Telegram API |
+| 16 | `!2DGraphics!` 🆕 | Управление 2D-графикой |
 
 <details>
 <summary><b>1. <code>!GrassGreen!</code> — базовое ядро и управляющие конструкции</b></summary>
@@ -662,6 +667,69 @@ int main() {
 
 </details>
 
+<details>
+<summary><b>15. <code>!tg!</code> 🆕 — интеграция с Telegram API</b></summary>
+
+<br>
+
+Встроенный модуль для работы с Telegram API: создание ботов и отправка сообщений через Telegram.
+
+| Функция | Что делает |
+| :--- | :--- |
+| `telegram_init(token)` | инициализация сессии с указанным API-токеном |
+| `send_message(chat_id, text)` | отправка текстового сообщения в указанный чат |
+| `get_updates()` | получение обновлений (новых сообщений, событий) от Telegram API |
+| `send_photo(chat_id, photo_path)` | отправка изображения в указанный чат |
+| `send_document(chat_id, document_path)` | отправка документа в указанный чат |
+
+```cpp
+!GrassGreen!
+!tg!
+
+int main() {
+    telegram_init("YOUR_TELEGRAM_BOT_API_TOKEN");
+    send_message(12345678, "Привет от GrassGreen!");
+    send_photo(12345678, "path/to/image.jpg");
+    send_document(12345678, "path/to/document.txt");
+    return 0;
+}
+```
+
+</details>
+
+<details>
+<summary><b>16. <code>!2DGraphics!</code> 🆕 — управление 2D-графикой</b></summary>
+
+<br>
+
+Инструменты для рисования 2D-графики: основные примитивы (линии, круги, прямоугольники) и более сложные фигуры.
+
+| Функция | Что делает |
+| :--- | :--- |
+| `create_canvas(width, height)` | создание нового холста для рисования |
+| `draw_line(x1, y1, x2, y2)` | рисование линии между двумя точками |
+| `draw_circle(x, y, radius)` | рисование круга |
+| `draw_rectangle(x, y, width, height)` | рисование прямоугольника |
+| `fill_color(color)` | установка цвета заливки |
+| `save_image(path)` | сохранение холста в файл |
+
+```cpp
+!GrassGreen!
+!2DGraphics!
+
+int main() {
+    create_canvas(800, 600);
+    fill_color("#00ffcc");
+    draw_rectangle(100, 100, 200, 150);
+    draw_circle(400, 300, 50);
+    draw_line(100, 100, 700, 500);
+    save_image("output.png");
+    return 0;
+}
+```
+
+</details>
+
 ---
 
 ## 🔨 Сборка из исходников
@@ -711,66 +779,6 @@ g++ -std=c++20 -O3 -s \
 | `grassc .// <файл.grass>` | компиляция скрипта в автономный исполняемый файл `.exe` |
 | `grassc ./! <файл.grass>` | компиляция и мгновенное выполнение байт-кода во встроенной VM |
 | `grassc install` | переустановка ассоциаций Windows, иконок и расширения VS Code |
-
----
-
-## 🔭 Roadmap
-
-<details>
-<summary><b>Планируемые модули: <code>!tg!</code> и <code>!2DGraphics!</code></b></summary>
-
-<br>
-
-**`!tg!` — интеграция с Telegram API:** создание ботов и отправка сообщений.
-
-| Функция | Что делает |
-| :--- | :--- |
-| `telegram_init(token)` | инициализация сессии с API-токеном |
-| `send_message(chat_id, text)` | отправка текстового сообщения в чат |
-| `get_updates()` | получение новых сообщений и событий |
-| `send_photo(chat_id, photo_path)` | отправка изображения |
-| `send_document(chat_id, document_path)` | отправка документа |
-
-```cpp
-!GrassGreen!
-!tg!
-
-int main() {
-    telegram_init("YOUR_TELEGRAM_BOT_API_TOKEN");
-    send_message(12345678, "Привет от GrassGreen!");
-    send_photo(12345678, "path/to/image.jpg");
-    send_document(12345678, "path/to/document.txt");
-    return 0;
-}
-```
-
-**`!2DGraphics!` — управление 2D-графикой:** линии, круги, прямоугольники и более сложные фигуры.
-
-| Функция | Что делает |
-| :--- | :--- |
-| `create_canvas(width, height)` | создание холста |
-| `draw_line(x1, y1, x2, y2)` | линия между двумя точками |
-| `draw_circle(x, y, radius)` | круг |
-| `draw_rectangle(x, y, width, height)` | прямоугольник |
-| `fill_color(color)` | цвет заливки |
-| `save_image(path)` | сохранение холста в файл |
-
-```cpp
-!GrassGreen!
-!2DGraphics!
-
-int main() {
-    create_canvas(800, 600);
-    fill_color("#00ffcc");
-    draw_rectangle(100, 100, 200, 150);
-    draw_circle(400, 300, 50);
-    draw_line(100, 100, 700, 500);
-    save_image("output.png");
-    return 0;
-}
-```
-
-</details>
 
 ---
 
