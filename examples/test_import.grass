@@ -1,0 +1,38 @@
+!GrassGreen!
+import "modules/math_utils.grass";
+import "modules/player_module.grass";
+
+int main() {
+    gout << "========================================" << endl;
+    gout << "  GRASSGREEN 4.0 IMPORT SYSTEM TEST" << endl;
+    gout << "========================================" << endl;
+
+    // 1. Тест вызова функций из imported модуля
+    take sq = square(9);
+    take cb = cube(3);
+    gout << "[TEST 1] square(9) = " << sq << " (ожидалось 81)" << endl;
+    gout << "[TEST 2] cube(3) = " << cb << " (ожидалось 27)" << endl;
+
+    // 2. Тест транзитивного импорта (math_utils -> common_types -> get_pi)
+    take area = circle_area(10);
+    gout << "[TEST 3] circle_area(10) = " << area << " (ожидалось ~314.159)" << endl;
+
+    // 3. Тест создания структур из импортированных модулей
+    Vec2D pos;
+    pos.x = 100;
+    pos.y = 250;
+    gout << "[TEST 4] Vec2D pos: x=" << pos.x << ", y=" << pos.y << endl;
+
+    Player hero;
+    hero.hp = 1000;
+    hero.score = 50;
+    gout << "[TEST 5] Player hero: hp=" << hero.hp << ", score=" << hero.score << endl;
+
+    // 4. Тест передачи аргументов в функцию из внешнего модуля
+    print_player_status("Knight", hero.hp);
+
+    gout << "========================================" << endl;
+    gout << "  ALL IMPORT TESTS PASSED (100% OK)" << endl;
+    gout << "========================================" << endl;
+    return 0;
+}

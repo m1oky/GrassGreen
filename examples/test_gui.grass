@@ -12,7 +12,7 @@ int main() {
         theme("dark");
         glass();
 
-        label "🌿 GrassGreen UI {app_ver}" {
+        label "GrassGreen UI {app_ver}" {
             id(lbl_header);
             window-ob(0, 30);
             size(520, 36);

@@ -9,11 +9,11 @@ int main() {
 
     // Вычисление расстояния между точками
     take dist = discor((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
-    cout << "Евклидово расстояние: " << dist << endl;
+    gout << "Евклидово расстояние: " << dist << endl;
 
     // Линейная интерполяция
     take smooth_step = lerp(0, 100, 0.5);
-    cout << "Интерполяция (50%): " << smooth_step << endl;
+    gout << "Интерполяция (50%): " << smooth_step << endl;
 
     return 0;
 }

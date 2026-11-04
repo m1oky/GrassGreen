@@ -1,4 +1,5 @@
 #include "GrassSys.h"
+#include "GrassHAL.h"
 #include <windows.h>
 #include <thread>
 #include <vector>
@@ -6,6 +7,9 @@
 namespace GrassSys {
 
     bool clip_set(const std::string& text) {
+        if (GrassHAL::is_freestanding()) {
+            return GrassHAL::clipboard_set(text);
+        }
         if (!OpenClipboard(NULL)) return false;
         EmptyClipboard();
 
@@ -24,6 +28,9 @@ namespace GrassSys {
     }
 
     std::string clip_get() {
+        if (GrassHAL::is_freestanding()) {
+            return GrassHAL::clipboard_get();
+        }
         if (!OpenClipboard(NULL)) return "";
         HANDLE hData = GetClipboardData(CF_TEXT);
         if (!hData) {
@@ -39,14 +46,23 @@ namespace GrassSys {
     }
 
     int screen_w() {
+        if (GrassHAL::is_freestanding()) {
+            return GrassHAL::g_software_fb.width;
+        }
         return GetSystemMetrics(SM_CXSCREEN);
     }
 
     int screen_h() {
+        if (GrassHAL::is_freestanding()) {
+            return GrassHAL::g_software_fb.height;
+        }
         return GetSystemMetrics(SM_CYSCREEN);
     }
 
     std::string pc_name() {
+        if (GrassHAL::is_freestanding()) {
+            return GrassHAL::get_system_name();
+        }
         char buffer[MAX_COMPUTERNAME_LENGTH + 1] = {0};
         DWORD size = sizeof(buffer);
         if (GetComputerNameA(buffer, &size)) {
@@ -56,6 +72,9 @@ namespace GrassSys {
     }
 
     std::string user_name() {
+        if (GrassHAL::is_freestanding()) {
+            return GrassHAL::get_user_name();
+        }
         char buffer[256] = {0};
         DWORD size = sizeof(buffer);
         if (GetUserNameA(buffer, &size)) {
@@ -65,6 +84,9 @@ namespace GrassSys {
     }
 
     std::string get_env(const std::string& key) {
+        if (GrassHAL::is_freestanding()) {
+            return "";
+        }
         char buffer[4096] = {0};
         DWORD res = GetEnvironmentVariableA(key.c_str(), buffer, sizeof(buffer));
         if (res > 0 && res < sizeof(buffer)) {
@@ -74,11 +96,17 @@ namespace GrassSys {
     }
 
     int cpu_cores() {
+        if (GrassHAL::is_freestanding()) {
+            return GrassHAL::get_cpu_cores();
+        }
         unsigned int cores = std::thread::hardware_concurrency();
         return (cores > 0) ? (int)cores : 1;
     }
 
     double ram_total_mb() {
+        if (GrassHAL::is_freestanding()) {
+            return (double)(GrassHAL::get_total_ram_bytes() / (1024 * 1024));
+        }
         MEMORYSTATUSEX memInfo;
         memInfo.dwLength = sizeof(MEMORYSTATUSEX);
         if (GlobalMemoryStatusEx(&memInfo)) {
@@ -88,6 +116,9 @@ namespace GrassSys {
     }
 
     double ram_free_mb() {
+        if (GrassHAL::is_freestanding()) {
+            return (double)(GrassHAL::get_free_ram_bytes() / (1024 * 1024));
+        }
         MEMORYSTATUSEX memInfo;
         memInfo.dwLength = sizeof(MEMORYSTATUSEX);
         if (GlobalMemoryStatusEx(&memInfo)) {
@@ -97,6 +128,9 @@ namespace GrassSys {
     }
 
     double uptime_sec() {
+        if (GrassHAL::is_freestanding()) {
+            return GrassHAL::get_elapsed_ms(0) / 1000.0;
+        }
         return (double)(GetTickCount64() / 1000);
     }
 

@@ -1,0 +1,11 @@
+!GrassGreen!
+
+int main() {
+    take a = 10 + 20;
+    take b = a * 2;
+    take i = 0;
+    i = i + 1;
+    i = i + 1;
+    gout << "a=" << a << ", b=" << b << ", i=" << i << endl;
+    return 0;
+}

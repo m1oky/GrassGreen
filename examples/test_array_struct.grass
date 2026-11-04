@@ -1,0 +1,40 @@
+!GrassGreen!
+
+// Определение структуры
+struct Player {
+    string name;
+    int hp;
+};
+
+int main() {
+    gout << "=== ТЕСТ МАССИВОВ И СТРУКТУР GRASSGREEN 4.0 ===" << endl;
+
+    // Тестирование массивов
+    take myArray = [];
+    myArray.push(10);
+    myArray.push(20);
+    myArray.push(30);
+    if (len(myArray) != 3) {
+        gout << "Ошибка: неверная длина массива!" << endl;
+    } else {
+        gout << "Длина массива: " << len(myArray) << " (OK)" << endl;
+    }
+
+    // Тестирование доступа к элементам
+    gout << "myArray[1] = " << myArray[1] << endl;
+
+    // Создание экземпляра структуры
+    Player player;
+    player.name = "Hero";
+    player.hp = 100;
+
+    // Проверка доступа к полям
+    if (player.hp != 100) {
+        gout << "Ошибка: неверное значение hp!" << endl;
+    } else {
+        gout << "player.hp = " << player.hp << " (OK)" << endl;
+    }
+    gout << "player.name = " << player.name << endl;
+
+    gout << "=== ВСЕ ТЕСТЫ ПРОЙДЕНЫ УСПЕШНО ===" << endl;
+}

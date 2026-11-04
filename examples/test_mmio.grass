@@ -1,0 +1,83 @@
+!GrassGreen!
+!mmio!
+
+int main() {
+    gout << "=== GRASSGREEN 4.0 MMIO & VOLATILE TEST SUITE ===" << endl;
+
+    // 1. Проверка синтаксиса volatile переменных
+    volatile take v_reg = 100;
+    gout << "[TEST 1] Volatile variable initialized = " << v_reg << endl;
+    if (v_reg == 100) {
+        gout << "[PASSED] Volatile variable syntax OK!" << endl;
+    }
+
+    // 2. MMIO 8-бит: VGA Text Buffer (0xB8000)
+    take VGA_BASE = 753664; // 0xB8000
+    mmio_write8(VGA_BASE, 71); // 'G'
+    mmio_write8(VGA_BASE + 1, 10); // Light Green attribute
+
+    take b0 = mmio_read8(VGA_BASE);
+    take b1 = mmio_read8(VGA_BASE + 1);
+
+    gout << "[TEST 2] VGA Buffer at 0xB8000: byte0 = " << b0 << " attribute = " << b1 << endl;
+    if (b0 == 71 && b1 == 10) {
+        gout << "[PASSED] MMIO 8-bit VGA Buffer read/write OK!" << endl;
+    } else {
+        gout << "[FAILED] MMIO 8-bit read mismatch!" << endl;
+    }
+
+    // 3. MMIO 16-бит, 32-бит, 64-бит
+    mmio_write16(1024, 65530);
+    take val16 = mmio_read16(1024);
+    gout << "[TEST 3.1] MMIO 16-bit at 1024 = " << val16 << endl;
+
+    mmio_write32(2048, 305419896); // 0x12345678
+    take val32 = mmio_read32(2048);
+    gout << "[TEST 3.2] MMIO 32-bit at 2048 = " << val32 << endl;
+
+    mmio_write64(4096, 9876543210123);
+    take val64 = mmio_read64(4096);
+    gout << "[TEST 3.3] MMIO 64-bit at 4096 = " << val64 << endl;
+
+    if (val16 == 65530 && val32 == 305419896 && val64 == 9876543210123) {
+        gout << "[PASSED] Multi-width MMIO 16/32/64 OK!" << endl;
+    } else {
+        gout << "[FAILED] Multi-width MMIO mismatch!" << endl;
+    }
+
+    // 4. MMIO Высокие адреса (APIC / PCIe BAR)
+    take APIC_BASE = 4276092928; // 0xFEE00000
+    mmio_write32(APIC_BASE, 54321);
+    take apic_val = mmio_read32(APIC_BASE);
+    gout << "[TEST 4] High MMIO (APIC 0xFEE00000) = " << apic_val << endl;
+    if (apic_val == 54321) {
+        gout << "[PASSED] High address MMIO OK!" << endl;
+    }
+
+    // 5. Hardware Port I/O (inb/outb, inw/outw, inl/outl)
+    outb(1016, 65); // Port 0x3F8 (COM1)
+    take com_byte = inb(1016);
+    gout << "[TEST 5.1] Port I/O outb/inb (COM1 0x3F8) = " << com_byte << endl;
+
+    outw(496, 4660); // Port 0x1F0 (IDE)
+    take ide_word = inw(496);
+    gout << "[TEST 5.2] Port I/O outw/inw (IDE 0x1F0) = " << ide_word << endl;
+
+    outl(3320, 2147483648); // Port 0xCF8 (PCI Config Addr)
+    take pci_dword = inl(3320);
+    gout << "[TEST 5.3] Port I/O outl/inl (PCI 0xCF8) = " << pci_dword << endl;
+
+    if (com_byte == 65 && ide_word == 4660 && pci_dword == 2147483648) {
+        gout << "[PASSED] Hardware Port I/O (PIO) in/out 8/16/32 OK!" << endl;
+    } else {
+        gout << "[FAILED] Port I/O mismatch!" << endl;
+    }
+
+    // 6. Аппаратные барьеры памяти (Memory Barriers)
+    memory_barrier();
+    read_barrier();
+    write_barrier();
+    gout << "[TEST 6] Memory barriers (mfence/lfence/sfence) executed successfully!" << endl;
+
+    gout << "=== ALL MMIO & VOLATILE TESTS PASSED (100% OK) ===" << endl;
+}

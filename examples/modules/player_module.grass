@@ -1,0 +1,12 @@
+!GrassGreen!
+import "common_types.grass";
+
+struct Player {
+    hp: u32,
+    score: u32
+}
+
+take print_player_status(take name, take hp) {
+    gout << "Игрок [" << name << "] — Здоровье: " << hp << " HP" << endl;
+    return 1;
+}

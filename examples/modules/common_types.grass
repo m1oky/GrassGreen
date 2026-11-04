@@ -1,0 +1,10 @@
+!GrassGreen!
+
+struct Vec2D {
+    x: u32,
+    y: u32
+}
+
+take get_pi() {
+    return 3.14159;
+}

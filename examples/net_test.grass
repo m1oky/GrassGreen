@@ -2,8 +2,8 @@
 !GrassNet!
 
 int main() {
-    cout << "=== [GrassNet v3.1 Network Suite] ===" << endl;
-    cout << "Локальный IP компьютера: " << local_ip() << endl;
+    gout << "=== [GrassNet v3.1 Network Suite] ===" << endl;
+    gout << "Локальный IP компьютера: " << local_ip() << endl;
 
     // 1. Создаём собственного веб-агента
     agent
@@ -17,10 +17,10 @@ int main() {
 
     // 3. Проверяем DNS и пинг
     string gh_ip = resolve_ip("example.com");
-    cout << "IP домена example.com: " << gh_ip << endl;
+    gout << "IP домена example.com: " << gh_ip << endl;
 
     if (connect("example.com", 80)) {
-        cout << "Прямое TCP-соединение с example.com установлено! Пинг: " << ping("example.com", 80) << " ms" << endl;
+        gout << "Прямое TCP-соединение с example.com установлено! Пинг: " << ping("example.com", 80) << " ms" << endl;
     }
 
     // 4. Поднимаем собственный защищённый сервер
@@ -33,7 +33,7 @@ int main() {
     }
 
     async;
-    cout << "Статус прослушивания сервера: " << accept() << endl;
+    gout << "Статус прослушивания сервера: " << accept() << endl;
 
     net_close();
     return 0;

@@ -1,847 +1,354 @@
-<div align="center">
+# GrassGreen (G&G) — Версия 4.0
 
-<img src="logo.svg" alt="GrassGreen Logo" width="128" height="128" />
+GrassGreen — компилируемый язык программирования системного уровня с синтаксисом в стиле C++. Проект включает компилятор и виртуальную машину `grg` (бывший `grassc`), поддержку прямого выполнения байт-кода, генерацию автономных исполняемых файлов `.exe` для Windows, нативный JIT-компилятор под архитектуру x86_64, а также встроенный графический интерфейс, многопоточность, сетевой стек и инструменты прямого обращения к памяти (MMIO и Port I/O).
 
-# 🌿 GrassGreen
-
-### Высокопроизводительный стек-ориентированный язык системного уровня
-**C++-синтаксис · собственная Stack VM · сборка в автономный Win32 `.exe`**
-
-<sub><i>High-performance bytecode programming language with C++ syntax, stack VM, PE .exe packer, and built-in GUI engine.</i></sub>
-
-<br>
-
-[![Standard](https://img.shields.io/badge/C%2B%2B-20-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white)](https://isocpp.org/)
-[![Platform](https://img.shields.io/badge/Windows-x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://microsoft.com)
-[![VM](https://img.shields.io/badge/VM-Stack_Engine-00ffcc?style=for-the-badge&labelColor=161b22)](#-архитектура)
-[![Version](https://img.shields.io/badge/release-v3.6.0-2bff88?style=for-the-badge&labelColor=161b22)](https://github.com/m1oky/GrassGreen)
-[![License](https://img.shields.io/badge/license-MIT-lightgrey?style=for-the-badge&labelColor=161b22)](LICENSE)
-
-<br>
-
-[**🚀 Быстрый старт**](#-быстрый-старт) &nbsp;·&nbsp; [**🧱 Архитектура**](#-архитектура) &nbsp;·&nbsp; [**📊 Бенчмарки**](#-бенчмарки) &nbsp;·&nbsp; [**🧩 Модули**](#-модули) &nbsp;·&nbsp; [**🔨 Сборка**](#-сборка-из-исходников) &nbsp;·&nbsp; [**💻 CLI**](#-команды-cli)
-
-</div>
+Сайт проекта: grassgreen.info  
+Репозиторий: github.com/m1oky/GrassGreen
 
 ---
 
-**GrassGreen** — независимый компилируемый язык программирования. В комплекте: собственная виртуальная машина (Stack VM) с прямой диспетчеризацией опкодов, инкрементальный PE-Packer для генерации автономных `.exe`, модульный GUI-движок на базе Win32/GDI+, сетевой стек, парсер JSON, управление процессами, файловая система, мониторинг ОС и буфера обмена, встроенный reactive-web сервер, интеграция с Telegram API, 2D-графика и инструменты прямого управления памятью.
+## Основные особенности версии 4.0
 
-## ✨ Возможности
-
-| | | |
-| :--- | :--- | :--- |
-| ⚡ **Быстрая Stack VM**<br><sub>Прямая диспетчеризация опкодов, предвыделенный стек вызовов</sub> | 📦 **Автономные `.exe`**<br><sub>Инкрементальный PE-Packer, сборка за ~1.45 ms</sub> | 🪟 **GUI-движок**<br><sub>Win32 / GDI+, скругления, ClearType, без мерцания</sub> |
-| 🌐 **Сетевой стек**<br><sub>`!GrassNet!`: TCP/IP, HTTP/HTTPS, сокет-сервер</sub> | 🗄️ **Встроенная БД**<br><sub>`!database!`: Key-Value движок GSE с шифрованием</sub> | 🕸️ **Web-раннер**<br><sub>`!GrassWeb!`: `.grass` DSL → HTML5/CSS3/ES6</sub> |
-| 🧾 **JSON без библиотек**<br><sub>`!json!`: парсинг, сборка, валидация</sub> | 🖥️ **Системный доступ**<br><sub>`!sys!`, `!proc!`, `!fsys!`, `!memory!`</sub> | 🧪 **Математика**<br><sub>`!FastMath!` и `!CoreMath!` (кубиты, GCD)</sub> |
-| 🤖 **Telegram-боты** 🆕<br><sub>`!tg!`: сообщения, фото, документы</sub> | 🎨 **2D-графика** 🆕<br><sub>`!2DGraphics!`: примитивы, заливка, экспорт</sub> | 🔧 **VS Code из коробки**<br><sub>`grassc install`: иконки, подсветка, сниппеты</sub> |
-
----
-
-## 🚀 Быстрый старт
-
-**1. Разверни окружение VS Code** (иконки, подсветка, сниппеты, `Ctrl + Shift + B`):
-
-```powershell
-.\bin\grassc.exe install
-```
-
-**2. Создай `hello.grass`:**
-
-```cpp
-!GrassGreen!
-
-int main() {
-    cout << "Hello, GrassGreen!" << endl;
-    return 0;
-}
-```
-
-**3. Запусти или собери:**
-
-```powershell
-.\bin\grassc.exe ./! hello.grass     # выполнить в виртуальной машине
-.\bin\grassc.exe .// hello.grass     # собрать автономный .exe
-```
+- Прямая табличная диспетчеризация инструкций виртуальной машины (computed goto) без цикла switch.
+- Представление всех базовых значений через 64-битный NaN-boxing (ровно 8 байт на значение).
+- Аллокатор памяти Arena Allocator со сдвигом указателя (bump-pointer) для быстрого выделения памяти под структуры и строки без фрагментации.
+- Нативный x86_64 JIT-компилятор для горячих циклов с использованием регистров SSE2 и возвратом по стандарту вызовов Microsoft x64 ABI.
+- Многопоточность: запуск системных потоков (`thread`), асинхронные вызовы (`async`), системные мьютексы и функции синхронизации.
+- Поддержка пользовательских структур (`struct`) со строгим C-ABI выравниванием полей (1, 4, 8 байт) и динамических массивов (`array`).
+- Аппаратный доступ к памяти и портам (`!mmio!`): прямое чтение и запись физических адресов (VGA-буфер, APIC), инструкции ввода-вывода x86 (`inb`/`outb`), барьеры памяти (`memory_barrier`, `read_barrier`, `write_barrier`) и ключевое слово `volatile`.
+- Автономный режим Freestanding (`--freestanding`): возможность сборки ядра без использования стандартной библиотеки C/C++ для работы на голом железе и в загрузчиках ОС.
+- Фирменный потоковый ввод-вывод: вывод через `gout << ... << endl;` и ввод через `gin >> var;` с прямым обращением к системным вызовам ОС в обход `std::cout`.
+- Многопроходный оптимизатор байт-кода: слияние инструкций (Opcode Fusion), свертка констант (Constant Folding) и удаление недостижимого кода (DCE).
+- Модульная система импорта: подключение файлов через `import "file.grass";` с контролем повторных включений (семантика `#pragma once`).
 
 ---
 
-## 🧱 Архитектура
+## Установка и сборка
 
-Компилятор `grassc` преобразует исходный текст в компактный двоичный поток инструкций с фиксированным шагом и связывает его с исполняемым ядром через оверлей PE-заголовка.
+### Вариант 1. Установка через инсталлятор setup.exe
 
-```mermaid
-flowchart TD
-    A["📄 Исходный код .grass"] --> B["Лексер и GrassSyntax"]
-    B --> C["Валидатор строгой изоляции библиотек"]
-    C --> D["Генератор байт-кода"]
-    D --> E["⚙️ Stack VM<br/>предвыделенный стек вызовов<br/>реестр контекста переменных"]
-    D --> F["📦 Fast Win32 PE-Packer<br/>инкрементальная запись<br/>автономный .exe, меньше 2 ms"]
+В корне репозитория и в папке `bin/` находится автономный графический установщик `setup.exe`.
+1. Запустите `setup.exe`.
+2. Выберите путь установки (по умолчанию `C:\GrassGreen`).
+3. Нажмите кнопку "Установить". Установщик распакует компилятор `grg.exe`, лаунчеры `grg.cmd`, `grass.cmd`, `gg.cmd`, привяжет расширения файлов `.grass` и `.gdb` с установкой официальных иконок, а также пропишет путь в системную переменную `PATH`.
+4. Для автоматической установки без диалоговых окон можно запустить:
+   ```cmd
+   setup.exe /silent
+   ```
+
+После установки команда `grg` становится доступна из любой папки в терминале.
+
+### Вариант 2. Сборка компилятора из исходников
+
+Для сборки требуется компилятор GCC (MinGW-w64) с поддержкой стандарта C++20.
+Запустите скрипт сборки в корне проекта:
+```cmd
+build.bat
 ```
+Скрипт скомпилирует ядро и создаст исполняемые файлы `bin\grassc.exe` и `bin\grg.exe`.
 
 ---
 
-## 📊 Бенчмарки
+## Быстрый старт
 
-Тест: 30 000 итераций арифметического сложения в цикле с проверкой граничных условий. CPU Intel Core i7, Windows 10 x64.
-
-| Язык / среда | Время | Скорость |
-| :--- | :---: | :--- |
-| 🌿 **GrassGreen (Stack VM)** | **6.00 ms** | `█` &nbsp;**1.0x (baseline)** |
-| NodeJS v20 (V8 JIT warmup) | 14.10 ms | `██` &nbsp;~2.3x медленнее |
-| CPython 3.12 (standard) | 92.40 ms | `███████████████` &nbsp;~15.4x медленнее |
-
-> 💡 Сборка в автономный `.exe` занимает **1.45 ms** благодаря инкрементальному обновлению PE-хвоста без полной перезаписи бинарника.
-
----
-
-## 🧰 Строгая модульная система
-
-Язык отвергает неявный импорт. Каждый вызов функций ядра проверяется на этапе трансляции синтаксического дерева. Точка входа обязана объявляться как `int main() { ... }`.
-
-```text
-!GrassGreen!    // Обязательный заголовок базового языка
-!time!          // Точные таймеры
-!GrassNet!      // Сетевой стек TCP/IP и HTTP
-!json!          // Сериализация и парсинг JSON
-!sys!           // Мониторинг Windows и буфер обмена
-!proc!          // Управление процессами и инспекция памяти
-!fsys!          // Расширенная файловая система и директории
-!tg!            // Интеграция с Telegram API
-!2DGraphics!    // 2D-графика: примитивы, заливка, сохранение
-```
-
----
-
-## 🧩 Модули
-
-16 встроенных модулей (`!tg!` и `!2DGraphics!` добавлены в v3.6). Нажми на модуль, чтобы увидеть функции и пример.
-
-| № | Модуль | Назначение |
-| :-: | :--- | :--- |
-| 1 | `!GrassGreen!` | Базовое ядро и управляющие конструкции |
-| 2 | `!time!` | Профилирование и системные часы |
-| 3 | `!interface!` | Win32/GDI+ Fluent GUI Engine |
-| 4 | `!FastMath!` | Быстрая вычислительная математика |
-| 5 | `!CoreMath!` | Квантовые вентили и криптопримитивы |
-| 6 | `!memory!` | Мониторинг и управление ОЗУ |
-| 7 | `!random!` | Генератор случайных величин |
-| 8 | `!database!` | Key-Value движок GSE |
-| 9 | `!GrassWeb!` | Реактивный Web-раннер |
-| 10 | `!GrassNet!` | TCP/IP, HTTP/HTTPS, сокет-сервер |
-| 11 | `!json!` | Парсинг и генерация JSON |
-| 12 | `!sys!` | Мониторинг Windows, буфер обмена, железо |
-| 13 | `!proc!` | Управление процессами |
-| 14 | `!fsys!` | Файловая система и директории |
-| 15 | `!tg!` 🆕 | Интеграция с Telegram API |
-| 16 | `!2DGraphics!` 🆕 | Управление 2D-графикой |
-
-<details>
-<summary><b>1. <code>!GrassGreen!</code> — базовое ядро и управляющие конструкции</b></summary>
-
-<br>
-
-Стандартная C++ семантика: типы `take`, `int`, `string`, потоки ввода-вывода `cout` / `cin`, циклы `for`, `while`, ветвления `if` / `else`.
+Создайте файл `hello.grass`:
 
 ```cpp
 !GrassGreen!
 
 int main() {
-    take counter = 0;
-    string title = "Kernel Initialized";
-
-    for (take i = 0; i < 5; i++) {
-        counter += i;
-    }
-
-    if (counter >= 10) {
-        cout << title << ": " << counter << endl;
-    }
-
+    gout << "Привет из GrassGreen 4.0!" << endl;
     return 0;
 }
 ```
 
-</details>
-
-<details>
-<summary><b>2. <code>!time!</code> — аппаратное профилирование и системные часы</b></summary>
-
-<br>
-
-Высокоточное профилирование участков кода через счётчики `std::chrono::high_resolution_clock` и нативные системные вызовы Windows API.
-
-| Функция | Что делает |
-| :--- | :--- |
-| `start_time()` | запуск высокоточного аппаратного секундомера |
-| `stop_time()` | фиксация интервала, возврат миллисекунд (`double`) |
-| `conclus_time()` | форматированный вывод затраченного времени строкой (`"7.42 ms"`) |
-| `get_date()` / `get_time_str()` | локальная дата и время ОС |
-
-```cpp
-!GrassGreen!
-!time!
-
-int main() {
-    start_time();
-
-    take sum = 0;
-    for (take i = 1; i <= 30000; i++) {
-        sum = sum + i;
-    }
-
-    stop_time();
-
-    cout << "Сумма: " << sum << " | Время: " << conclus_time() << endl;
-    cout << "Метка времени: " << get_date() << " [" << get_time_str() << "]" << endl;
-    return 0;
-}
-```
-
-</details>
-
-<details>
-<summary><b>3. <code>!interface!</code> — нативный Win32/GDI+ Fluent GUI Engine</b></summary>
-
-<br>
-
-Оконный движок с субклассированием оконных процедур, скруглением хитбоксов через `SetWindowRgn`, антиалиасингом ClearType и защитой от мерцания буфера (`WS_CLIPCHILDREN`).
-
-```cpp
-!GrassGreen!
-!interface!
-
-int main() {
-    window {
-        title("GrassGreen Engine Console");
-        size(500, 420);
-        color(#12131a);
-        theme("dark");
-        glass();
-
-        label "Компилятор GrassGreen v3.6" {
-            id(lbl_status);
-            window-ob(0, 40);
-            size(500, 32);
-            middle();
-            text-color(#00ffcc);
-            font-size(20);
-            font-style("Segoe UI");
-            shadow();
-        }
-
-        enter "Ввод команды..." {
-            id(cmd_input);
-            window-ob(50, 100);
-            size(400, 40);
-            middle();
-            radius(8);
-        }
-
-        button "Выполнить операцию" {
-            id(btn_exec);
-            window-ob(50, 160);
-            size(400, 44);
-            middle();
-            button-color(#1a2634);
-            text-color(#00ffcc);
-            radius(10);
-            shadow();
-            click-ob(cmd_input, lbl_status);
-        }
-
-        show();
-    }
-    return 0;
-}
-```
-
-</details>
-
-<details>
-<summary><b>4. <code>!FastMath!</code> — оптимизированная вычислительная математика</b></summary>
-
-<br>
-
-Векторная и тригонометрическая математика без накладных расходов. Подходит для симуляций и графических расчётов.
-
-| Функция | Что делает |
-| :--- | :--- |
-| `discor(x)` / `sqrt(x)` | быстрое вычисление квадратного корня |
-| `lerp(a, b, t)` | линейная интерполяция между узлами |
-| `clamp(val, min, max)` | ограничение диапазона скаляра |
-| `sin(rad)`, `cos(rad)`, `abs(val)`, `round(val)`, `min(a, b)`, `max(a, b)` | базовые функции |
-
-```cpp
-!GrassGreen!
-!FastMath!
-
-int main() {
-    take velocity = 144.0;
-    take root = discor(velocity);
-    take smoothed = lerp(0.0, 100.0, 0.75);
-
-    cout << "Root: " << root << " | Lerp: " << smoothed << endl;
-    return 0;
-}
-```
-
-</details>
-
-<details>
-<summary><b>5. <code>!CoreMath!</code> — эмулятор квантовых вентилей и криптопримитивы</b></summary>
-
-<br>
-
-Программная эмуляция базовых унитарных преобразований кубитов и работа с криптографическими алгоритмами.
-
-| Функция | Что делает |
-| :--- | :--- |
-| `qb_init(q)` | инициализация регистра состояния кубита в базисе \|0⟩ |
-| `h(q)` | оператор Адамара (квантовая суперпозиция) |
-| `x(q)` | вентиль Паули-X (квантовое отрицание NOT) |
-| `cnot(ctrl, target)` | двухкубитовый контролируемый вентиль отрицания |
-| `q_rand(q)` | редукция суперпозиции и измерение бита (0 или 1) |
-| `gcd(a, b)` | алгоритм Евклида, наибольший общий делитель |
-
-```cpp
-!GrassGreen!
-!CoreMath!
-
-int main() {
-    qb_init("q0");
-    h("q0");
-    take measured_bit = q_rand("q0");
-
-    cout << "Квантовое случайное состояние: " << measured_bit << endl;
-    return 0;
-}
-```
-
-</details>
-
-<details>
-<summary><b>6. <code>!memory!</code> — прямой мониторинг и управление ОЗУ</b></summary>
-
-<br>
-
-Низкоуровневый контроль кучи, ручное выделение блоков памяти и защита от утечек.
-
-| Функция | Что делает |
-| :--- | :--- |
-| `memory_usit()` | текущее потребление памяти виртуальной машиной в байтах |
-| `memory_free()` | объём физически свободной оперативной памяти в системе |
-| `memory_alloc(bytes)` | резервирование дескриптора блока памяти |
-| `memory_free_block(id)` | явное освобождение выделенного сегмента |
-| `memory_limit(bytes)` | барьер ВМ (аварийный останов при переполнении) |
-| `memory_clean()` | сборка неиспользуемых строковых литералов |
-
-```cpp
-!GrassGreen!
-!memory!
-
-int main() {
-    memory_limit(67108864); // Барьер в 64 МБ
-
-    take block = memory_alloc(1048576);
-    cout << "Выделен блок ID: " << block << endl;
-    cout << "Использовано ядром: " << memory_usit() << " байт" << endl;
-
-    memory_free_block(block);
-    memory_clean();
-    return 0;
-}
-```
-
-</details>
-
-<details>
-<summary><b>7. <code>!random!</code> — генератор случайных величин</b></summary>
-
-<br>
-
-Генератор на основе `std::mt19937` с поддержкой случайных строковых токенов разного регистра.
-
-```cpp
-!GrassGreen!
-!random!
-
-int main() {
-    take roll = random(1, 100);
-    string token = random_txt("en", 16);
-
-    cout << "Случайный диапазон [1-100]: " << roll << endl;
-    cout << "Токен сессии: " << token << endl;
-    return 0;
-}
-```
-
-</details>
-
-<details>
-<summary><b>8. <code>!database!</code> — встраиваемый Key-Value движок GSE</b></summary>
-
-<br>
-
-Собственный бинарный движок хранения данных **Grass Storage Engine**:
-
-- многотабличные пространства (`table("users")`);
-- атомарный инкремент и декремент числовых ключей без блокировки потока (`db_inc`);
-- 64-битное хеширование ключей по алгоритму FNV-1a (`db_hash`);
-- симметричное блочное XOR-шифрование с солью (`db_encrypt` / `db_decrypt`);
-- экспорт в JSON и инкрементальный бэкап.
-
-```cpp
-!GrassGreen!
-!database!
-
-int main() {
-    db_open("storage.gdb");
-    table("session_tokens");
-
-    db_set("admin_key", "sec_token_9918");
-    db_encrypt("admin_key", "SaltPhrase");
-
-    take visits = db_inc("visits_total", 1);
-    db_save();
-
-    cout << "Записей в таблице: " << visits << endl;
-    return 0;
-}
-```
-
-</details>
-
-<details>
-<summary><b>9. <code>!GrassWeb!</code> — реактивный лёгкий Web-раннер</b></summary>
-
-<br>
-
-Встроенный HTTP-сервер на сокетах WinSock2. Транслирует компактный `.grass` DSL прямо в чистый HTML5/CSS3/ES6 без тяжёлых зависимостей (React/Vue/Webpack) и отдаёт страницы клиенту за 1–3 ms.
-
-```text
-!GREEN_WWW1!
-!GrassWeb!
-
-glass(16, 0.08)
-neon(#00ffcc)
-box-start
-    icon(bolt)
-    color(#00ffcc)
-    thick()
-    G5 GrassGreen Edge Platform
-
-    <name>/status_lbl
-    color(#8e99a8)
-    G2 Шлюз запущен на localhost:8080
-
-    row-start
-        <name>/btn_ping
-        grad(#00ffcc, #0088ff)
-        round-ob(8)
-        button = Проверить статус ядра
-    row-end
-box-end
-
-script-start
-    on-click(btn_ping)
-        set-text(status_lbl, Система в норме: задержка 0.4 ms)
-        repaint-color(status_lbl, #00ff88)
-        play-anim(btn_ping, pulse, 0.2s)
-    end-click
-script-end
-```
-
-</details>
-
-<details>
-<summary><b>10. <code>!GrassNet!</code> — сетевой стек TCP/IP, HTTP/HTTPS клиент и сокет-сервер</b></summary>
-
-<br>
-
-Нативный сетевой модуль на базе **WinSock2** и **WinINet**. Поддерживает прямые литералы IPv4 без кавычек (`127.0.0.1`), декларативные блоки `agent` и `create_serv()` и фильтрацию входящих пакетов на уровне сокета.
-
-| Функция | Что делает |
-| :--- | :--- |
-| `agent { browser "..."; device "..."; }` | заголовки `User-Agent` и системный профиль клиента для исходящих запросов |
-| `API("token")` | автоматическая инъекция Bearer-токенов и `X-API-Key` в HTTP/HTTPS заголовки |
-| `connect(host, [port])` | прямое TCP-соединение с контролем таймаута |
-| `send(url, [method], [body])` | HTTP/HTTPS запросы с поддержкой TLS |
-| `create_serv() { port: ...; IP: ...; password: ...; certainIP: ...; }` | неблокирующий TCP-сервер с привязкой к интерфейсу и белым списком `certainIP` |
-| `accept()` / `async` | опрос дескрипторов через `select()` и синхронизация сетевых потоков |
-| `ping(host)`, `resolve_ip(domain)`, `local_ip()`, `download(url, path)`, `net_status()`, `net_close()` | диагностические и транспортные примитивы |
-
-```cpp
-!GrassGreen!
-!GrassNet!
-
-int main() {
-    cout << "Локальный интерфейс: " << local_ip() << endl;
-
-    agent {
-        browser "GrassGreenBot/3.6";
-        device "Windows 10 x64; ProDesk";
-    }
-
-    API("gg_secret_api_token_2026");
-
-    string target_ip = resolve_ip("example.com");
-    if (connect("example.com", 80)) {
-        cout << "Узел " << target_ip << " доступен | RTT: " << ping("example.com", 80) << " ms" << endl;
-    }
-
-    create_serv() {
-        port: 8443;
-        IP: 127.0.0.1;
-        password: 1234;
-        certainIP: 127.0.0.1;
-    }
-
-    async;
-    cout << "Очередь сокета: " << accept() << endl;
-
-    net_close();
-    return 0;
-}
-```
-
-</details>
-
-<details>
-<summary><b>11. <code>!json!</code> — сериализация, генерация и парсинг JSON</b></summary>
-
-<br>
-
-Лёгкий модуль парсинга и сборки JSON-пакетов для обмена данными с внешними Web API и сетевыми сервисами, без внешних библиотек.
-
-| Функция | Что делает |
-| :--- | :--- |
-| `json_get(json_str, "key.subkey")` | рекурсивное извлечение значения поля или вложенного объекта |
-| `json_set(json_str, key, value)` | создание ключа или обновление существующего в JSON-строке |
-| `json_valid(json_str)` | валидация структуры JSON (баланс скобок и синтаксис) |
-| `json_minify(json_str)` | сжатие JSON без незначимых пробелов и переводов строк |
-| `json_clear()`, `json_add(k, v)`, `json_add_num(k, num)`, `json_build()` | потоковый билдер JSON-объектов |
-
-```cpp
-!GrassGreen!
-!json!
-
-int main() {
-    // Построение JSON документа
-    json_clear();
-    json_add("project", "GrassGreen");
-    json_add("author", "m1oky");
-    json_add_num("version", 3.6);
-
-    string payload = json_build();
-    cout << "JSON Payload: " << payload << endl;
-
-    // Чтение значений по ключу
-    string author = json_get(payload, "author");
-    cout << "Разработчик: " << author << " | Валидность: " << json_valid(payload) << endl;
-
-    // Обновление структуры
-    string updated = json_set(payload, "status", "production");
-    cout << "Обновлено: " << updated << endl;
-    return 0;
-}
-```
-
-</details>
-
-<details>
-<summary><b>12. <code>!sys!</code> — системный мониторинг Windows, буфер обмена и железо</b></summary>
-
-<br>
-
-Прямое взаимодействие с подсистемами Windows через Win32 API: диагностика железа, системные метрики и буфер обмена.
-
-| Функция | Что делает |
-| :--- | :--- |
-| `clip_set(text)` | копирование строки в глобальный буфер обмена (`Ctrl + C`) |
-| `clip_get()` | чтение буфера обмена (`Ctrl + V`) |
-| `screen_w()` / `screen_h()` | физическое разрешение основного дисплея в пикселях |
-| `pc_name()` / `user_name()` | сетевое имя ПК и учётная запись пользователя |
-| `cpu_cores()` | количество активных логических потоков процессора |
-| `ram_total_mb()` / `ram_free_mb()` | общий и свободный объём физической памяти |
-| `uptime_sec()` | время непрерывной работы Windows в секундах |
-| `get_env(var_name)` | значение системной переменной окружения (`"PATH"`, `"TEMP"`) |
-
-```cpp
-!GrassGreen!
-!sys!
-
-int main() {
-    cout << "Узел: " << pc_name() << " | Пользователь: " << user_name() << endl;
-    cout << "Дисплей: " << screen_w() << "x" << screen_h() << endl;
-    cout << "Потоков CPU: " << cpu_cores() << endl;
-    cout << "ОЗУ: свободно " << ram_free_mb() << " MB из " << ram_total_mb() << " MB" << endl;
-    cout << "Аптайм Windows: " << uptime_sec() << " сек" << endl;
-
-    // Работа с системным буфером обмена (Clipboard)
-    clip_set("GrassGreen Engine 2026");
-    cout << "Скопировано в буфер: " << clip_get() << endl;
-    return 0;
-}
-```
-
-</details>
-
-<details>
-<summary><b>13. <code>!proc!</code> — управление процессами и мониторинг памяти</b></summary>
-
-<br>
-
-Низкоуровневый аудит и контроль запущенных приложений Windows через Toolhelp32 и PSAPI. Подходит для фоновых мониторов, античит-сканеров и диспетчеров задач.
-
-| Функция | Что делает |
-| :--- | :--- |
-| `proc_find(name)` | поиск процесса по имени файла (без учёта регистра), возвращает PID или `-1` |
-| `proc_kill(pid)` | принудительное завершение через `TerminateProcess` (`1` или `0`) |
-| `proc_mem(pid)` | занятая процессом память (Working Set) в мегабайтах |
-| `proc_exists(pid)` | активен ли процесс с этим PID прямо сейчас (`1` или `0`) |
-| `proc_list()` | список всех запущенных процессов и их PID строкой |
-
-```cpp
-!GrassGreen!
-!proc!
-
-int main() {
-    take target = "explorer.exe";
-    take pid = proc_find(target);
-
-    cout << "Поиск процесса: " << target << " | PID: " << pid << endl;
-
-    if (pid != -1) {
-        take ram = proc_mem(pid);
-        take is_active = proc_exists(pid);
-        cout << "Статус активности (1 = живой): " << is_active << endl;
-        cout << "Занято памяти: " << ram << " MB" << endl;
-    } else {
-        cout << "Процесс не найден!" << endl;
-    }
-
-    return 0;
-}
-```
-
-</details>
-
-<details>
-<summary><b>14. <code>!fsys!</code> — расширенная файловая система и директории</b></summary>
-
-<br>
-
-Модуль для навигации, рекурсивного создания структуры директорий и инспекции файлов на базе `<filesystem>` из C++20.
-
-| Функция | Что делает |
-| :--- | :--- |
-| `fs_mkdir(path)` | создание папки или цепочки вложенных директорий (`1` или `0`) |
-| `fs_is_dir(path)` | проверка, что путь существует и это папка (`1` или `0`) |
-| `fs_size(path)` | точный размер файла на диске в байтах |
-| `fs_copy(src, dst)` | копирование файла с перезаписью существующего |
-| `fs_list(path)` | текстовый листинг папки с отметками каталогов (`/`) |
-
-```cpp
-!GrassGreen!
-!fsys!
-
-int main() {
-    take work_dir = "test_dir";
-    take ok = fs_mkdir(work_dir);
-    cout << "Создание папки '" << work_dir << "': " << ok << endl;
-
-    take is_folder = fs_is_dir(work_dir);
-    cout << "Проверка статуса папки (1 = да): " << is_folder << endl;
-
-    take exe_size = fs_size("bin/grassc.exe");
-    cout << "Размер бинарника grassc.exe: " << exe_size << " байт" << endl;
-
-    cout << "Содержимое каталога bin:" << endl;
-    take list_out = fs_list("bin");
-    cout << list_out << endl;
-
-    return 0;
-}
-```
-
-</details>
-
-<details>
-<summary><b>15. <code>!tg!</code> 🆕 — интеграция с Telegram API</b></summary>
-
-<br>
-
-Встроенный модуль для работы с Telegram API: создание ботов и отправка сообщений через Telegram.
-
-| Функция | Что делает |
-| :--- | :--- |
-| `telegram_init(token)` | инициализация сессии с указанным API-токеном |
-| `send_message(chat_id, text)` | отправка текстового сообщения в указанный чат |
-| `get_updates()` | получение обновлений (новых сообщений, событий) от Telegram API |
-| `send_photo(chat_id, photo_path)` | отправка изображения в указанный чат |
-| `send_document(chat_id, document_path)` | отправка документа в указанный чат |
-
-```cpp
-!GrassGreen!
-!tg!
-
-int main() {
-    telegram_init("YOUR_TELEGRAM_BOT_API_TOKEN");
-    send_message(12345678, "Привет от GrassGreen!");
-    send_photo(12345678, "path/to/image.jpg");
-    send_document(12345678, "path/to/document.txt");
-    return 0;
-}
-```
-
-</details>
-
-<details>
-<summary><b>16. <code>!2DGraphics!</code> 🆕 — управление 2D-графикой</b></summary>
-
-<br>
-
-Инструменты для рисования 2D-графики: основные примитивы (линии, круги, прямоугольники) и более сложные фигуры.
-
-| Функция | Что делает |
-| :--- | :--- |
-| `create_canvas(width, height)` | создание нового холста для рисования |
-| `draw_line(x1, y1, x2, y2)` | рисование линии между двумя точками |
-| `draw_circle(x, y, radius)` | рисование круга |
-| `draw_rectangle(x, y, width, height)` | рисование прямоугольника |
-| `fill_color(color)` | установка цвета заливки |
-| `save_image(path)` | сохранение холста в файл |
-
-```cpp
-!GrassGreen!
-!2DGraphics!
-
-int main() {
-    create_canvas(800, 600);
-    fill_color("#00ffcc");
-    draw_rectangle(100, 100, 200, 150);
-    draw_circle(400, 300, 50);
-    draw_line(100, 100, 700, 500);
-    save_image("output.png");
-    return 0;
-}
-```
-
-</details>
-
----
-
-## 🔨 Сборка из исходников
-
-Нужен MinGW-w64 (GCC с поддержкой C++20):
-
+Запуск скрипта в виртуальной машине:
 ```bash
-g++ -std=c++20 -O3 -s \
-  src/grassc.cpp \
-  src/GrassSyntax.cpp \
-  src/GrassProc.cpp \
-  src/GrassFsys.cpp \
-  src/GrassTime.cpp \
-  src/GrassNet.cpp \
-  src/GrassJson.cpp \
-  src/GrassSys.cpp \
-  src/gui_engine.cpp \
-  src/GrassWeb.cpp \
-  src/GSE.cpp \
-  src/FastMath.cpp \
-  src/CoreMath.cpp \
-  src/GrassMemory.cpp \
-  src/GrassRandom.cpp \
-  -o bin/grassc.exe \
-  -lgdiplus -lgdi32 -lcomctl32 -lwinmm -lws2_32 -lwininet -lurlmon -lpsapi
+grg hello.grass
 ```
 
-### Окружение VS Code
-
-```powershell
-.\bin\grassc.exe install
-```
-
-Команда автоматически:
-
-1. Регистрирует векторные иконки для `.grass` (`logo.svg`) и баз данных `.gdb` (`gdb_logo.svg`).
-2. Устанавливает TextMate-грамматику подсветки синтаксиса в расширения редактора.
-3. Добавляет сниппеты для `int main()`, блоков `window { ... }`, `agent { ... }` и `create_serv()`.
-4. Настраивает сборку открытого скрипта по **`Ctrl + Shift + B`**.
-
----
-
-## 💻 Команды CLI
-
-| Команда | Что делает |
-| :--- | :--- |
-| `grassc .// <файл.grass>` | компиляция скрипта в автономный исполняемый файл `.exe` |
-| `grassc ./! <файл.grass>` | компиляция и мгновенное выполнение байт-кода во встроенной VM |
-| `grassc install` | переустановка ассоциаций Windows, иконок и расширения VS Code |
-
----
-
-## 📁 Структура проекта
-
-```text
-GrassGreen/
-├── bin/
-│   └── grassc.exe           # Компилятор, VM и упаковщик
-├── docs/                    # Документация функций и сигнатур
-│   ├── coremath.txt
-│   ├── fastmath.txt
-│   ├── fsys.txt
-│   ├── gdb.txt
-│   ├── GrassNet.txt
-│   ├── interface.txt
-│   ├── json.txt
-│   ├── library.txt
-│   ├── main.txt
-│   ├── memory.txt
-│   ├── proc.txt
-│   ├── random.txt
-│   ├── sys.txt
-│   ├── time.txt
-│   └── WEB.txt
-├── examples/                # Эталонные тестовые сценарии
-│   ├── benchmark.grass      # Стресс-тест циклов (30 000 итераций)
-│   ├── config.gdb           # Бинарная конфигурационная база данных
-│   ├── fsys_test.grass      # Файловая система и директории
-│   ├── json_test.grass      # Парсинг и сборка JSON
-│   ├── math.grass           # Комплексный тест CoreMath и FastMath
-│   ├── memory.grass         # Граничные условия и лимиты кучи
-│   ├── net_test.grass       # TCP/HTTP стек и сокет-сервер
-│   ├── proc_test.grass      # Поиск процессов, память, завершение
-│   ├── sys_test.grass       # Параметры железа и буфер обмена
-│   ├── test_gui.grass       # Оконное приложение Fluent Win32
-│   └── test_web.grass       # Реактивный веб-интерфейс на сокетах
-├── src/                     # Исходный код C++
-│   ├── CoreMath.cpp / .h    # Квантовый эмулятор кубитов
-│   ├── FastMath.cpp / .h    # Тригонометрия и lerp
-│   ├── GrassFsys.cpp / .h   # Расширенная файловая система
-│   ├── GrassJson.cpp / .h   # Сериализация и парсер JSON
-│   ├── GrassMemory.cpp / .h # Менеджер кучи и аллокатор блоков
-│   ├── GrassNet.cpp / .h    # Сетевой стек WinSock2 / WinINet
-│   ├── GrassProc.cpp / .h   # Управление процессами и память
-│   ├── GrassRandom.cpp / .h # PRNG на базе mt19937
-│   ├── GrassSyntax.cpp / .h # Лексер и генератор байт-кода
-│   ├── GrassSys.cpp / .h    # Win32 мониторинг и буфер обмена
-│   ├── GrassTime.cpp / .h   # Высокоточные часы
-│   ├── GrassWeb.cpp / .h    # Встроенный HTTP-сервер
-│   ├── GSE.cpp / .h         # Движок базы данных GSE
-│   ├── gui_engine.cpp / .h  # Оконная подсистема Win32/GDI+
-│   └── grassc.cpp           # Точка входа, Stack VM и PE-Packer
-├── gdb_logo.svg             # Иконка хранилищ GSE (.gdb)
-├── logo.svg                 # Иконка файлов GrassGreen (.grass)
-├── LICENSE                  # MIT
-└── README.md                # Этот файл
+Сборка в автономный исполняемый файл `.exe`:
+```bash
+grg -emit-exe hello.grass -o hello.exe
 ```
 
 ---
 
-<div align="center">
-  <sub>Разработано для высокопроизводительных компактных вычислений и системных утилит под Windows.</sub>
-  <br><br>
-  <b>🌿 GrassGreen v3.6.0</b> · MIT License
-</div>
+## Команды компилятора grg
+
+Компилятор вызывается командой `grg` (или `grassc`).
+
+Основные флаги командной строки:
+
+- `grg <файл.grass>` — компиляция и немедленный запуск скрипта в виртуальной машине.
+- `-o <имя>` — указать имя выходного файла.
+- `-c` — собрать только бинарный байт-код (`.grassc`) без сборки исполняемого `.exe`.
+- `-emit-exe` — собрать байт-код вместе с загрузчиком в автономный `.exe`.
+- `--jit` — принудительно включить нативный JIT-компилятор x86_64 для циклов.
+- `-O0` — режим без оптимизаций (быстрая отладочная сборка).
+- `-O1` — включить свертку констант и локальные оптимизации.
+- `-O2` — включить слияние опкодов и удаление мертвого кода.
+- `-O3` — максимальный уровень оптимизации (многопроходное слияние опкодов + автоматический JIT).
+- `--dump-ast` — вывести структуру синтаксического дерева (AST) в терминал.
+- `-S` — вывести дизассемблированный листинг байт-кода.
+- `--time` — замерить время каждого этапа компиляции с точностью до миллисекунд.
+- `--freestanding` — режим ядра без использования стандартной библиотеки C++.
+- `-V`, `--version` — вывести версию компилятора.
+- `-h`, `--help` — показать справку по всем флагам.
+- `--ru` / `--en` — переключение языка сообщений компилятора (по умолчанию: английский).
+
+---
+
+## Каталог стандартных библиотек
+
+Каждая библиотека подключается в начале файла директивой вида `!имя!`.
+
+| Номер | Директива | Назначение |
+| --- | --- | --- |
+| 1 | `!GrassGreen!` | Базовое ядро, управляющие конструкции, функции ввода-вывода и строковые операции |
+| 2 | `!time!` | Высокоточные системные часы, замер времени работы участков кода и даты |
+| 3 | `!interface!` | Оконный интерфейс Windows (Win32/GDI+): окна, темы, поля ввода, кнопки, текст |
+| 4 | `!FastMath!` | Быстрая вычислительная математика: корни, тригонометрия, интерполяция `lerp`, модуль |
+| 5 | `!CoreMath!` | Математика высокой точности, криптопримитивы, НОД, большие степени, кубиты |
+| 6 | `!memory!` | Управление оперативной памятью процесса, Arena Allocator и мониторинг памяти системы |
+| 7 | `!random!` | Генератор псевдослучайных чисел и случайных строк |
+| 8 | `!database!` | Встроенный Key-Value движок базы данных GSE (файлы `.gdb`, таблицы, шифрование) |
+| 9 | `!GrassWeb!` | DSL-фронтенд для разработки веб-страниц и скриптов браузера |
+| 10 | `!GrassNet!` | Сетевые протоколы TCP/IP, отправка HTTP/HTTPS запросов, ping, сокет-сервер |
+| 11 | `!json!` | Парсер, построитель, валидатор и сжатие строк формата JSON |
+| 12 | `!sys!` | Диагностика Windows: системный буфер обмена, информация о процессоре, мониторе, аптайме |
+| 13 | `!proc!` | Мониторинг и управление процессами Windows: поиск по имени, чтение памяти, завершение |
+| 14 | `!fsys!` | Расширенная работа с файловой системой: создание папок, проверка путей, списки файлов |
+| 15 | `!tg!` | Создание Telegram-ботов через официальный HTTP Bot API |
+| 16 | `!2DGraphics!` | Графический 2D-движок: холст, двойная буферизация, примитивы, опрос клавиатуры |
+| 17 | `!mmio!` | Прямой доступ к физической памяти (MMIO), аппаратные порты x86, барьеры памяти и volatile |
+| 18 | `!thread!` | Системные потоки операционной системы, асинхронные задачи и системные мьютексы |
+
+Подробные описания функций каждой библиотеки в формате "слово — значение" находятся в папке `docs/`.
+
+---
+
+## Синтаксис и конструкции языка
+
+### 1. Переменные и типы данных
+
+Переменные объявляются ключевым словом `take` или `set`:
+```cpp
+take count = 10;
+take pi = 3.14159;
+take name = "GrassGreen";
+take is_active = true;
+```
+
+Спецификатор `volatile` используется для предотвращения кеширования значения компилятором (необходимо при работе с аппаратными регистрами MMIO):
+```cpp
+volatile take reg = 100;
+```
+
+Базовые скалярные типы: `int`, `void`, `string`, `float`, `double`, `u8`, `u16`, `u32`, `u64`, `bool`.
+
+### 2. Потоковый ввод-вывод
+
+Вывод в консоль выполняется через оператор сдвига `<<` и объект `gout`:
+```cpp
+gout << "Игрок: " << name << " | Очки: " << score << endl;
+```
+Манипулятор `endl` выводит символ переноса строки и сбрасывает системный буфер вывода.
+
+Ввод из консоли выполняется через оператор сдвига `>>` и объект `gin`:
+```cpp
+take user_name = "";
+gout << "Введите ваше имя: " << endl;
+gin >> user_name;
+```
+
+### 3. Структуры данных (C-ABI)
+
+Объявление структур со строгим выравниванием полей:
+```cpp
+struct Player {
+    hp: u32,
+    score: u32
+}
+
+int main() {
+    Player hero;
+    hero.hp = 100;
+    hero.score = 250;
+    gout << "HP: " << hero.hp << ", Score: " << hero.score << endl;
+    return 0;
+}
+```
+
+### 4. Динамические массивы
+
+```cpp
+take items = [];
+items.push(10);
+items.push(20);
+items.push(30);
+
+take length = len(items);
+take first = items[0];
+items.pop();
+```
+
+### 5. Функции
+
+Функции объявляются ключевым словом `take` или типом возвращаемого значения:
+```cpp
+take multiply(take a, take b) {
+    return a * b;
+}
+
+int square(take x) {
+    return x * x;
+}
+```
+
+### 6. Управляющие конструкции
+
+Условный оператор `if-else`:
+```cpp
+if (score >= 100) {
+    gout << "Победа!" << endl;
+} else {
+    gout << "Попробуйте снова" << endl;
+}
+```
+
+Цикл `while`:
+```cpp
+take i = 0;
+while (i < 10) {
+    gout << "Шаг: " << i << endl;
+    i++;
+}
+```
+
+Цикл `for`:
+```cpp
+for (take i = 1; i <= 5; i++) {
+    gout << "Итерация: " << i << endl;
+}
+```
+
+### 7. Модули и импорт файлов
+
+Импорт сторонних файлов `.grass` в проект:
+```cpp
+import "modules/math_utils.grass";
+import "modules/player.grass";
+```
+Компилятор нормализует пути и защищает от повторного включения (семантика `#pragma once`).
+
+---
+
+## Многопоточность и синхронизация
+
+Подключение библиотеки: `!thread!` (или `!async!`).
+
+### Запуск системного потока с ожиданием результата
+```cpp
+take worker(take x) {
+    return x * 10;
+}
+
+int main() {
+    take t = thread(worker, 5);
+    take result = thread_join(t);
+    gout << "Результат потока: " << result << endl;
+    return 0;
+}
+```
+
+### Запуск асинхронной фоновой задачи
+```cpp
+async background_save("data.bin");
+```
+
+### Синхронизация через мьютексы
+```cpp
+take mtx = mutex_create();
+
+mutex_lock(mtx);
+// критическая секция: безопасная работа с общими переменными
+shared_counter++;
+mutex_unlock(mtx);
+
+mutex_destroy(mtx);
+```
+
+---
+
+## Низкоуровневый доступ к памяти и портам
+
+Подключение библиотеки: `!mmio!` (или `!io!`, `!hw!`).
+
+### Чтение и запись физической памяти (MMIO)
+```cpp
+// Запись символа в текстовый видеобуфер VGA (0xB8000)
+mmio_write8(0xB8000, 65);     // символ 'A'
+mmio_write8(0xB8001, 10);     // атрибут цвета
+
+// Чтение значений разной разрядности
+take b = mmio_read8(0xB8000);
+take w = mmio_read16(0x1000);
+take d = mmio_read32(0x2000);
+take q = mmio_read64(0x4000);
+```
+
+### Работа с аппаратными портами ввода-вывода (Port I/O)
+```cpp
+outb(0x3F8, 65);              // запись байта в COM1
+take received = inb(0x3F8);   // чтение байта из порта
+```
+
+### Барьеры памяти
+```cpp
+memory_barrier(); // аппаратная сериализация mfence
+read_barrier();   // lfence
+write_barrier();  // sfence
+```
+
+---
+
+## Поддержка в Visual Studio Code
+
+В папке `.vscode/extension/` и `bin/` находится официальный пакет расширения `grassgreen-4.0.0.vsix`.
+
+Расширение включает:
+- TextMate подсветку синтаксиса всех 18 библиотек, управляющих конструкций, потокового вывода `gout`/`gin`, структур и ключевых слов.
+- Официальные векторные иконки для файлов `.grass` (`logo.svg`) и файлов баз данных `.gdb` (`gdb_logo.svg`).
+- Набор сниппетов (IntelliSense) для быстрого создания функций, циклов, структур, потоков, мьютексов и шаблонов `main`.
+
+Установка расширения в редактор:
+```bash
+code --install-extension bin/grassgreen-4.0.0.vsix
+```
+
+---
+
+## Документация
+
+Полный справочник по всем стандартным библиотекам и функциям находится в каталоге `docs/`:
+
+- `docs/library.md` — общий перечень библиотек с кратким назначением
+- `docs/main.md` — спецификация управляющих конструкций и базовых вызовов
+- `docs/mmio.md` — функции аппаратного доступа к памяти и портам
+- `docs/thread.md` — функции работы с потоками и мьютексами
+- `docs/2DGraphics.md` — функции графического 2D-движка
+- `docs/interface.md` — элементы управления оконного GUI-интерфейса
+- `docs/gdb.md` — команды встроенной базы данных GSE
+- `docs/fsys.md` — работа с файловой системой
+- `docs/json.md` — функции работы с JSON
+- `docs/GrassNet.md` — сетевые протоколы и сокеты
+- `docs/sys.md` — системная информация и буфер обмена
+- `docs/proc.md` — управление процессами
+- `docs/memory.md` — управление оперативной памятью
+- `docs/time.md` — замер времени и системные часы
+- `docs/fastmath.md` — быстрая математика
+- `docs/coremath.md` — высокоточная и квантовая математика
+- `docs/random.md` — генератор случайных чисел
+- `docs/tg.md` — команды Telegram-бота
+- `docs/WEB.md` — фронтенд и скрипты веб-приложений

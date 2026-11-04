@@ -11,9 +11,9 @@ int main() {
 
     stop_time();
 
-    cout << "Сумма от 1 до 30000: " << total << endl;
-    cout << "Время работы: " << conclus_time() << endl;
-    cout << "Дата запуска: " << get_date() << " " << get_time_str() << endl;
+    gout << "Сумма от 1 до 30000: " << total << endl;
+    gout << "Время работы: " << conclus_time() << endl;
+    gout << "Дата запуска: " << get_date() << " " << get_time_str() << endl;
 
     return 0;
 }

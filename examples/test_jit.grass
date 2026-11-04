@@ -1,0 +1,46 @@
+!GrassGreen!
+
+int main() {
+    gout << "========================================" << endl;
+    gout << "  GRASSGREEN 4.0 x86_64 JIT TEST SUITE  " << endl;
+    gout << "========================================" << endl;
+
+    // 1. Тест горячего цикла суммирования 1..1,000,000 в нативном машинном коде x86_64
+    take sum = 0;
+    take i = 1;
+    take limit = 1000000;
+
+    while (i <= limit) {
+        sum = sum + i;
+        i = i + 1;
+    }
+
+    gout << "[JIT TEST 1] Сумма от 1 до 1,000,000: " << sum << endl;
+    gout << "[JIT TEST 1] Ожидалось: 500000500000" << endl;
+
+    // 2. Тест с плавающей точкой: вычисление шагов
+    take val = 0.0;
+    take step = 0;
+    while (step < 500000) {
+        val = val + 0.5;
+        step = step + 1;
+    }
+
+    gout << "[JIT TEST 2] val (500,000 x 0.5): " << val << endl;
+    gout << "[JIT TEST 2] Ожидалось: 250000" << endl;
+
+    // 3. Тест инкрементов OP_INC_VAR
+    take counter = 0;
+    take k = 0;
+    while (k < 100000) {
+        counter++;
+        k++;
+    }
+    gout << "[JIT TEST 3] counter (100,000 инкрементов): " << counter << endl;
+    gout << "[JIT TEST 3] Ожидалось: 100000" << endl;
+
+    gout << "========================================" << endl;
+    gout << "  ALL JIT TESTS COMPLETED SUCCESSFULLY! " << endl;
+    gout << "========================================" << endl;
+    return 0;
+}

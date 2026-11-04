@@ -1,0 +1,78 @@
+!GrassGreen!
+!thread!
+
+take calc_square(x) {
+    take res = x * x;
+    return res;
+}
+
+take calc_sum(a, b) {
+    take res = a + b;
+    return res;
+}
+
+take counter_worker(steps, mtx) {
+    for (take i = 0; i < steps; i++) {
+        mutex_lock(mtx);
+        g_counter = g_counter + 1;
+        mutex_unlock(mtx);
+    }
+    return steps;
+}
+
+take bg_task(val) {
+    thread_sleep(20);
+    return val;
+}
+
+int main() {
+    gout << "[Test Thread]: 1. Parallel function execution and return values..." << endl;
+    take t1 = thread(calc_square, 12);
+    take t2 = thread(calc_sum, 100, 250);
+
+    take r1 = thread_join(t1);
+    take r2 = thread_join(t2);
+
+    gout << "Thread 1 calc_square(12) = " << r1 << endl;
+    gout << "Thread 2 calc_sum(100, 250) = " << r2 << endl;
+
+    if (r1 == 144 && r2 == 350) {
+        gout << "[PASSED]: Parallel functions returned correct values!" << endl;
+    } else {
+        gout << "[FAILED]: Return values mismatch!" << endl;
+    }
+
+    gout << "[Test Thread]: 2. Mutex synchronization & shared variable..." << endl;
+    take g_mtx = mutex_create();
+    take g_counter = 0;
+
+    take w1 = thread(counter_worker, 500, g_mtx);
+    take w2 = thread(counter_worker, 500, g_mtx);
+
+    take w1_res = thread_join(w1);
+    take w2_res = thread_join(w2);
+
+    gout << "g_counter after 2x500 increments = " << g_counter << endl;
+
+    if (g_counter == 1000) {
+        gout << "[PASSED]: Mutex protected shared variable counter = 1000 without data race!" << endl;
+    } else {
+        gout << "[FAILED]: Data race detected in counter!" << endl;
+    }
+
+    gout << "[Test Thread]: 3. Async statement and thread sleep..." << endl;
+    async bg_task(777);
+    take async_t = async(bg_task, 42);
+    take async_res = thread_join(async_t);
+    gout << "Async result = " << async_res << endl;
+
+    if (async_res == 42) {
+        gout << "[PASSED]: Async thread completed successfully!" << endl;
+    }
+
+    take current_tid = thread_id();
+    gout << "Current thread ID = " << current_tid << endl;
+
+    mutex_destroy(g_mtx);
+    gout << "[Test Thread]: ALL MULTITHREADING TESTS PASSED!" << endl;
+}

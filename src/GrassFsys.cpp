@@ -1,20 +1,30 @@
 #include "GrassFsys.h"
+#include "GrassHAL.h"
 #include <filesystem>
 #include <sstream>
 
 namespace fs = std::filesystem;
 
 bool GrassFsys::mkdir(const std::string& path) {
+    if (GrassHAL::is_freestanding()) {
+        return GrassHAL::vfs_mkdir(path);
+    }
     std::error_code ec;
     return fs::create_directories(path, ec);
 }
 
 bool GrassFsys::is_dir(const std::string& path) {
+    if (GrassHAL::is_freestanding()) {
+        return GrassHAL::vfs_is_dir(path);
+    }
     std::error_code ec;
     return fs::is_directory(path, ec);
 }
 
 int64_t GrassFsys::size(const std::string& path) {
+    if (GrassHAL::is_freestanding()) {
+        return GrassHAL::vfs_size(path);
+    }
     std::error_code ec;
     if (!fs::exists(path, ec) || fs::is_directory(path, ec)) return 0;
     auto sz = fs::file_size(path, ec);
@@ -23,11 +33,17 @@ int64_t GrassFsys::size(const std::string& path) {
 }
 
 bool GrassFsys::copy(const std::string& src, const std::string& dst) {
+    if (GrassHAL::is_freestanding()) {
+        return GrassHAL::vfs_copy(src, dst);
+    }
     std::error_code ec;
     return fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
 }
 
 std::string GrassFsys::list(const std::string& path) {
+    if (GrassHAL::is_freestanding()) {
+        return GrassHAL::vfs_list(path);
+    }
     std::error_code ec;
     if (!fs::exists(path, ec) || !fs::is_directory(path, ec)) return "";
     std::ostringstream ss;

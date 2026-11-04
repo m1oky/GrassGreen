@@ -1,3 +1,4 @@
+#include "GrassHAL.h"
 #include <winsock2.h> 
 #include <windows.h>
 #include "GrassWeb.h"
@@ -721,6 +722,12 @@ string CompileGrassToHTML(const string& filename) {
 }
 
 void GrassWeb_LoadPage(const string& filename) {
+    if (GrassHAL::is_freestanding()) {
+        string html_body = CompileGrassToHTML(filename);
+        GrassHAL::vfs_write(filename + ".html", html_body);
+        cout << "[GrassWeb Freestanding]: Скомпилировано в RamFS: " << filename << ".html (" << html_body.size() << " байт)\n";
+        return;
+    }
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) return;
 

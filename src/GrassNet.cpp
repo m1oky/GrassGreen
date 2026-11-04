@@ -1,37 +1,44 @@
 #include "GrassNet.h"
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <wininet.h>
-#include <urlmon.h>
+#include "GrassHAL.h"
 #include <chrono>
 #include <iostream>
 #include <sstream>
 
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <wininet.h>
+#include <urlmon.h>
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "wininet.lib")
 #pragma comment(lib, "urlmon.lib")
+#endif
 
 namespace GrassNet {
 
     static bool wsa_initialized = false;
     static std::string current_browser = "GrassGreenNet/3.1";
-    static std::string current_device = "Windows NT 10.0; Win64; x64";
+    static std::string current_device = "Freestanding-HAL";
     static std::string current_api_key = "";
     static int last_http_status = 0;
 
+#if defined(_WIN32)
     static SOCKET client_sock = INVALID_SOCKET;
     static SOCKET server_sock = INVALID_SOCKET;
+#endif
     static std::string srv_password = "";
     static std::string srv_certain_ip = "";
     static int srv_port = 8080;
 
     static void ensure_wsa() {
-        if (!wsa_initialized) {
+#if defined(_WIN32)
+        if (!wsa_initialized && !GrassHAL::is_freestanding()) {
             WSADATA wsa;
             if (WSAStartup(MAKEWORD(2, 2), &wsa) == 0) {
                 wsa_initialized = true;
             }
         }
+#endif
     }
 
     void set_agent(const std::string& browser, const std::string& device) {
@@ -48,10 +55,15 @@ namespace GrassNet {
     }
 
     int get_last_status() {
+        if (GrassHAL::is_freestanding()) return 200;
         return last_http_status;
     }
 
     std::string resolve_ip(const std::string& domain) {
+        if (GrassHAL::is_freestanding()) {
+            return "127.0.0.1";
+        }
+#if defined(_WIN32)
         ensure_wsa();
         struct addrinfo hints = {}, *res = nullptr;
         hints.ai_family = AF_INET;
@@ -66,18 +78,30 @@ namespace GrassNet {
         inet_ntop(AF_INET, &(ipv4->sin_addr), ip_str, INET_ADDRSTRLEN);
         freeaddrinfo(res);
         return std::string(ip_str);
+#else
+        return "127.0.0.1";
+#endif
     }
 
     std::string get_local_ip() {
+        if (GrassHAL::is_freestanding()) {
+            return "127.0.0.1";
+        }
+#if defined(_WIN32)
         ensure_wsa();
         char hostname[256] = {0};
         if (gethostname(hostname, sizeof(hostname)) == 0) {
             return resolve_ip(hostname);
         }
+#endif
         return "127.0.0.1";
     }
 
     bool connect_host(const std::string& ip_or_host, int port) {
+        if (GrassHAL::is_freestanding()) {
+            return true;
+        }
+#if defined(_WIN32)
         ensure_wsa();
         if (client_sock != INVALID_SOCKET) {
             closesocket(client_sock);
@@ -90,7 +114,6 @@ namespace GrassNet {
         client_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (client_sock == INVALID_SOCKET) return false;
 
-        // Таймаут подключения 3 секунды
         DWORD timeout = 3000;
         setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
         setsockopt(client_sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
@@ -106,9 +129,16 @@ namespace GrassNet {
             return false;
         }
         return true;
+#else
+        return true;
+#endif
     }
 
     double ping(const std::string& host, int port) {
+        if (GrassHAL::is_freestanding()) {
+            return 0.15; // Freestanding аппаратная задержка
+        }
+#if defined(_WIN32)
         ensure_wsa();
         auto t1 = std::chrono::high_resolution_clock::now();
         bool ok = connect_host(host, port);
@@ -119,9 +149,17 @@ namespace GrassNet {
         }
         if (!ok) return -1.0;
         return std::chrono::duration<double, std::milli>(t2 - t1).count();
+#else
+        return 0.15;
+#endif
     }
 
     std::string send_request(const std::string& url, const std::string& method, const std::string& body) {
+        if (GrassHAL::is_freestanding()) {
+            last_http_status = 200;
+            return "{\"status\": 200, \"mode\": \"freestanding\", \"url\": \"" + url + "\"}";
+        }
+#if defined(_WIN32)
         std::string ua = get_user_agent();
         HINTERNET hInternet = InternetOpenA(ua.c_str(), INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
         if (!hInternet) return "[GrassNet Error]: Не удалось инициализировать WinINet";
@@ -159,9 +197,22 @@ namespace GrassNet {
         InternetCloseHandle(hUrl);
         InternetCloseHandle(hInternet);
         return response;
+#else
+        last_http_status = 200;
+        return "{\"status\": 200, \"mode\": \"freestanding\"}";
+#endif
     }
 
     bool create_server(const std::string& ip, int port, const std::string& password, const std::string& certain_ip) {
+        if (GrassHAL::is_freestanding()) {
+            srv_port = port;
+            srv_password = password;
+            srv_certain_ip = certain_ip;
+            std::cout << "[GrassNet Freestanding Server]: Запущен виртуальный сокет на "
+                      << (ip.empty() ? "127.0.0.1" : ip) << ":" << port << "\n";
+            return true;
+        }
+#if defined(_WIN32)
         ensure_wsa();
         if (server_sock != INVALID_SOCKET) {
             closesocket(server_sock);
@@ -201,14 +252,20 @@ namespace GrassNet {
         std::cout << "[GrassNet Server]: Запущен на " << (ip.empty() ? "127.0.0.1" : ip)
                   << ":" << port << " (Filter IP: " << (certain_ip.empty() ? "ALL" : certain_ip) << ")\n";
         return true;
+#else
+        return true;
+#endif
     }
 
     std::string accept_request() {
+        if (GrassHAL::is_freestanding()) {
+            return "IDLE (freestanding mock queue)";
+        }
+#if defined(_WIN32)
         if (server_sock == INVALID_SOCKET) {
             return "[GrassNet Error]: Сервер не запущен (вызови create_serv)";
         }
 
-        // Таймаут ожидания 100 мс, чтобы не зависать намертво при тестах
         fd_set readSet;
         FD_ZERO(&readSet);
         FD_SET(server_sock, &readSet);
@@ -228,7 +285,6 @@ namespace GrassNet {
         inet_ntop(AF_INET, &client_info.sin_addr, client_ip, INET_ADDRSTRLEN);
         std::string incoming_ip(client_ip);
 
-        // Проверка certainIP
         if (!srv_certain_ip.empty() && srv_certain_ip != "0.0.0.0" && incoming_ip != srv_certain_ip) {
             std::string deny = "HTTP/1.1 403 Forbidden\r\n\r\nAccess Denied by GrassNet certainIP policy.";
             ::send(client, deny.c_str(), (int)deny.size(), 0);
@@ -244,20 +300,38 @@ namespace GrassNet {
         ::send(client, reply.c_str(), (int)reply.size(), 0);
         closesocket(client);
         return data;
+#else
+        return "IDLE";
+#endif
     }
 
     void sync_async(int delay_ms) {
+        if (GrassHAL::is_freestanding()) {
+            GrassHAL::delay_ms((uint32_t)delay_ms);
+            return;
+        }
+#if defined(_WIN32)
         if (delay_ms > 0) Sleep(delay_ms);
+#endif
     }
 
     bool download_file(const std::string& url, const std::string& filepath) {
+        if (GrassHAL::is_freestanding()) {
+            return GrassHAL::vfs_write(filepath, "/* GrassNet Freestanding Mock Download from " + url + " */");
+        }
+#if defined(_WIN32)
         HRESULT hr = URLDownloadToFileA(NULL, url.c_str(), filepath.c_str(), 0, NULL);
         return SUCCEEDED(hr);
+#else
+        return GrassHAL::vfs_write(filepath, "/* GrassNet Freestanding Mock */");
+#endif
     }
 
     void close_all() {
+#if defined(_WIN32)
         if (client_sock != INVALID_SOCKET) { closesocket(client_sock); client_sock = INVALID_SOCKET; }
         if (server_sock != INVALID_SOCKET) { closesocket(server_sock); server_sock = INVALID_SOCKET; }
+#endif
     }
 
 } // namespace GrassNet

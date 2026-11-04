@@ -1,0 +1,15 @@
+!GrassGreen!
+import "common_types.grass";
+
+take square(take n) {
+    return n * n;
+}
+
+take cube(take n) {
+    return n * n * n;
+}
+
+take circle_area(take radius) {
+    take pi = get_pi();
+    return pi * square(radius);
+}

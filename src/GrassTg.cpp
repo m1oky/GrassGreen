@@ -1,3 +1,4 @@
+#include "GrassHAL.h"
 #include "GrassTg.h"
 #include <windows.h>
 #include <wininet.h>
@@ -27,6 +28,15 @@ std::string GrassTg::urlEncode(const std::string& value) {
 }
 
 std::string GrassTg::httpGet(const std::string& url) {
+    if (GrassHAL::is_freestanding()) {
+        if (url.find("getUpdates") != std::string::npos) {
+            return "{\"ok\":true,\"result\":[]}";
+        }
+        if (url.find("getMe") != std::string::npos) {
+            return "{\"ok\":true,\"result\":{\"id\":10001,\"is_bot\":true,\"first_name\":\"FreestandingBot\",\"username\":\"grass_bot\"}}";
+        }
+        return "{\"ok\":true,\"result\":{\"message_id\":1001}}";
+    }
     // INTERNET_OPEN_TYPE_PRECONFIG подтягивает системные сетевые настройки и прокси
     HINTERNET hInternet = InternetOpenA("GrassGreenBot/3.5", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
     if (!hInternet) return "";

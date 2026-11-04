@@ -7,7 +7,14 @@
 #include <unordered_set>
 #include <cstdint>
 #include <cmath>
+#include <cstring>
+#include <cstdlib>
 #include <sstream>
+
+#include "GrassArena.h"
+
+// Глобальная арена для строк VM (определяется один раз в grassc.cpp)
+extern GrassArena g_vm_arena;
 
 // 1. НАБОР ДВОИЧНЫХ ИНСТРУКЦИЙ (OPCODES)
 enum OpCode : uint8_t {
@@ -17,6 +24,7 @@ enum OpCode : uint8_t {
     OP_LOAD_VAR      = 0x03,
     OP_STORE_VAR     = 0x04,
     OP_POP           = 0x05,
+    OP_NOP           = 0x0E,
 
     OP_ADD           = 0x10,
     OP_SUB           = 0x11,
@@ -55,39 +63,235 @@ enum OpCode : uint8_t {
     OP_UI_SHOW       = 0x72,
     OP_UI_CMD        = 0x73,
 
+    OP_NEW_ARRAY     = 0x80,
+    OP_GET_INDEX     = 0x81,
+    OP_SET_INDEX     = 0x82,
+    OP_ARRAY_PUSH    = 0x83,
+    OP_ARRAY_POP     = 0x84,
+    OP_NEW_STRUCT    = 0x85,
+    OP_GET_FIELD     = 0x86,
+    OP_SET_FIELD     = 0x87,
+
+    // ── Фьюз-инструкции и оптимизации (Bytecode Optimizer) ──
+    OP_ADD_CONST     = 0x90,
+    OP_SUB_CONST     = 0x91,
+    OP_MUL_CONST     = 0x92,
+    OP_DIV_CONST     = 0x93,
+    OP_INC_VAR       = 0x94,
+    OP_DEC_VAR       = 0x95,
+
+    // ── Многопоточность (Multithreading & Async) ──
+    OP_THREAD_SPAWN  = 0xA0,
+    OP_ASYNC_SPAWN   = 0xA1,
+
     OP_JUMP          = 0xF0,
     OP_CALL_USER     = 0xF1
 };
 
-// 2. УНИВЕРСАЛЬНЫЙ ТИП ДАННЫХ ВМ (GRASS VALUE)
+// 2. УНИВЕРСАЛЬНЫЙ ТИП ДАННЫХ ВМ (GRASS VALUE) — NaN-boxing (8 байт)
+//
+// Схема кодирования IEEE 754 NaN:
+//   Обычный double:  любые 64 бит, НЕ попадающие в наши теги
+//   QNAN   = 0x7FFC000000000000  (13 старших бит = quiet NaN marker)
+//   STRUCT = 0x7FFB... | ptr48
+//   NIL    = 0x7FFC... | 0
+//   ARRAY  = 0x7FFD... | ptr48
+//   BOOL   = 0x7FFE... | (0 или 1)
+//   STR    = 0x7FFF... | ptr48
+//
+struct GrassArray;
+struct GrassStructDef;
+struct GrassStructInstance;
+
 struct GrassValue {
-    bool is_string = false;
-    double num = 0.0;
-    std::string str = "";
+    uint64_t bits;
 
-    static GrassValue Num(double v) { GrassValue g; g.is_string = false; g.num = v; return g; }
-    static GrassValue Str(const std::string& s) { GrassValue g; g.is_string = true; g.str = s; return g; }
+    // ── Константы NaN-boxing ──
+    static constexpr uint64_t QNAN       = 0x7FFC000000000000ULL;
+    static constexpr uint64_t TAG_STRUCT = 0x7FFB000000000000ULL;
+    static constexpr uint64_t TAG_NIL    = 0x7FFC000000000000ULL;
+    static constexpr uint64_t TAG_ARRAY  = 0x7FFD000000000000ULL;
+    static constexpr uint64_t TAG_BOOL   = 0x7FFE000000000000ULL;
+    static constexpr uint64_t TAG_STR    = 0x7FFF000000000000ULL;
+    static constexpr uint64_t PTR_MASK   = 0x0000FFFFFFFFFFFFULL; // 48-бит указатель
 
-    std::string toString() const {
-        if (is_string) return str;
-        if (std::floor(num) == num && std::fabs(num) < 1e15) {
-            return std::to_string((long long)num);
-        }
-        std::stringstream ss;
-        ss << num;
-        return ss.str();
+    // ── Конструктор (nil по умолчанию) ──
+    GrassValue() : bits(TAG_NIL) {}
+
+    // ── Фабрики ──
+    static GrassValue Num(double v) {
+        GrassValue g;
+        std::memcpy(&g.bits, &v, 8);
+        return g;
+    }
+
+    static GrassValue Str(const std::string& s) {
+        GrassValue g;
+        char* p = g_vm_arena.alloc_string(s.c_str(), s.size());
+        g.bits = TAG_STR | ((uint64_t)(uintptr_t)p & PTR_MASK);
+        return g;
+    }
+
+    static GrassValue Nil() {
+        GrassValue g;
+        g.bits = TAG_NIL;
+        return g;
+    }
+
+    static GrassValue Bool(bool b) {
+        GrassValue g;
+        g.bits = TAG_BOOL | (b ? 1ULL : 0ULL);
+        return g;
+    }
+
+    static GrassValue Array(GrassArray* a) {
+        GrassValue g;
+        g.bits = TAG_ARRAY | ((uint64_t)(uintptr_t)a & PTR_MASK);
+        return g;
+    }
+
+    static GrassValue Struct(GrassStructInstance* s) {
+        GrassValue g;
+        g.bits = TAG_STRUCT | ((uint64_t)(uintptr_t)s & PTR_MASK);
+        return g;
+    }
+
+    // ── Инспекция типа ──
+    bool is_nil()    const { return bits == TAG_NIL; }
+    bool is_str()    const { return (bits & 0xFFFF000000000000ULL) == TAG_STR; }
+    bool is_string() const { return is_str(); }
+    bool is_bool()   const { return (bits & 0xFFFF000000000000ULL) == TAG_BOOL; }
+    bool is_array()  const { return (bits & 0xFFFF000000000000ULL) == TAG_ARRAY; }
+    bool is_struct() const { return (bits & 0xFFFF000000000000ULL) == TAG_STRUCT; }
+    bool is_num()    const {
+        uint64_t t = bits & 0xFFFF000000000000ULL;
+        return t != TAG_NIL && t != TAG_BOOL && t != TAG_STR && t != TAG_ARRAY && t != TAG_STRUCT;
+    }
+
+    // ── Извлечение значений ──
+    const char* asCStr() const {
+        return (const char*)(uintptr_t)(bits & PTR_MASK);
+    }
+
+    GrassArray* asArray() const {
+        return (GrassArray*)(uintptr_t)(bits & PTR_MASK);
+    }
+
+    GrassStructInstance* asStruct() const {
+        return (GrassStructInstance*)(uintptr_t)(bits & PTR_MASK);
     }
 
     double toNumber() const {
-        if (!is_string) return num;
-        try { return std::stod(str); } catch (...) { return 0.0; }
+        if (is_str()) {
+            const char* s = asCStr();
+            if (!s || !*s) return 0.0;
+            char* end;
+            double v = std::strtod(s, &end);
+            return (end != s) ? v : 0.0;
+        }
+        if (is_bool()) return (bits & 1) ? 1.0 : 0.0;
+        if (is_nil() || is_array() || is_struct()) return 0.0;
+        double d;
+        std::memcpy(&d, &bits, 8);
+        return d;
     }
 
-    bool isTruthy() const {
-        if (is_string) return !str.empty() && str != "0" && str != "false";
-        return num != 0.0;
-    }
+    std::string toString() const;
+    bool isTruthy() const;
 };
+
+// ── Определение структур и массивов GrassGreen 4.0 ──
+struct GrassArray {
+    std::vector<GrassValue> elements;
+};
+
+enum class GrassFieldType {
+    U8,
+    U16,
+    U32,
+    U64,
+    INT,
+    FLOAT,
+    DOUBLE,
+    BOOL,
+    STRING,
+    VALUE
+};
+
+struct GrassFieldDef {
+    std::string name;
+    GrassFieldType type;
+    size_t offset;
+    size_t size;
+    size_t alignment;
+};
+
+struct GrassStructDef {
+    std::string name;
+    std::vector<GrassFieldDef> fields;
+    std::unordered_map<std::string, size_t> field_indices;
+    size_t total_size = 0;
+    size_t alignment = 1;
+};
+
+struct GrassStructInstance {
+    GrassStructDef* def = nullptr;
+    uint8_t* data = nullptr; // память в g_vm_arena
+};
+
+inline std::string GrassValue::toString() const {
+    if (is_str()) {
+        const char* s = asCStr();
+        return s ? std::string(s) : std::string();
+    }
+    if (is_nil())  return "nil";
+    if (is_bool()) return (bits & 1) ? "true" : "false";
+    if (is_array()) {
+        GrassArray* arr = asArray();
+        if (!arr) return "[]";
+        std::string res = "[";
+        for (size_t i = 0; i < arr->elements.size(); ++i) {
+            if (i > 0) res += ", ";
+            res += arr->elements[i].toString();
+        }
+        res += "]";
+        return res;
+    }
+    if (is_struct()) {
+        GrassStructInstance* st = asStruct();
+        if (!st || !st->def) return "{struct}";
+        return "{" + st->def->name + "}";
+    }
+    double d;
+    std::memcpy(&d, &bits, 8);
+    if (std::floor(d) == d && std::fabs(d) < 1e15) {
+        return std::to_string((long long)d);
+    }
+    std::ostringstream ss;
+    ss << d;
+    return ss.str();
+}
+
+inline bool GrassValue::isTruthy() const {
+    if (is_nil())  return false;
+    if (is_bool()) return (bits & 1) != 0;
+    if (is_array()) {
+        GrassArray* arr = asArray();
+        return arr && !arr->elements.empty();
+    }
+    if (is_struct()) return asStruct() != nullptr;
+    if (is_str()) {
+        const char* s = asCStr();
+        if (!s || !*s) return false;
+        if (s[0] == '0' && s[1] == '\0') return false;
+        // "false"
+        if (s[0]=='f'&&s[1]=='a'&&s[2]=='l'&&s[3]=='s'&&s[4]=='e'&&s[5]=='\0') return false;
+        return true;
+    }
+    return toNumber() != 0.0;
+}
+
+extern std::unordered_map<std::string, GrassStructDef> g_struct_registry;
 
 // 3. ТОКЕНЫ И ЛЕКСЕР
 enum GrassTokenKind {
@@ -126,7 +330,8 @@ enum GrassTokenKind {
     TOK_OR,
     TOK_NOT,
     TOK_SHL,
-    TOK_SHR
+    TOK_SHR,
+    TOK_DOT
 };
 
 struct GrassToken {
@@ -171,6 +376,7 @@ class BytecodeCompiler {
         std::vector<std::string> param_names;
     };
     std::unordered_map<std::string, UserFunction> user_functions;
+    std::vector<std::pair<size_t, std::string>> thread_spawn_fixups;
 
     GrassToken& peek(int offset = 0);
     GrassToken advance();
@@ -206,6 +412,7 @@ class BytecodeCompiler {
     void parseBlock();
     void parseStepStatement();
     void parseStatement();
+    void parseStructDefinition();
 
 public:
     std::vector<uint8_t> code;

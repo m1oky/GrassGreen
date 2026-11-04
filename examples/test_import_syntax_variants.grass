@@ -1,0 +1,18 @@
+!GrassGreen!
+// Различные варианты синтаксиса импорта
+#include <modules/math_utils.grass>
+include "modules/player_module"
+
+int main() {
+    gout << "Testing syntax variants: #include <...> and include '...'" << endl;
+    take x = square(12);
+    gout << "12^2 = " << x << endl;
+
+    Player p;
+    p.hp = 500;
+    p.score = 999;
+    print_player_status("Wizard", p.hp);
+
+    gout << "SYNTAX VARIANTS TEST PASSED!" << endl;
+    return 0;
+}

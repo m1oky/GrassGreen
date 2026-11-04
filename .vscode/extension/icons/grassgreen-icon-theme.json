@@ -1,0 +1,18 @@
+{
+  "iconDefinitions": {
+    "_grass": {
+      "iconPath": "./logo.svg"
+    },
+    "_gdb": {
+      "iconPath": "./gdb_logo.svg"
+    }
+  },
+  "fileExtensions": {
+    "grass": "_grass",
+    "gdb": "_gdb"
+  },
+  "languageIds": {
+    "grassgreen": "_grass",
+    "grassdb": "_gdb"
+  }
+}

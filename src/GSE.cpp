@@ -1,3 +1,4 @@
+#include "GrassHAL.h"
 #include <windows.h>
 #include "GSE.h"
 #include <iostream>
@@ -57,6 +58,9 @@ namespace GrassDB {
     }
 
     static string get_current_timestamp() {
+        if (GrassHAL::is_freestanding()) {
+            return GrassHAL::get_rtc_date() + " " + GrassHAL::get_rtc_time();
+        }
         SYSTEMTIME st;
         GetLocalTime(&st);
         ostringstream oss;
@@ -262,6 +266,25 @@ namespace GrassDB {
         init_default_schema();
         active_filepath = strip_quotes(filename);
 
+        if (GrassHAL::is_freestanding() && GrassHAL::vfs_exists(active_filepath)) {
+            stringstream file(GrassHAL::vfs_read(active_filepath));
+            string first_line;
+            if (getline(file, first_line)) {
+                first_line = trim_str(first_line);
+                if (first_line != "!database!" && first_line != "!gdb!") {
+                    cout << "[GSE Error]: Invalid library header in " << active_filepath << " (expected !database!)" << endl;
+                    return false;
+                }
+            }
+            active_table = "default";
+            string line;
+            while (getline(file, line)) {
+                exec_command(line);
+            }
+            cout << "[GSE Success]: Loaded " << db_store.size() << " records from RamFS: " << active_filepath << endl;
+            return true;
+        }
+
         ifstream file(active_filepath);
         if (!file.is_open()) return false;
 
@@ -290,13 +313,10 @@ namespace GrassDB {
         string target = filename.empty() ? active_filepath : strip_quotes(filename);
         if (target.empty()) target = "storage.gdb";
 
-        ofstream file(target, ios::trunc);
-        if (!file.is_open()) return false;
+        stringstream ss;
+        ss << "!database!\n";
+        ss << "* Grass Storage Engine (GSE v3.0) Database File\n\n";
 
-        file << "!database!\n";
-        file << "* Grass Storage Engine (GSE v3.0) Database File\n\n";
-
-        // Группируем записи по таблицам для аккуратного сохранения
         map<string, vector<GSERecord>> grouped;
         for (const auto& kv : db_store) {
             grouped[kv.second.table].push_back(kv.second);
@@ -304,16 +324,24 @@ namespace GrassDB {
 
         for (const auto& tbl_group : grouped) {
             if (tbl_group.first != "default") {
-                file << "table(" << tbl_group.first << ")\n";
+                ss << "table(" << tbl_group.first << ")\n";
             }
             for (const auto& rec : tbl_group.second) {
-                file << rec.key << "(" << rec.value << ")\n";
+                ss << rec.key << "(" << rec.value << ")\n";
             }
             if (tbl_group.first != "default") {
-                file << "end-table\n\n";
+                ss << "end-table\n\n";
             }
         }
 
+        if (GrassHAL::is_freestanding()) {
+            GrassHAL::vfs_write(target, ss.str());
+            return true;
+        }
+
+        ofstream file(target, ios::trunc);
+        if (!file.is_open()) return false;
+        file << ss.str();
         file.close();
         return true;
     }

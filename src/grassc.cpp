@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <iomanip>
 #include <windows.h>
+#include <mutex>
 
 #include "GrassSyntax.h"
 #include "FastMath.h"
@@ -30,9 +31,20 @@
 #include "GrassFsys.h"
 #include "GrassTg.h"
 #include "Grass2DGraphics.h"
+#include "GrassIO.h"
+#include "GrassHAL.h"
+#include "GrassOptimizer.h"
+#include "GrassImport.h"
+#include "GrassJIT.h"
+#include "GrassThread.h"
+#include "GrassMMIO.h"
 
 using namespace std;
 namespace fs = std::filesystem;
+
+// Глобальная арена для строк VM (4 МБ)
+GrassArena g_vm_arena(4 * 1024 * 1024);
+unordered_map<string, GrassStructDef> g_struct_registry;
 
 static string wstring_to_utf8_helper(const wstring& wstr) {
     if (wstr.empty()) return "";
@@ -44,6 +56,12 @@ static string wstring_to_utf8_helper(const wstring& wstr) {
     return str;
 }
 
+// Разделяемое окружение для многопоточности GrassGreen
+struct GrassSharedEnv {
+    std::mutex mtx;
+    unordered_map<string, GrassValue> vars;
+};
+
 // ============================================================================
 // 1. СТЕКОВАЯ ВИРТУАЛЬНАЯ МАШИНА GRASSGREEN (ТУРБО-ВЕРСИЯ)
 // ============================================================================
@@ -53,6 +71,39 @@ class GrassVM {
     vector<GrassValue> stack;
     vector<size_t> call_stack;
     unordered_map<string, GrassValue> vars;
+    shared_ptr<GrassSharedEnv> shared_env;
+    bool is_root_vm = true;
+    GrassValue last_return_value{GrassValue::Num(0.0)};
+    vector<GrassArray*> heap_arrays;
+    unordered_map<uint32_t, shared_ptr<GrassJIT::CompiledJitBlock>> jit_cache;
+    unordered_map<uint32_t, int> loop_trip_counters;
+    unordered_set<uint32_t> failed_loops;
+
+    bool tryRunJitLoop(uint32_t loop_start, uint32_t loop_end) {
+        if (failed_loops.count(loop_start)) return false;
+
+        auto& active_vars = (is_root_vm && shared_env) ? shared_env->vars : vars;
+        auto jit_it = jit_cache.find(loop_start);
+        if (jit_it != jit_cache.end()) {
+            GrassJIT::executeJitBlock(jit_it->second, active_vars);
+            ip = jit_it->second->end_ip;
+            return true;
+        }
+        int& trips = loop_trip_counters[loop_start];
+        trips++;
+        if (trips >= 2) {
+            auto block = GrassJIT::tryCompileLoop(code, loop_start, loop_end, active_vars);
+            if (block && block->is_valid) {
+                jit_cache[loop_start] = block;
+                GrassJIT::executeJitBlock(block, active_vars);
+                ip = block->end_ip;
+                return true;
+            } else {
+                failed_loops.insert(loop_start);
+            }
+        }
+        return false;
+    }
 
     inline uint8_t readByte() {
         if (ip >= code.size()) return OP_HALT;
@@ -94,18 +145,36 @@ class GrassVM {
     inline void push(GrassValue&& v) { stack.push_back(std::move(v)); }
 
     void syncDBToVars() {
-        for (const auto& kv : GrassDB::get_all_records()) {
-            vars[kv.first] = GrassValue::Str(kv.second.value);
-            vars[kv.first + "()"] = GrassValue::Str(kv.second.value);
-        }
-        for (const auto& kv : variables_cache) {
-            vars[kv.first] = GrassValue::Str(wstring_to_utf8_helper(kv.second));
+        if (is_root_vm && shared_env) {
+            std::lock_guard<std::mutex> lk(shared_env->mtx);
+            for (const auto& kv : GrassDB::get_all_records()) {
+                shared_env->vars[kv.first] = GrassValue::Str(kv.second.value);
+                shared_env->vars[kv.first + "()"] = GrassValue::Str(kv.second.value);
+            }
+            for (const auto& kv : variables_cache) {
+                shared_env->vars[kv.first] = GrassValue::Str(wstring_to_utf8_helper(kv.second));
+            }
+        } else {
+            for (const auto& kv : GrassDB::get_all_records()) {
+                vars[kv.first] = GrassValue::Str(kv.second.value);
+                vars[kv.first + "()"] = GrassValue::Str(kv.second.value);
+            }
+            for (const auto& kv : variables_cache) {
+                vars[kv.first] = GrassValue::Str(wstring_to_utf8_helper(kv.second));
+            }
         }
     }
 
     void syncVarsToGUI() {
-        for (const auto& kv : vars) {
-            GrassGUI::set_variable(kv.first, kv.second.toString());
+        if (is_root_vm && shared_env) {
+            std::lock_guard<std::mutex> lk(shared_env->mtx);
+            for (const auto& kv : shared_env->vars) {
+                GrassGUI::set_variable(kv.first, kv.second.toString());
+            }
+        } else {
+            for (const auto& kv : vars) {
+                GrassGUI::set_variable(kv.first, kv.second.toString());
+            }
         }
     }
 
@@ -121,178 +190,541 @@ class GrassVM {
     }
 
 public:
-    explicit GrassVM(const vector<uint8_t>& bytecode) : code(bytecode) {
-        // Предварительный резерв памяти (ноль реаллокаций при исполнении)
+    explicit GrassVM(const vector<uint8_t>& bytecode,
+                     shared_ptr<GrassSharedEnv> shared = nullptr,
+                     bool root = true)
+        : code(bytecode), shared_env(shared), is_root_vm(root) {
+        if (is_root_vm && !shared_env) {
+            shared_env = make_shared<GrassSharedEnv>();
+        }
         stack.reserve(512);
         call_stack.reserve(128);
         vars.reserve(128);
+        heap_arrays.reserve(64);
     }
 
-    void execute() {
-        size_t op_counter = 0;
-        while (ip < code.size()) {
-            // Проверяем лимит памяти раз в 256 инструкций для максимальной скорости циклов
-            if ((++op_counter & 255) == 0 && GrassMemory::is_limit_exceeded()) {
-                cerr << "\n[GrassGreen Error]: Превышен установленный лимит памяти (memory_limit)!\n";
-                return;
+    ~GrassVM() {
+        for (GrassArray* a : heap_arrays) delete a;
+    }
+
+    GrassValue getLastReturnValue() const { return last_return_value; }
+
+    int64_t spawnThread(uint32_t entry_ip, uint8_t argc, bool detached) {
+        vector<GrassValue> args(argc);
+        for (int i = (int)argc - 1; i >= 0; --i) {
+            args[i] = pop();
+        }
+
+        if (!shared_env) {
+            shared_env = make_shared<GrassSharedEnv>();
+        }
+        auto shared = shared_env;
+        const vector<uint8_t>& bc = this->code;
+
+        int64_t tid = GrassThread::create_thread([&bc, shared, entry_ip, args]() -> GrassValue {
+            GrassVM thread_vm(bc, shared, false);
+            for (size_t i = 0; i < args.size(); ++i) {
+                thread_vm.push(args[i]);
             }
+            thread_vm.execute(entry_ip);
+            return thread_vm.getLastReturnValue();
+        }, detached);
 
-            uint8_t op = readByte();
-            switch (op) {
-                case OP_HALT: return;
+        return tid;
+    }
 
-                case OP_CONST_NUM: push(GrassValue::Num(readDouble())); break;
-                case OP_CONST_STR: push(GrassValue::Str(readString())); break;
+    void execute(size_t start_ip = 0) {
+        ip = start_ip;
+        size_t op_counter = 0;
 
-                case OP_JUMP:
-                case OP_JMP: {
-                    ip = readU32();
-                    break;
-                }
+        // ── Табличная диспетчеризация (Labels-as-Values / Computed Goto) ──
+        static const void* dispatch_table[256];
+        static bool table_init = false;
+        if (!table_init) {
+            for (int i = 0; i < 256; ++i) dispatch_table[i] = &&do_unknown;
+            dispatch_table[OP_HALT]          = &&do_halt;
+            dispatch_table[OP_CONST_NUM]     = &&do_const_num;
+            dispatch_table[OP_CONST_STR]     = &&do_const_str;
+            dispatch_table[OP_LOAD_VAR]      = &&do_load_var;
+            dispatch_table[OP_STORE_VAR]     = &&do_store_var;
+            dispatch_table[OP_POP]           = &&do_pop;
+            dispatch_table[OP_ADD]           = &&do_add;
+            dispatch_table[OP_SUB]           = &&do_sub;
+            dispatch_table[OP_MUL]           = &&do_mul;
+            dispatch_table[OP_DIV]           = &&do_div;
+            dispatch_table[OP_NEG]           = &&do_neg;
+            dispatch_table[OP_MOD]           = &&do_mod;
+            dispatch_table[OP_CMP_EQ]        = &&do_cmp_eq;
+            dispatch_table[OP_CMP_NEQ]       = &&do_cmp_neq;
+            dispatch_table[OP_CMP_LT]        = &&do_cmp_lt;
+            dispatch_table[OP_CMP_GT]        = &&do_cmp_gt;
+            dispatch_table[OP_CMP_LTE]       = &&do_cmp_lte;
+            dispatch_table[OP_CMP_GTE]       = &&do_cmp_gte;
+            dispatch_table[OP_AND]           = &&do_and;
+            dispatch_table[OP_OR]            = &&do_or;
+            dispatch_table[OP_NOT]           = &&do_not;
+            dispatch_table[OP_JMP]           = &&do_jmp;
+            dispatch_table[OP_JMP_IF_FALSE]  = &&do_jmp_if_false;
+            dispatch_table[OP_CALL_FUNC]     = &&do_call_func;
+            dispatch_table[OP_RET]           = &&do_ret;
+            dispatch_table[OP_LOG]           = &&do_log;
+            dispatch_table[OP_LOG_EMPTY]     = &&do_log_empty;
+            dispatch_table[OP_WAIT]          = &&do_wait;
+            dispatch_table[OP_ASK]           = &&do_ask;
+            dispatch_table[OP_PRINT_RAW]     = &&do_print_raw;
+            dispatch_table[OP_CALL_BUILTIN]  = &&do_call_builtin;
+            dispatch_table[OP_LOAD_DB]       = &&do_load_db;
+            dispatch_table[OP_START_WEB]     = &&do_start_web;
+            dispatch_table[OP_UI_INIT]       = &&do_ui_init;
+            dispatch_table[OP_UI_ADD_ELEM]   = &&do_ui_add_elem;
+            dispatch_table[OP_UI_SHOW]       = &&do_ui_show;
+            dispatch_table[OP_UI_CMD]        = &&do_ui_cmd;
+            dispatch_table[OP_NEW_ARRAY]     = &&do_new_array;
+            dispatch_table[OP_GET_INDEX]     = &&do_get_index;
+            dispatch_table[OP_SET_INDEX]     = &&do_set_index;
+            dispatch_table[OP_ARRAY_PUSH]    = &&do_array_push;
+            dispatch_table[OP_ARRAY_POP]     = &&do_array_pop;
+            dispatch_table[OP_NEW_STRUCT]    = &&do_new_struct;
+            dispatch_table[OP_GET_FIELD]     = &&do_get_field;
+            dispatch_table[OP_SET_FIELD]     = &&do_set_field;
+            dispatch_table[OP_JUMP]          = &&do_jmp;
+            dispatch_table[OP_CALL_USER]     = &&do_call_func;
+            dispatch_table[OP_NOP]           = &&do_nop;
+            dispatch_table[OP_ADD_CONST]     = &&do_add_const;
+            dispatch_table[OP_SUB_CONST]     = &&do_sub_const;
+            dispatch_table[OP_MUL_CONST]     = &&do_mul_const;
+            dispatch_table[OP_DIV_CONST]     = &&do_div_const;
+            dispatch_table[OP_INC_VAR]       = &&do_inc_var;
+            dispatch_table[OP_DEC_VAR]       = &&do_dec_var;
+            dispatch_table[OP_THREAD_SPAWN]  = &&do_thread_spawn;
+            dispatch_table[OP_ASYNC_SPAWN]   = &&do_async_spawn;
+            table_init = true;
+        }
 
-                case OP_JMP_IF_FALSE: {
-                    uint32_t target = readU32();
-                    if (!pop().isTruthy()) ip = target;
-                    break;
-                }
+        #define DISPATCH_STEP() \
+            do { \
+                if ((++op_counter & 255) == 0 && GrassMemory::is_limit_exceeded()) { \
+                    cerr << "\n[GrassGreen Error]: Превышен установленный лимит памяти (memory_limit)!\n"; \
+                    return; \
+                } \
+                if (ip >= code.size()) return; \
+                goto *dispatch_table[readByte()]; \
+            } while (0)
 
-                case OP_CALL_USER:
-                case OP_CALL_FUNC: {
-                    uint32_t target_ip = readU32();
-                    call_stack.push_back(ip);
-                    ip = target_ip;
-                    break;
-                }
+        DISPATCH_STEP();
 
-                case OP_RET: {
-                    if (!call_stack.empty()) {
-                        ip = call_stack.back();
-                        call_stack.pop_back();
-                    } else {
-                        return;
-                    }
-                    break;
-                }
+    do_halt:
+        return;
 
-                case OP_LOAD_VAR: {
-                    string name = readString();
-                    auto it = vars.find(name);
-                    if (it != vars.end()) push(it->second);
-                    else if (GrassDB::has(name)) push(GrassValue::Str(GrassDB::get(name)));
-                    else push(GrassValue::Str(""));
-                    break;
-                }
-                case OP_STORE_VAR: {
-                    string name = readString();
-                    vars[std::move(name)] = pop();
-                    break;
-                }
-                case OP_POP: pop(); break;
+    do_nop:
+        DISPATCH_STEP();
 
-                case OP_ADD: {
-                    GrassValue b = pop(), a = pop();
-                    if (a.is_string || b.is_string) push(GrassValue::Str(a.toString() + b.toString()));
-                    else push(GrassValue::Num(a.num + b.num));
-                    break;
-                }
-                case OP_SUB: { GrassValue b = pop(), a = pop(); push(GrassValue::Num(a.toNumber() - b.toNumber())); break; }
-                case OP_MUL: { GrassValue b = pop(), a = pop(); push(GrassValue::Num(a.toNumber() * b.toNumber())); break; }
-                case OP_DIV: {
-                    GrassValue b = pop(), a = pop();
-                    double div = b.toNumber();
-                    push(GrassValue::Num(div != 0.0 ? a.toNumber() / div : 0.0));
-                    break;
-                }
-                case OP_MOD: {
-                    GrassValue b = pop(), a = pop();
-                    long long bv = (long long)b.toNumber();
-                    push(GrassValue::Num(bv != 0 ? (double)((long long)a.toNumber() % bv) : 0.0));
-                    break;
-                }
-                case OP_NEG: { GrassValue a = pop(); push(GrassValue::Num(-a.toNumber())); break; }
-                case OP_NOT: { GrassValue a = pop(); push(GrassValue::Num(a.isTruthy() ? 0.0 : 1.0)); break; }
-                case OP_AND: { GrassValue b = pop(), a = pop(); push(GrassValue::Num((a.isTruthy() && b.isTruthy()) ? 1.0 : 0.0)); break; }
-                case OP_OR:  { GrassValue b = pop(), a = pop(); push(GrassValue::Num((a.isTruthy() || b.isTruthy()) ? 1.0 : 0.0)); break; }
+    do_add_const: {
+        double c = readDouble();
+        GrassValue a = pop();
+        if (a.is_str()) push(GrassValue::Str(a.toString() + to_string(c)));
+        else push(GrassValue::Num(a.toNumber() + c));
+        DISPATCH_STEP();
+    }
 
-                case OP_CMP_EQ: {
-                    GrassValue b = pop(), a = pop();
-                    if (a.is_string && b.is_string) push(GrassValue::Num(a.str == b.str ? 1.0 : 0.0));
-                    else push(GrassValue::Num(a.toNumber() == b.toNumber() ? 1.0 : 0.0));
-                    break;
-                }
-                case OP_CMP_NEQ: {
-                    GrassValue b = pop(), a = pop();
-                    if (a.is_string && b.is_string) push(GrassValue::Num(a.str != b.str ? 1.0 : 0.0));
-                    else push(GrassValue::Num(a.toNumber() != b.toNumber() ? 1.0 : 0.0));
-                    break;
-                }
-                case OP_CMP_LT:  { GrassValue b = pop(), a = pop(); push(GrassValue::Num(a.toNumber() <  b.toNumber() ? 1.0 : 0.0)); break; }
-                case OP_CMP_GT:  { GrassValue b = pop(), a = pop(); push(GrassValue::Num(a.toNumber() >  b.toNumber() ? 1.0 : 0.0)); break; }
-                case OP_CMP_LTE: { GrassValue b = pop(), a = pop(); push(GrassValue::Num(a.toNumber() <= b.toNumber() ? 1.0 : 0.0)); break; }
-                case OP_CMP_GTE: { GrassValue b = pop(), a = pop(); push(GrassValue::Num(a.toNumber() >= b.toNumber() ? 1.0 : 0.0)); break; }
+    do_sub_const: {
+        double c = readDouble();
+        GrassValue a = pop();
+        push(GrassValue::Num(a.toNumber() - c));
+        DISPATCH_STEP();
+    }
 
-                case OP_LOG: {
-                    cout << pop().toString() << '\n';
-                    break;
-                }
-                case OP_PRINT_RAW: {
-                    cout << pop().toString();
-                    break;
-                }
-                case OP_LOG_EMPTY: cout << '\n'; break;
+    do_mul_const: {
+        double c = readDouble();
+        GrassValue a = pop();
+        push(GrassValue::Num(a.toNumber() * c));
+        DISPATCH_STEP();
+    }
 
-                case OP_WAIT: {
-                    int ms = (int)pop().toNumber();
-                    if (ms > 0) Sleep(ms);
-                    break;
-                }
-                case OP_ASK: {
-                    string var_name = readString();
-                    string input;
-                    getline(cin, input);
-                    vars[var_name] = GrassValue::Str(input);
-                    break;
-                }
+    do_div_const: {
+        double c = readDouble();
+        GrassValue a = pop();
+        push(GrassValue::Num(c != 0.0 ? a.toNumber() / c : 0.0));
+        DISPATCH_STEP();
+    }
 
-                case OP_LOAD_DB: {
-                    GrassDB::init_default_schema();
-                    GrassStorageEngine_Load("storage.gdb");
-                    syncDBToVars();
-                    break;
+    do_inc_var: {
+        {
+            string name = readString();
+            if (is_root_vm) {
+                if (shared_env) {
+                    std::lock_guard<std::mutex> lk(shared_env->mtx);
+                    auto it = shared_env->vars.find(name);
+                    if (it != shared_env->vars.end()) it->second = GrassValue::Num(it->second.toNumber() + 1.0);
+                    else shared_env->vars[name] = GrassValue::Num(1.0);
                 }
-
-                case OP_START_WEB: {
-                    string fname = readString();
-                    GrassWeb_LoadPage(fname);
-                    break;
-                }
-
-                case OP_CALL_BUILTIN: {
-                    string fn = readString();
-                    uint8_t argc = readByte();
-                    vector<GrassValue> args(argc);
-                    for (int i = argc - 1; i >= 0; --i) args[i] = pop();
-
-                    if (fn == "input") {
-                        if (argc >= 1) { cout << args[0].toString(); cout.flush(); }
-                        string s;
-                        if (cin >> s) {
-                            string rest;
-                            getline(cin, rest);
-                            push(GrassValue::Str(s));
-                        } else {
-                            cin.clear();
-                            push(GrassValue::Str(""));
+            } else {
+                auto it = vars.find(name);
+                if (it != vars.end()) {
+                    it->second = GrassValue::Num(it->second.toNumber() + 1.0);
+                } else {
+                    bool in_shared = false;
+                    if (shared_env) {
+                        std::lock_guard<std::mutex> lk(shared_env->mtx);
+                        auto sit = shared_env->vars.find(name);
+                        if (sit != shared_env->vars.end()) {
+                            sit->second = GrassValue::Num(sit->second.toNumber() + 1.0);
+                            in_shared = true;
                         }
                     }
-                    else if (fn == "input.getline" || fn == "getline" || fn == "ask") {
-                        if (argc >= 1) { cout << args[0].toString(); cout.flush(); }
-                        string s;
-                        getline(cin, s);
-                        push(GrassValue::Str(s));
+                    if (!in_shared) {
+                        vars[name] = GrassValue::Num(1.0);
+                    }
+                }
+            }
+        }
+        DISPATCH_STEP();
+    }
+
+    do_dec_var: {
+        {
+            string name = readString();
+            if (is_root_vm) {
+                if (shared_env) {
+                    std::lock_guard<std::mutex> lk(shared_env->mtx);
+                    auto it = shared_env->vars.find(name);
+                    if (it != shared_env->vars.end()) it->second = GrassValue::Num(it->second.toNumber() - 1.0);
+                    else shared_env->vars[name] = GrassValue::Num(-1.0);
+                }
+            } else {
+                auto it = vars.find(name);
+                if (it != vars.end()) {
+                    it->second = GrassValue::Num(it->second.toNumber() - 1.0);
+                } else {
+                    bool in_shared = false;
+                    if (shared_env) {
+                        std::lock_guard<std::mutex> lk(shared_env->mtx);
+                        auto sit = shared_env->vars.find(name);
+                        if (sit != shared_env->vars.end()) {
+                            sit->second = GrassValue::Num(sit->second.toNumber() - 1.0);
+                            in_shared = true;
+                        }
+                    }
+                    if (!in_shared) {
+                        vars[name] = GrassValue::Num(-1.0);
+                    }
+                }
+            }
+        }
+        DISPATCH_STEP();
+    }
+
+
+    do_const_num:
+        push(GrassValue::Num(readDouble()));
+        DISPATCH_STEP();
+
+    do_const_str:
+        push(GrassValue::Str(readString()));
+        DISPATCH_STEP();
+
+    do_jmp: {
+        uint32_t target = readU32();
+        if (GrassJIT::is_enabled() && target < ip) {
+            if (tryRunJitLoop(target, (uint32_t)ip)) {
+                DISPATCH_STEP();
+            }
+        }
+        ip = target;
+        DISPATCH_STEP();
+    }
+
+    do_jmp_if_false: {
+        uint32_t target = readU32();
+        if (!pop().isTruthy()) ip = target;
+        DISPATCH_STEP();
+    }
+
+    do_call_func: {
+        uint32_t target_ip = readU32();
+        call_stack.push_back(ip);
+        ip = target_ip;
+        DISPATCH_STEP();
+    }
+
+    do_ret: {
+        if (!stack.empty()) {
+            last_return_value = stack.back();
+        }
+        if (!call_stack.empty()) {
+            ip = call_stack.back();
+            call_stack.pop_back();
+        } else {
+            return;
+        }
+        DISPATCH_STEP();
+    }
+
+    do_load_var: {
+        {
+            string name = readString();
+            bool found = false;
+            GrassValue val;
+            if (!is_root_vm) {
+                auto it = vars.find(name);
+                if (it != vars.end()) {
+                    val = it->second;
+                    found = true;
+                }
+            }
+            if (!found && shared_env) {
+                std::lock_guard<std::mutex> lk(shared_env->mtx);
+                auto it = shared_env->vars.find(name);
+                if (it != shared_env->vars.end()) {
+                    val = it->second;
+                    found = true;
+                }
+            }
+            if (found) {
+                push(val);
+            } else if (GrassDB::has(name)) {
+                push(GrassValue::Str(GrassDB::get(name)));
+            } else {
+                push(GrassValue::Str(""));
+            }
+        }
+        DISPATCH_STEP();
+    }
+
+    do_store_var: {
+        {
+            string name = readString();
+            GrassValue val = pop();
+            if (is_root_vm) {
+                if (shared_env) {
+                    std::lock_guard<std::mutex> lk(shared_env->mtx);
+                    shared_env->vars[name] = std::move(val);
+                }
+            } else {
+                auto it = vars.find(name);
+                if (it != vars.end()) {
+                    it->second = std::move(val);
+                } else {
+                    bool in_shared = false;
+                    if (shared_env) {
+                        std::lock_guard<std::mutex> lk(shared_env->mtx);
+                        auto sit = shared_env->vars.find(name);
+                        if (sit != shared_env->vars.end()) {
+                            sit->second = std::move(val);
+                            in_shared = true;
+                        }
+                    }
+                    if (!in_shared) {
+                        vars[name] = std::move(val);
+                    }
+                }
+            }
+        }
+        DISPATCH_STEP();
+    }
+
+    do_pop:
+        pop();
+        DISPATCH_STEP();
+
+    do_add: {
+        GrassValue b = pop(), a = pop();
+        if (a.is_str() || b.is_str()) push(GrassValue::Str(a.toString() + b.toString()));
+        else push(GrassValue::Num(a.toNumber() + b.toNumber()));
+        DISPATCH_STEP();
+    }
+
+    do_sub: {
+        GrassValue b = pop(), a = pop();
+        push(GrassValue::Num(a.toNumber() - b.toNumber()));
+        DISPATCH_STEP();
+    }
+
+    do_mul: {
+        GrassValue b = pop(), a = pop();
+        push(GrassValue::Num(a.toNumber() * b.toNumber()));
+        DISPATCH_STEP();
+    }
+
+    do_div: {
+        GrassValue b = pop(), a = pop();
+        double div = b.toNumber();
+        push(GrassValue::Num(div != 0.0 ? a.toNumber() / div : 0.0));
+        DISPATCH_STEP();
+    }
+
+    do_mod: {
+        GrassValue b = pop(), a = pop();
+        long long bv = (long long)b.toNumber();
+        push(GrassValue::Num(bv != 0 ? (double)((long long)a.toNumber() % bv) : 0.0));
+        DISPATCH_STEP();
+    }
+
+    do_neg: {
+        GrassValue a = pop();
+        push(GrassValue::Num(-a.toNumber()));
+        DISPATCH_STEP();
+    }
+
+    do_not: {
+        GrassValue a = pop();
+        push(GrassValue::Num(a.isTruthy() ? 0.0 : 1.0));
+        DISPATCH_STEP();
+    }
+
+    do_and: {
+        GrassValue b = pop(), a = pop();
+        push(GrassValue::Num((a.isTruthy() && b.isTruthy()) ? 1.0 : 0.0));
+        DISPATCH_STEP();
+    }
+
+    do_or: {
+        GrassValue b = pop(), a = pop();
+        push(GrassValue::Num((a.isTruthy() || b.isTruthy()) ? 1.0 : 0.0));
+        DISPATCH_STEP();
+    }
+
+    do_cmp_eq: {
+        GrassValue b = pop(), a = pop();
+        if (a.is_str() && b.is_str()) {
+            const char* sa = a.asCStr();
+            const char* sb = b.asCStr();
+            push(GrassValue::Num((sa && sb && strcmp(sa, sb) == 0) ? 1.0 : 0.0));
+        } else {
+            push(GrassValue::Num(a.toNumber() == b.toNumber() ? 1.0 : 0.0));
+        }
+        DISPATCH_STEP();
+    }
+
+    do_cmp_neq: {
+        GrassValue b = pop(), a = pop();
+        if (a.is_str() && b.is_str()) {
+            const char* sa = a.asCStr();
+            const char* sb = b.asCStr();
+            push(GrassValue::Num((sa && sb && strcmp(sa, sb) != 0) ? 1.0 : 0.0));
+        } else {
+            push(GrassValue::Num(a.toNumber() != b.toNumber() ? 1.0 : 0.0));
+        }
+        DISPATCH_STEP();
+    }
+
+    do_cmp_lt: {
+        GrassValue b = pop(), a = pop();
+        push(GrassValue::Num(a.toNumber() <  b.toNumber() ? 1.0 : 0.0));
+        DISPATCH_STEP();
+    }
+
+    do_cmp_gt: {
+        GrassValue b = pop(), a = pop();
+        push(GrassValue::Num(a.toNumber() >  b.toNumber() ? 1.0 : 0.0));
+        DISPATCH_STEP();
+    }
+
+    do_cmp_lte: {
+        GrassValue b = pop(), a = pop();
+        push(GrassValue::Num(a.toNumber() <= b.toNumber() ? 1.0 : 0.0));
+        DISPATCH_STEP();
+    }
+
+    do_cmp_gte: {
+        GrassValue b = pop(), a = pop();
+        push(GrassValue::Num(a.toNumber() >= b.toNumber() ? 1.0 : 0.0));
+        DISPATCH_STEP();
+    }
+
+    do_log: {
+        {
+            string s = pop().toString();
+            GrassIO::write_stdout(s.data(), s.size());
+            GrassIO::write_stdout("\n", 1);
+        }
+        DISPATCH_STEP();
+    }
+
+    do_print_raw: {
+        {
+            string s = pop().toString();
+            GrassIO::write_stdout(s.data(), s.size());
+        }
+        DISPATCH_STEP();
+    }
+
+    do_log_empty: {
+        GrassIO::write_stdout("\n", 1);
+        DISPATCH_STEP();
+    }
+
+    do_wait: {
+        int ms = (int)pop().toNumber();
+        if (ms > 0) Sleep(ms);
+        DISPATCH_STEP();
+    }
+
+    do_ask: {
+        {
+            string var_name = readString();
+            char in_buf[1024];
+            size_t len = GrassIO::read_line(in_buf, sizeof(in_buf));
+            GrassValue v = GrassValue::Str(string(in_buf, len));
+            if (is_root_vm && shared_env) {
+                std::lock_guard<std::mutex> lk(shared_env->mtx);
+                shared_env->vars[var_name] = v;
+            } else {
+                vars[var_name] = v;
+            }
+        }
+        DISPATCH_STEP();
+    }
+
+    do_load_db: {
+        GrassDB::init_default_schema();
+        GrassStorageEngine_Load("storage.gdb");
+        syncDBToVars();
+        DISPATCH_STEP();
+    }
+
+    do_start_web: {
+        {
+            string fname = readString();
+            GrassWeb_LoadPage(fname);
+        }
+        DISPATCH_STEP();
+    }
+
+    do_call_builtin: {
+        {
+            string fn = readString();
+            uint8_t argc = readByte();
+            vector<GrassValue> args(argc);
+            for (int i = (int)argc - 1; i >= 0; --i) args[i] = pop();
+
+                    if (fn == "gin" || fn == "input") {
+                        if (argc >= 1) {
+                            string prompt = args[0].toString();
+                            GrassIO::write_stdout(prompt.data(), prompt.size());
+                        }
+                        char buf[1024];
+                        size_t len = GrassIO::read_line(buf, sizeof(buf));
+                        char* space = strpbrk(buf, " \t\r\n");
+                        if (space) *space = '\0';
+                        push(GrassValue::Str(string(buf)));
+                    }
+                    else if (fn == "gin.getline" || fn == "input.getline" || fn == "getline" || fn == "ask") {
+                        if (argc >= 1) {
+                            string prompt = args[0].toString();
+                            GrassIO::write_stdout(prompt.data(), prompt.size());
+                        }
+                        char buf[1024];
+                        size_t len = GrassIO::read_line(buf, sizeof(buf));
+                        push(GrassValue::Str(string(buf, len)));
                     }
                     else if ((fn == "len" || fn == "length" || fn == "size") && argc >= 1) {
-                        push(GrassValue::Num((double)args[0].toString().size()));
+                        if (args[0].is_array()) {
+                            GrassArray* a = args[0].asArray();
+                            push(GrassValue::Num(a ? (double)a->elements.size() : 0.0));
+                        } else {
+                            push(GrassValue::Num((double)args[0].toString().size()));
+                        }
                     }
                     else if (fn == "upper" && argc >= 1) {
                         string s = args[0].toString();
@@ -342,7 +774,7 @@ public:
                         push(GrassValue::Num(args[0].toNumber()));
                     }
                     else if (fn == "typeof" && argc >= 1) {
-                        push(GrassValue::Str(args[0].is_string ? "string" : "number"));
+                        push(GrassValue::Str(args[0].is_str() ? "string" : "number"));
                     }
                     else if (fn == "clear" || fn == "cls") {
                         system("cls");
@@ -527,7 +959,7 @@ public:
                     else if ((fn == "proc_mem" || fn == "mem") && argc >= 1) {
                         push(GrassValue::Num((double)GrassProc::mem((int64_t)args[0].toNumber())));
                     }
-                    else if (fn == "proc_exists" || (fn == "exists" && argc >= 1 && !args[0].is_string)) {
+                    else if (fn == "proc_exists" || (fn == "exists" && argc >= 1 && !args[0].is_str())) {
                         push(GrassValue::Num(GrassProc::exists((int64_t)args[0].toNumber()) ? 1.0 : 0.0));
                     }
                     else if (fn == "proc_list" || fn == "list") {
@@ -874,75 +1306,383 @@ public:
                         }
                         push(GrassValue::Str(html));
                     }
+                    // ── Многопоточность (!thread!) ──
+                    else if (fn == "thread_join" && argc >= 1) {
+                        int64_t tid = (int64_t)args[0].toNumber();
+                        push(GrassThread::join_thread(tid));
+                    }
+                    else if (fn == "thread_detach" && argc >= 1) {
+                        int64_t tid = (int64_t)args[0].toNumber();
+                        push(GrassValue::Num(GrassThread::detach_thread(tid) ? 1.0 : 0.0));
+                    }
+                    else if (fn == "thread_id") {
+                        push(GrassValue::Num((double)GrassThread::get_current_thread_id()));
+                    }
+                    else if (fn == "thread_sleep" && argc >= 1) {
+                        uint32_t ms = (uint32_t)args[0].toNumber();
+                        GrassThread::sleep_ms(ms);
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "mutex_create") {
+                        int64_t mid = GrassThread::mutex_create();
+                        push(GrassValue::Num((double)mid));
+                    }
+                    else if (fn == "mutex_lock" && argc >= 1) {
+                        int64_t mid = (int64_t)args[0].toNumber();
+                        push(GrassValue::Num(GrassThread::mutex_lock(mid) ? 1.0 : 0.0));
+                    }
+                    else if (fn == "mutex_unlock" && argc >= 1) {
+                        int64_t mid = (int64_t)args[0].toNumber();
+                        push(GrassValue::Num(GrassThread::mutex_unlock(mid) ? 1.0 : 0.0));
+                    }
+                    else if (fn == "mutex_destroy" && argc >= 1) {
+                        int64_t mid = (int64_t)args[0].toNumber();
+                        push(GrassValue::Num(GrassThread::mutex_destroy(mid) ? 1.0 : 0.0));
+                    }
+                    // ── Аппаратный доступ к памяти: MMIO и Port I/O (!mmio!) ──
+                    else if (fn == "mmio_read8" && argc >= 1) {
+                        push(GrassValue::Num((double)GrassMMIO::read8((uint64_t)args[0].toNumber())));
+                    }
+                    else if (fn == "mmio_read16" && argc >= 1) {
+                        push(GrassValue::Num((double)GrassMMIO::read16((uint64_t)args[0].toNumber())));
+                    }
+                    else if (fn == "mmio_read32" && argc >= 1) {
+                        push(GrassValue::Num((double)GrassMMIO::read32((uint64_t)args[0].toNumber())));
+                    }
+                    else if (fn == "mmio_read64" && argc >= 1) {
+                        push(GrassValue::Num((double)GrassMMIO::read64((uint64_t)args[0].toNumber())));
+                    }
+                    else if (fn == "mmio_write8" && argc >= 2) {
+                        GrassMMIO::write8((uint64_t)args[0].toNumber(), (uint8_t)args[1].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "mmio_write16" && argc >= 2) {
+                        GrassMMIO::write16((uint64_t)args[0].toNumber(), (uint16_t)args[1].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "mmio_write32" && argc >= 2) {
+                        GrassMMIO::write32((uint64_t)args[0].toNumber(), (uint32_t)args[1].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "mmio_write64" && argc >= 2) {
+                        GrassMMIO::write64((uint64_t)args[0].toNumber(), (uint64_t)args[1].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if ((fn == "io_in8" || fn == "inb") && argc >= 1) {
+                        push(GrassValue::Num((double)GrassMMIO::in8((uint16_t)args[0].toNumber())));
+                    }
+                    else if ((fn == "io_in16" || fn == "inw") && argc >= 1) {
+                        push(GrassValue::Num((double)GrassMMIO::in16((uint16_t)args[0].toNumber())));
+                    }
+                    else if ((fn == "io_in32" || fn == "inl") && argc >= 1) {
+                        push(GrassValue::Num((double)GrassMMIO::in32((uint16_t)args[0].toNumber())));
+                    }
+                    else if ((fn == "io_out8" || fn == "outb") && argc >= 2) {
+                        GrassMMIO::out8((uint16_t)args[0].toNumber(), (uint8_t)args[1].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if ((fn == "io_out16" || fn == "outw") && argc >= 2) {
+                        GrassMMIO::out16((uint16_t)args[0].toNumber(), (uint16_t)args[1].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if ((fn == "io_out32" || fn == "outl") && argc >= 2) {
+                        GrassMMIO::out32((uint16_t)args[0].toNumber(), (uint32_t)args[1].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "memory_barrier") {
+                        GrassMMIO::memory_barrier();
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "read_barrier") {
+                        GrassMMIO::read_barrier();
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "write_barrier") {
+                        GrassMMIO::write_barrier();
+                        push(GrassValue::Num(1.0));
+                    }
                     else if (vars.count(fn + "()")) push(vars[fn + "()"]);
                     else if (vars.count(fn)) push(vars[fn]);
+                    else if (shared_env && shared_env->vars.count(fn)) push(shared_env->vars[fn]);
                     else if (GrassDB::has(fn)) push(GrassValue::Str(GrassDB::get(fn)));
                     else push(GrassValue::Num(0.0));
-                    break;
                 }
+                DISPATCH_STEP();
+            }
 
-                case OP_UI_INIT: {
-                    string title = readString();
-                    int w = (int)readU32();
-                    int h = (int)readU32();
-                    string bg = readString();
-                    string fon = readString();
-                    if (vars.count(title)) title = vars[title].toString();
+    do_ui_init: {
+        {
+            string title = readString();
+            int w = (int)readU32();
+            int h = (int)readU32();
+            string bg = readString();
+            string fon = readString();
+            if (vars.count(title)) title = vars[title].toString();
 
-                    GrassGUI::reset();
-                    syncVarsToGUI();
-                    GrassGUI::exec_command("window");
-                    GrassGUI::exec_command("title(!!" + title + "!!)");
-                    GrassGUI::exec_command("size(" + to_string(w) + ", " + to_string(h) + ")");
-                    if (!bg.empty()) GrassGUI::exec_command("color(" + bg + ")");
-                    if (!fon.empty()) GrassGUI::exec_command("fon(" + fon + ")");
-                    break;
+            GrassGUI::reset();
+            syncVarsToGUI();
+            GrassGUI::exec_command("window");
+            GrassGUI::exec_command("title(!!" + title + "!!)");
+            GrassGUI::exec_command("size(" + to_string(w) + ", " + to_string(h) + ")");
+            if (!bg.empty()) GrassGUI::exec_command("color(" + bg + ")");
+            if (!fon.empty()) GrassGUI::exec_command("fon(" + fon + ")");
+        }
+        DISPATCH_STEP();
+    }
+
+    do_ui_add_elem: {
+        {
+            string type = readString();
+            string id = readString();
+            string text = readString();
+            int x = (int)readU32();
+            int y = (int)readU32();
+            int w = (int)readU32();
+            int h = (int)readU32();
+            int align = (int)readU32();
+            string color = readString();
+            int fsize = (int)readU32();
+            string fstyle = readString();
+            bool glass = (readByte() != 0);
+            string run = readString();
+
+            if (vars.count(text)) text = vars[text].toString();
+
+            GrassGUI::exec_command(type + " !!" + text + "!!");
+            if (!id.empty()) GrassGUI::exec_command("id(" + id + ")");
+            GrassGUI::exec_command("window-ob(" + to_string(x) + ", " + to_string(y) + ")");
+            GrassGUI::exec_command("size(" + to_string(w) + ", " + to_string(h) + ")");
+            if (align == 1) GrassGUI::exec_command("middle");
+            else if (align == 2) GrassGUI::exec_command("left");
+            else if (align == 3) GrassGUI::exec_command("right");
+            if (!color.empty()) GrassGUI::exec_command("text-color(" + color + ")");
+            GrassGUI::exec_command("font-size(" + to_string(fsize) + ")");
+            if (!fstyle.empty()) GrassGUI::exec_command("font-style(" + fstyle + ")");
+            if (glass) GrassGUI::exec_command("glass");
+            if (!run.empty()) GrassGUI::exec_command("run(" + run + ")");
+        }
+        DISPATCH_STEP();
+    }
+
+    do_ui_cmd: {
+        {
+            string cmd_line = readString();
+            GrassGUI::exec_command(cmd_line);
+        }
+        DISPATCH_STEP();
+    }
+
+    do_ui_show: {
+        HWND hConsole = GetConsoleWindow();
+        if (hConsole) ShowWindow(hConsole, SW_HIDE);
+        syncVarsToGUI();
+        GrassGUI::show_window();
+        DISPATCH_STEP();
+    }
+
+    do_new_array: {
+        uint32_t count = readU32();
+        GrassArray* arr = new GrassArray();
+        arr->elements.resize(count);
+        for (int i = (int)count - 1; i >= 0; --i) {
+            arr->elements[i] = pop();
+        }
+        heap_arrays.push_back(arr);
+        push(GrassValue::Array(arr));
+        DISPATCH_STEP();
+    }
+
+    do_get_index: {
+        GrassValue obj = pop();
+        GrassValue idx = pop();
+        if (obj.is_array()) {
+            GrassArray* arr = obj.asArray();
+            long long i = (long long)idx.toNumber();
+            if (arr && i >= 0 && (size_t)i < arr->elements.size()) {
+                push(arr->elements[i]);
+            } else {
+                push(GrassValue::Nil());
+            }
+        } else if (obj.is_str()) {
+            string s = obj.toString();
+            long long i = (long long)idx.toNumber();
+            if (i >= 0 && (size_t)i < s.size()) {
+                push(GrassValue::Str(string(1, s[i])));
+            } else {
+                push(GrassValue::Str(""));
+            }
+        } else {
+            push(GrassValue::Nil());
+        }
+        DISPATCH_STEP();
+    }
+
+    do_set_index: {
+        GrassValue obj = pop();
+        GrassValue val = pop();
+        GrassValue idx = pop();
+        if (obj.is_array()) {
+            GrassArray* arr = obj.asArray();
+            long long i = (long long)idx.toNumber();
+            if (arr && i >= 0) {
+                if ((size_t)i >= arr->elements.size()) {
+                    arr->elements.resize(i + 1, GrassValue::Nil());
                 }
-                case OP_UI_ADD_ELEM: {
-                    string type = readString();
-                    string id = readString();
-                    string text = readString();
-                    int x = (int)readU32();
-                    int y = (int)readU32();
-                    int w = (int)readU32();
-                    int h = (int)readU32();
-                    int align = (int)readU32();
-                    string color = readString();
-                    int fsize = (int)readU32();
-                    string fstyle = readString();
-                    bool glass = (readByte() != 0);
-                    string run = readString();
+                arr->elements[i] = val;
+            }
+        }
+        DISPATCH_STEP();
+    }
 
-                    if (vars.count(text)) text = vars[text].toString();
+    do_array_push: {
+        GrassValue obj = pop();
+        GrassValue val = pop();
+        if (obj.is_array()) {
+            GrassArray* arr = obj.asArray();
+            if (arr) {
+                arr->elements.push_back(val);
+            }
+        }
+        push(val);
+        DISPATCH_STEP();
+    }
 
-                    GrassGUI::exec_command(type + " !!" + text + "!!");
-                    if (!id.empty()) GrassGUI::exec_command("id(" + id + ")");
-                    GrassGUI::exec_command("window-ob(" + to_string(x) + ", " + to_string(y) + ")");
-                    GrassGUI::exec_command("size(" + to_string(w) + ", " + to_string(h) + ")");
-                    if (align == 1) GrassGUI::exec_command("middle");
-                    else if (align == 2) GrassGUI::exec_command("left");
-                    else if (align == 3) GrassGUI::exec_command("right");
-                    if (!color.empty()) GrassGUI::exec_command("text-color(" + color + ")");
-                    GrassGUI::exec_command("font-size(" + to_string(fsize) + ")");
-                    if (!fstyle.empty()) GrassGUI::exec_command("font-style(" + fstyle + ")");
-                    if (glass) GrassGUI::exec_command("glass");
-                    if (!run.empty()) GrassGUI::exec_command("run(" + run + ")");
-                    break;
+    do_array_pop: {
+        GrassValue obj = pop();
+        if (obj.is_array()) {
+            GrassArray* arr = obj.asArray();
+            if (arr && !arr->elements.empty()) {
+                GrassValue val = arr->elements.back();
+                arr->elements.pop_back();
+                push(val);
+            } else {
+                push(GrassValue::Nil());
+            }
+        } else {
+            push(GrassValue::Nil());
+        }
+        DISPATCH_STEP();
+    }
+
+    do_new_struct: {
+        {
+            string s_name = readString();
+            auto it = g_struct_registry.find(s_name);
+            if (it != g_struct_registry.end()) {
+                GrassStructDef& def = it->second;
+                GrassStructInstance* inst = (GrassStructInstance*)g_vm_arena.alloc(sizeof(GrassStructInstance));
+                uint8_t* buf = (uint8_t*)g_vm_arena.alloc(def.total_size);
+                if (buf) memset(buf, 0, def.total_size);
+                inst->def = &def;
+                inst->data = buf;
+                push(GrassValue::Struct(inst));
+            } else {
+                push(GrassValue::Nil());
+            }
+        }
+        DISPATCH_STEP();
+    }
+
+    do_get_field: {
+        {
+            string f_name = readString();
+            GrassValue obj = pop();
+            if (obj.is_struct()) {
+                GrassStructInstance* inst = obj.asStruct();
+                if (inst && inst->def && inst->data) {
+                    auto it = inst->def->field_indices.find(f_name);
+                    if (it != inst->def->field_indices.end()) {
+                        const GrassFieldDef& fd = inst->def->fields[it->second];
+                        uint8_t* ptr = inst->data + fd.offset;
+                        switch (fd.type) {
+                            case GrassFieldType::U8:     push(GrassValue::Num((double)*(uint8_t*)ptr)); break;
+                            case GrassFieldType::U16:    push(GrassValue::Num((double)*(uint16_t*)ptr)); break;
+                            case GrassFieldType::U32:    push(GrassValue::Num((double)*(uint32_t*)ptr)); break;
+                            case GrassFieldType::INT:    push(GrassValue::Num((double)*(int32_t*)ptr)); break;
+                            case GrassFieldType::FLOAT:  push(GrassValue::Num((double)*(float*)ptr)); break;
+                            case GrassFieldType::DOUBLE: push(GrassValue::Num(*(double*)ptr)); break;
+                            case GrassFieldType::U64:    push(GrassValue::Num((double)*(uint64_t*)ptr)); break;
+                            case GrassFieldType::BOOL:   push(GrassValue::Bool(*(uint8_t*)ptr != 0)); break;
+                            case GrassFieldType::STRING: {
+                                const char* s = *(const char**)ptr;
+                                push(GrassValue::Str(s ? s : ""));
+                                break;
+                            }
+                            case GrassFieldType::VALUE:
+                                push(*(GrassValue*)ptr);
+                                break;
+                        }
+                    } else {
+                        push(GrassValue::Nil());
+                    }
+                } else {
+                    push(GrassValue::Nil());
                 }
-                case OP_UI_CMD: {
-                    string cmd_line = readString();
-                    GrassGUI::exec_command(cmd_line);
-                    break;
-                }
-                case OP_UI_SHOW: {
-                    HWND hConsole = GetConsoleWindow();
-                    if (hConsole) ShowWindow(hConsole, SW_HIDE);
-                    syncVarsToGUI();
-                    GrassGUI::show_window();
-                    break;
+            } else {
+                push(GrassValue::Nil());
+            }
+        }
+        DISPATCH_STEP();
+    }
+
+    do_set_field: {
+        {
+            string f_name = readString();
+            GrassValue obj = pop();
+            GrassValue val = pop();
+            if (obj.is_struct()) {
+                GrassStructInstance* inst = obj.asStruct();
+                if (inst && inst->def && inst->data) {
+                    auto it = inst->def->field_indices.find(f_name);
+                    if (it != inst->def->field_indices.end()) {
+                        const GrassFieldDef& fd = inst->def->fields[it->second];
+                        uint8_t* ptr = inst->data + fd.offset;
+                        switch (fd.type) {
+                            case GrassFieldType::U8:     *(uint8_t*)ptr  = (uint8_t)val.toNumber(); break;
+                            case GrassFieldType::U16:    *(uint16_t*)ptr = (uint16_t)val.toNumber(); break;
+                            case GrassFieldType::U32:    *(uint32_t*)ptr = (uint32_t)val.toNumber(); break;
+                            case GrassFieldType::INT:    *(int32_t*)ptr  = (int32_t)val.toNumber(); break;
+                            case GrassFieldType::FLOAT:  *(float*)ptr    = (float)val.toNumber(); break;
+                            case GrassFieldType::DOUBLE: *(double*)ptr   = val.toNumber(); break;
+                            case GrassFieldType::U64:    *(uint64_t*)ptr = (uint64_t)val.toNumber(); break;
+                            case GrassFieldType::BOOL:   *(uint8_t*)ptr  = val.isTruthy() ? 1 : 0; break;
+                            case GrassFieldType::STRING: {
+                                string s = val.toString();
+                                char* arena_s = g_vm_arena.alloc_string(s.c_str(), s.size());
+                                *(const char**)ptr = arena_s;
+                                break;
+                            }
+                            case GrassFieldType::VALUE:
+                                *(GrassValue*)ptr = val;
+                                break;
+                        }
+                    }
                 }
             }
         }
+        DISPATCH_STEP();
+    }
+
+    do_thread_spawn: {
+        uint32_t entry_ip = readU32();
+        uint8_t argc = readByte();
+        int64_t tid = spawnThread(entry_ip, argc, false);
+        push(GrassValue::Num((double)tid));
+        DISPATCH_STEP();
+    }
+
+    do_async_spawn: {
+        uint32_t entry_ip = readU32();
+        uint8_t argc = readByte();
+        int64_t tid = spawnThread(entry_ip, argc, true);
+        push(GrassValue::Num((double)tid));
+        DISPATCH_STEP();
+    }
+
+    do_unknown:
+        DISPATCH_STEP();
+
+#undef DISPATCH_STEP
     }
 };
 
@@ -956,17 +1696,25 @@ void InstallGrassGreenEcosystem() {
     fs::path root_dir = exe_path.parent_path();
     if (root_dir.filename() == "bin") root_dir = root_dir.parent_path();
 
-    cout << "\n=== [GrassGreen v3.0 Installer] ===\n";
+    cout << "\n=== [GrassGreen (G&G) v4.0.0 Installer] ===\n";
 
     {
+        ofstream grgcmd(root_dir / "grg.cmd");
+        grgcmd << "@echo off\n\"%~dp0bin\\grassc.exe\" %*\n";
+    }
+    {
         ofstream gcmd(root_dir / "grass.cmd");
-        gcmd << "@echo off\n\"" << exe_path.string() << "\" ./! %*\n";
+        gcmd << "@echo off\n\"%~dp0bin\\grassc.exe\" ./! %*\n";
     }
     {
         ofstream ggcmd(root_dir / "gg.cmd");
-        ggcmd << "@echo off\n\"" << exe_path.string() << "\" ./! %*\n";
+        ggcmd << "@echo off\n\"%~dp0bin\\grassc.exe\" ./! %*\n";
     }
-    cout << "[+] Созданы быстрые команды: grass <файл.grass> и gg <файл.grass>\n";
+    try {
+        fs::copy_file(exe_path, root_dir / "bin" / "grg.exe", fs::copy_options::overwrite_existing);
+    } catch (...) {}
+    cout << "[+] Созданы системные команды: grg <файл.grass>, grass <файл.grass> и gg <файл.grass>\n";
+    cout << "[+] Бинарник grg.exe продублирован в bin/grg.exe для интеграции в PATH.\n";
 
     const char* userprofile = getenv("USERPROFILE");
     if (userprofile) {
@@ -1038,9 +1786,9 @@ void InstallGrassGreenEcosystem() {
            << "    { \"name\": \"string.quoted.double.grass\", \"begin\": \"\\\"\", \"end\": \"\\\"\" },\n"
            << "    { \"name\": \"string.quoted.single.grass\", \"begin\": \"'\", \"end\": \"'\" },\n"
            << "    { \"name\": \"constant.other.color.grass\", \"match\": \"#[0-9a-fA-F]{3,8}\\\\b\" },\n"
-           << "    { \"name\": \"keyword.control.grass\", \"match\": \"\\\\b(if|else|chek|check|for|while|again|loop|break|stop|stoped|return|exit|wait|sleep|window|cout|cin|endl|text|script-start|script-end|on-click|end-click|on-input|end-input|on-hover|end-hover|on-key|end-key|every|end-every|end-wait|end-chek|table|end-table|box-start|box-end|row-start|row-end|col-start|col-end)\\\\b\" },\n"
+           << "    { \"name\": \"keyword.control.grass\", \"match\": \"\\\\b(if|else|chek|check|for|while|again|loop|break|stop|stoped|return|exit|wait|sleep|window|gout|gin|cout|cin|endl|text|script-start|script-end|on-click|end-click|on-input|end-input|on-hover|end-hover|on-key|end-key|every|end-every|end-wait|end-chek|table|end-table|box-start|box-end|row-start|row-end|col-start|col-end)\\\\b\" },\n"
            << "    { \"name\": \"storage.type.grass\", \"match\": \"\\\\b(int|take|void|func|alt|fn|string|str|float|double|num|bool|auto|set|var|let|fany|invent)\\\\b\" },\n"
-           << "    { \"name\": \"support.function.builtin.grass\", \"match\": \"\\\\b(main|input\\\\.getline|input|log|print|println|ask|random|random_txt|stop_random|play_random|memory_usit|memory_separ|memory_auto|memory_clean|memory_free|memory_alloc|memory_free_block|memory_limit|memory_dump|len|length|upper|lower|substr|replace|contains|trim|to_str|to_num|typeof|clear|cls|color|time|clock_ms|beep|msgbox|system|sqrt|discor|sin|cos|abs|round|floor|ceil|pow|clamp|min|max|rand|lerp|creat|redact|read|exists|remove|open|run|db_open|db_save|db_set|db_get|db_del|db_has|db_inc|db_dec|db_clear|db_backup|db_export_json|db_hash|db_encrypt|db_decrypt|gui_cmd|gui_get|gui_set|gui_show|gui_file|web_start|web_compile|title|size-top|theme|fon|iconP|button|label|enter|icon|video|window-ob|middle|left|right|text-color|button-color|font-size|font-style|radius|pad|shadow|glass|click-ob|switch|set-text|set-val|clear-val|repaint-color|repaint-bg|hide|show|toggle|play-anim)\\\\b\" },\n"
+           << "    { \"name\": \"support.function.builtin.grass\", \"match\": \"\\\\b(main|gin\\\\.getline|gin|input\\\\.getline|input|log|print|println|ask|random|random_txt|stop_random|play_random|memory_usit|memory_separ|memory_auto|memory_clean|memory_free|memory_alloc|memory_free_block|memory_limit|memory_dump|len|length|upper|lower|substr|replace|contains|trim|to_str|to_num|typeof|clear|cls|color|time|clock_ms|beep|msgbox|system|sqrt|discor|sin|cos|abs|round|floor|ceil|pow|clamp|min|max|rand|lerp|creat|redact|read|exists|remove|open|run|db_open|db_save|db_set|db_get|db_del|db_has|db_inc|db_dec|db_clear|db_backup|db_export_json|db_hash|db_encrypt|db_decrypt|gui_cmd|gui_get|gui_set|gui_show|gui_file|web_start|web_compile|title|size-top|theme|fon|iconP|button|label|enter|icon|video|window-ob|middle|left|right|text-color|button-color|font-size|font-style|radius|pad|shadow|glass|click-ob|switch|set-text|set-val|clear-val|repaint-color|repaint-bg|hide|show|toggle|play-anim)\\\\b\" },\n"
            << "    { \"name\": \"constant.numeric.grass\", \"match\": \"\\\\b\\\\d+(\\\\.\\\\d+)?\\\\b\" },\n"
            << "    { \"name\": \"constant.language.boolean.grass\", \"match\": \"\\\\b(true|false)\\\\b\" }\n"
            << "  ]\n"
@@ -1136,7 +1884,7 @@ void InstallGrassGreenEcosystem() {
 }
 
 // ============================================================================
-// 3. СВЕРХБЫСТРЫЙ WIN32 PE-PACKER (ИНКРЕМЕНТАЛЬНАЯ ДОЗАПИСЬ ЗА < 2 МС)
+// 3. WIN32 PE-PACKER (ИНКРЕМЕНТАЛЬНАЯ ДОЗАПИСЬ)
 // ============================================================================
 static const char MAGIC_FOOTER[8] = {'G','R','A','S','S','E','X','E'};
 
@@ -1186,8 +1934,10 @@ bool CheckAndRunEmbeddedBytecode() {
     }
     CloseHandle(hFile);
 
+    g_vm_arena.reset();
     GrassVM vm(bytecode);
     vm.execute();
+    GrassThread::shutdown();
     return true;
 }
 
@@ -1304,58 +2054,241 @@ bool BuildStandaloneExe(const string& output_exe, const vector<uint8_t>& bytecod
     return true;
 }
 
-bool CompileAndRunFile(string input_path, bool build_only) {
-    auto t_start = chrono::high_resolution_clock::now();
+// ============================================================================
+// 4. ОПЦИИ КОМПИЛЯТОРА И CLI ФЛАГИ (ROADMAP G&G 4.0)
+// ============================================================================
+struct CompilerOptions {
+    string input_file = "";
+    string output_file = "";
+    bool emit_bytecode_only = false; // -c (.grassc)
+    bool emit_exe = false;           // -emit-exe (.exe)
+    bool run_after_build = true;     // ./!, --run, -r, или по умолчанию для скриптов
+    bool explicit_run = false;
+    int opt_level = 2;               // -O0, -O1, -O2, -O3 (default: 2)
+    bool dump_ast = false;           // --dump-ast
+    bool dump_disasm = false;        // -S
+    bool print_timing = false;       // --time
+    bool freestanding = false;       // --freestanding
+    bool enable_jit = false;         // --jit (x86_64 JIT)
+    bool lang_ru = false;            // default: English, true: Russian (--ru)
+    bool show_version = false;       // -V, --version
+    bool show_help = false;          // -h, --help
+    bool install = false;            // --install, install, -i
+};
 
-    if (input_path.find('.') == string::npos) {
-        if (fs::exists(input_path + ".grass")) input_path += ".grass";
+void PrintVersion(bool lang_ru) {
+    if (lang_ru) {
+        cout << "GrassGreen (G&G) v4.0.0 (x86_64-win32)\n"
+             << "Официальный компилятор и ядро выполнения (grg / grassc)\n"
+             << "Сайт: grassgreen.info | Репозиторий: github.com/m1oky/GrassGreen\n";
+    } else {
+        cout << "GrassGreen (G&G) v4.0.0 (x86_64-win32)\n"
+             << "Official Compiler & Freestanding Execution Core (grg / grassc)\n"
+             << "Domain: grassgreen.info | Repository: github.com/m1oky/GrassGreen\n";
+    }
+}
+
+void PrintHelp(bool lang_ru) {
+    if (lang_ru) {
+        cout << "GrassGreen (G&G) v4.0.0 Компилятор и Рантайм (grg / grassc)\n\n"
+             << "Использование:\n"
+             << "  grg [опции] <файл.grass>\n"
+             << "  grassc [опции] <файл.grass>\n\n"
+             << "Опции сборки и вывода:\n"
+             << "  -o <файл>        Указать путь и имя выходного файла\n"
+             << "  -c               Собрать только чистый бинарный байт-код (.grassc)\n"
+             << "  -emit-exe        Упаковать байт-код в автономный исполняемый .exe\n"
+             << "  -r, --run, ./!   Скомпилировать и немедленно запустить в VM\n"
+             << "  -O0              Debug: сборка без оптимизаций\n"
+             << "  -O2, -O3         Оптимизация байт-кода (по умолчанию: -O2)\n"
+             << "  --jit            Включить нативный JIT-компилятор x86_64 для горячих циклов\n"
+             << "  --freestanding   Автономный режим ядра (без libc/C++ рантайма)\n\n"
+             << "Диагностика и анализ:\n"
+             << "  --dump-ast       Распечатать дерево токенов (AST) и C-ABI структуры\n"
+             << "  -S               Распечатать читаемый дизассемблер байт-кода\n"
+             << "  --time           Замерить время каждого этапа компиляции (мс)\n\n"
+             << "Локализация и справка:\n"
+             << "  --ru             Выводить сообщения компилятора на русском\n"
+             << "  --en             Выводить сообщения компилятора на английском (по умолчанию)\n"
+             << "  -V, --version    Показать информацию о версии\n"
+             << "  -h, --help       Показать эту справку\n"
+             << "  --install, -i    Установить инструментарий G&G и расширение VS Code\n";
+    } else {
+        cout << "GrassGreen (G&G) v4.0.0 Compiler & Runner (grg / grassc)\n\n"
+             << "Usage:\n"
+             << "  grg [options] <source.grass>\n"
+             << "  grassc [options] <source.grass>\n\n"
+             << "Build & Output Options:\n"
+             << "  -o <filename>    Specify output file name\n"
+             << "  -c               Compile to pure bytecode (.grassc) without .exe wrapper\n"
+             << "  -emit-exe        Package bytecode into standalone native Win32 .exe\n"
+             << "  -r, --run, ./!   Compile and execute immediately in VM\n"
+             << "  -O0              Debug: instant build without optimizations\n"
+             << "  -O2, -O3         Enable bytecode optimizations (default: -O2)\n"
+             << "  --jit            Enable native x86_64 JIT (Just-In-Time) compiler for loops\n"
+             << "  --freestanding   Freestanding kernel build (independent of libc/C++)\n\n"
+             << "Diagnostics & Inspection:\n"
+             << "  --dump-ast       Dump syntax tree (AST) and C-ABI struct layouts\n"
+             << "  -S               Print disassembled human-readable bytecode\n"
+             << "  --time           Display execution time for each compilation stage (ms)\n\n"
+             << "Localization & Info:\n"
+             << "  --ru             Switch compiler messages to Russian\n"
+             << "  --en             Switch compiler messages to English (default)\n"
+             << "  -V, --version    Show version information\n"
+             << "  -h, --help       Display this help message\n"
+             << "  --install, -i    Install G&G toolchain and VS Code extension\n";
+    }
+}
+
+void DisassembleBytecode(const vector<uint8_t>& code, bool lang_ru) {
+    if (lang_ru) {
+        cout << "\n=== ДИЗАССЕМБЛЕР БАЙТ-КОДА GRASSGREEN (G&G v4.0.0) ===\n";
+        cout << "Смещение  Опкод            Аргументы\n";
+        cout << "--------------------------------------------------------\n";
+    } else {
+        cout << "\n=== GRASSGREEN (G&G v4.0.0) BYTECODE DISASSEMBLY ===\n";
+        cout << "Offset    OpCode           Arguments\n";
+        cout << "--------------------------------------------------------\n";
     }
 
-    // Быстрое чтение исходного кода одним непрерывным блоком
-    ifstream in(input_path, ios::binary | ios::ate);
-    if (!in.is_open()) {
-        cerr << "[GrassError]: Файл не найден -> " << input_path << endl;
-        return false;
+    size_t ip = 0;
+    while (ip < code.size()) {
+        size_t cur_ip = ip;
+        uint8_t op = code[ip++];
+        cout << setw(6) << setfill('0') << cur_ip << "    " << setfill(' ');
+
+        auto readU32 = [&]() -> uint32_t {
+            if (ip + 4 > code.size()) { ip = code.size(); return 0; }
+            uint32_t v;
+            memcpy(&v, &code[ip], 4);
+            ip += 4;
+            return v;
+        };
+
+        auto readDouble = [&]() -> double {
+            if (ip + 8 > code.size()) { ip = code.size(); return 0.0; }
+            double d;
+            memcpy(&d, &code[ip], 8);
+            ip += 8;
+            return d;
+        };
+
+        auto readString = [&]() -> string {
+            uint32_t len = readU32();
+            if (ip + len > code.size()) { ip = code.size(); return ""; }
+            string s((const char*)&code[ip], len);
+            ip += len;
+            return s;
+        };
+
+        switch (op) {
+            case OP_HALT:         cout << "OP_HALT\n"; break;
+            case OP_CONST_NUM:    cout << "OP_CONST_NUM    " << readDouble() << "\n"; break;
+            case OP_CONST_STR:    cout << "OP_CONST_STR    \"" << readString() << "\"\n"; break;
+            case OP_LOAD_VAR:     cout << "OP_LOAD_VAR     \"" << readString() << "\"\n"; break;
+            case OP_STORE_VAR:    cout << "OP_STORE_VAR    \"" << readString() << "\"\n"; break;
+            case OP_POP:          cout << "OP_POP\n"; break;
+            case OP_ADD:          cout << "OP_ADD\n"; break;
+            case OP_SUB:          cout << "OP_SUB\n"; break;
+            case OP_MUL:          cout << "OP_MUL\n"; break;
+            case OP_DIV:          cout << "OP_DIV\n"; break;
+            case OP_NEG:          cout << "OP_NEG\n"; break;
+            case OP_MOD:          cout << "OP_MOD\n"; break;
+            case OP_CMP_EQ:       cout << "OP_CMP_EQ\n"; break;
+            case OP_CMP_NEQ:      cout << "OP_CMP_NEQ\n"; break;
+            case OP_CMP_LT:       cout << "OP_CMP_LT\n"; break;
+            case OP_CMP_GT:       cout << "OP_CMP_GT\n"; break;
+            case OP_CMP_LTE:      cout << "OP_CMP_LTE\n"; break;
+            case OP_CMP_GTE:      cout << "OP_CMP_GTE\n"; break;
+            case OP_AND:          cout << "OP_AND\n"; break;
+            case OP_OR:           cout << "OP_OR\n"; break;
+            case OP_NOT:          cout << "OP_NOT\n"; break;
+            case OP_JMP:          cout << "OP_JMP          -> " << readU32() << "\n"; break;
+            case OP_JMP_IF_FALSE: cout << "OP_JMP_IF_FALSE -> " << readU32() << "\n"; break;
+            case OP_CALL_FUNC:    cout << "OP_CALL_FUNC    -> " << readU32() << "\n"; break;
+            case OP_RET:          cout << "OP_RET\n"; break;
+            case OP_LOG:          cout << "OP_LOG\n"; break;
+            case OP_LOG_EMPTY:    cout << "OP_LOG_EMPTY\n"; break;
+            case OP_WAIT:         cout << "OP_WAIT\n"; break;
+            case OP_ASK:          cout << "OP_ASK          \"" << readString() << "\"\n"; break;
+            case OP_PRINT_RAW:    cout << "OP_PRINT_RAW\n"; break;
+            case OP_CALL_BUILTIN: {
+                string fn = readString();
+                uint8_t argc = (ip < code.size()) ? code[ip++] : 0;
+                cout << "OP_CALL_BUILTIN \"" << fn << "\" (argc=" << (int)argc << ")\n";
+                break;
+            }
+            case OP_LOAD_DB:      cout << "OP_LOAD_DB\n"; break;
+            case OP_START_WEB:    cout << "OP_START_WEB    \"" << readString() << "\"\n"; break;
+            case OP_UI_INIT:      cout << "OP_UI_INIT\n"; break;
+            case OP_UI_ADD_ELEM:  cout << "OP_UI_ADD_ELEM\n"; break;
+            case OP_UI_SHOW:      cout << "OP_UI_SHOW\n"; break;
+            case OP_UI_CMD:       cout << "OP_UI_CMD       \"" << readString() << "\"\n"; break;
+            case OP_NEW_ARRAY:    cout << "OP_NEW_ARRAY    count=" << readU32() << "\n"; break;
+            case OP_GET_INDEX:    cout << "OP_GET_INDEX\n"; break;
+            case OP_SET_INDEX:    cout << "OP_SET_INDEX\n"; break;
+            case OP_ARRAY_PUSH:   cout << "OP_ARRAY_PUSH\n"; break;
+            case OP_ARRAY_POP:    cout << "OP_ARRAY_POP\n"; break;
+            case OP_NEW_STRUCT:   cout << "OP_NEW_STRUCT   \"" << readString() << "\"\n"; break;
+            case OP_GET_FIELD:    cout << "OP_GET_FIELD    \"" << readString() << "\"\n"; break;
+            case OP_SET_FIELD:    cout << "OP_SET_FIELD    \"" << readString() << "\"\n"; break;
+            case OP_JUMP:         cout << "OP_JUMP         -> " << readU32() << "\n"; break;
+            case OP_CALL_USER:    cout << "OP_CALL_USER    -> " << readU32() << "\n"; break;
+            case OP_NOP:          cout << "OP_NOP\n"; break;
+            case OP_ADD_CONST:    cout << "OP_ADD_CONST    " << readDouble() << "\n"; break;
+            case OP_SUB_CONST:    cout << "OP_SUB_CONST    " << readDouble() << "\n"; break;
+            case OP_MUL_CONST:    cout << "OP_MUL_CONST    " << readDouble() << "\n"; break;
+            case OP_DIV_CONST:    cout << "OP_DIV_CONST    " << readDouble() << "\n"; break;
+            case OP_INC_VAR:      cout << "OP_INC_VAR      \"" << readString() << "\"\n"; break;
+            case OP_DEC_VAR:      cout << "OP_DEC_VAR      \"" << readString() << "\"\n"; break;
+            case OP_THREAD_SPAWN: {
+                uint32_t entry = readU32();
+                uint8_t argc = (ip < code.size()) ? code[ip++] : 0;
+                cout << "OP_THREAD_SPAWN  -> " << entry << " (argc=" << (int)argc << ")\n";
+                break;
+            }
+            case OP_ASYNC_SPAWN: {
+                uint32_t entry = readU32();
+                uint8_t argc = (ip < code.size()) ? code[ip++] : 0;
+                cout << "OP_ASYNC_SPAWN   -> " << entry << " (argc=" << (int)argc << ")\n";
+                break;
+            }
+            default:              cout << "OP_UNKNOWN_0x" << hex << (int)op << dec << "\n"; break;
+        }
     }
-    streamsize src_size = in.tellg();
-    in.seekg(0, ios::beg);
-    string source_code((size_t)max((streamsize)0, src_size), '\0');
-    if (src_size > 0) in.read(&source_code[0], src_size);
-    in.close();
+    cout << "--------------------------------------------------------\n\n";
+}
 
-    Lexer lexer(source_code);
-    vector<GrassToken> tokens = lexer.tokenize();
-
-    BytecodeCompiler compiler(tokens, input_path);
-    compiler.compileProgram();
-
-    if (compiler.has_error) {
-        cerr << "\n[GrassCompiler]: Сборка остановлена из-за ошибок синтаксиса в " << input_path << "!\n";
-        return false;
+void DumpAST(const vector<GrassToken>& tokens, const string& filename, bool lang_ru) {
+    if (lang_ru) {
+        cout << "\n=== ДАМП СИНТАКСИЧЕСКОГО ДЕРЕВА (AST): " << filename << " ===\n";
+    } else {
+        cout << "\n=== ABSTRACT SYNTAX TREE (AST) DUMP: " << filename << " ===\n";
     }
-
-    string output_exe = input_path;
-    size_t dot = output_exe.rfind('.');
-    if (dot != string::npos) output_exe = output_exe.substr(0, dot) + ".exe";
-    else output_exe += ".exe";
-
-    bool packed_ok = BuildStandaloneExe(output_exe, compiler.code);
-
-    auto t_end = chrono::high_resolution_clock::now();
-    double elapsed_ms = chrono::duration<double, std::milli>(t_end - t_start).count();
-
-    if (packed_ok) {
-        cout << "[GrassCompiler]: Скомпилировано " << compiler.code.size()
-             << " байт двоичного кода -> " << output_exe
-             << " (" << fixed << setprecision(2) << elapsed_ms << " ms)" << endl;
+    int cur_line = -1;
+    for (const auto& tok : tokens) {
+        if (tok.kind == TOK_EOF) break;
+        if (tok.line != cur_line) {
+            cur_line = tok.line;
+            cout << "\n[Line " << setw(3) << setfill('0') << cur_line << "] " << setfill(' ');
+        }
+        cout << tok.text << " ";
     }
-
-    if (!build_only) {
-        cout << "[GrassVM]: Исполнение двоичного кода...\n" << endl;
-        GrassVM vm(compiler.code);
-        vm.execute();
+    cout << "\n\n";
+    if (!g_struct_registry.empty()) {
+        if (lang_ru) cout << "Зарегистрированные структуры (C-ABI Data Layout):\n";
+        else cout << "Registered Structures (C-ABI Data Layout):\n";
+        for (const auto& kv : g_struct_registry) {
+            const auto& def = kv.second;
+            cout << "  struct " << def.name << " (Size: " << def.total_size 
+                 << " B, Alignment: " << def.alignment << " B):\n";
+            for (const auto& f : def.fields) {
+                cout << "    +" << f.offset << " B: " << f.name << " [size=" << f.size 
+                     << " B, align=" << f.alignment << " B]\n";
+            }
+        }
+        cout << "\n";
     }
-    return true;
 }
 
 string FindDefaultGrassFile() {
@@ -1372,6 +2305,262 @@ string FindDefaultGrassFile() {
     return "";
 }
 
+bool ProcessCompilation(CompilerOptions& opt) {
+    auto t_start = chrono::high_resolution_clock::now();
+
+    string input_path = opt.input_file;
+    if (input_path.empty()) {
+        input_path = FindDefaultGrassFile();
+        if (input_path.empty()) {
+            if (opt.lang_ru) cerr << "[GrassError]: Не указан входной файл .grass. Используйте 'grg -h' для справки.\n";
+            else cerr << "[GrassError]: No .grass input file specified. Use 'grg -h' for help.\n";
+            return false;
+        }
+    }
+
+    if (input_path.find('.') == string::npos) {
+        if (fs::exists(input_path + ".grass")) input_path += ".grass";
+        else if (fs::exists(input_path + ".grassc")) input_path += ".grassc";
+    }
+
+    // Прямой запуск чистого байт-кода .grassc
+    if (input_path.size() >= 7 && input_path.substr(input_path.size() - 7) == ".grassc") {
+        ifstream in_bc(input_path, ios::binary | ios::ate);
+        if (!in_bc.is_open()) {
+            if (opt.lang_ru) cerr << "[GrassError]: Не удалось открыть файл байт-кода -> " << input_path << "\n";
+            else cerr << "[GrassError]: Cannot open bytecode file -> " << input_path << "\n";
+            return false;
+        }
+        streamsize sz = in_bc.tellg();
+        in_bc.seekg(0, ios::beg);
+        vector<uint8_t> bc_data((size_t)sz);
+        if (sz > 0) in_bc.read((char*)bc_data.data(), sz);
+        in_bc.close();
+
+        if (opt.dump_disasm) {
+            DisassembleBytecode(bc_data, opt.lang_ru);
+        }
+        if (opt.run_after_build) {
+            if (opt.lang_ru) cout << "[GrassVM]: Исполнение байт-кода...\n\n";
+            else cout << "[GrassVM]: Executing bytecode...\n\n";
+            g_vm_arena.reset();
+            GrassVM vm(bc_data);
+            vm.execute();
+            GrassThread::shutdown();
+        if (opt.print_timing && GrassJIT::getStats().loops_compiled > 0) {
+            const auto& js = GrassJIT::getStats();
+            if (opt.lang_ru) {
+                cout << "\n[JIT-Компилятор x86_64]: Скомпилировано циклов: " << js.loops_compiled
+                     << " (" << js.machine_code_bytes << " B машинного кода x86_64, время JIT: "
+                     << js.compile_time_ms << " ms)\n";
+            } else {
+                cout << "\n[JIT x86_64]: Loops compiled: " << js.loops_compiled
+                     << " (" << js.machine_code_bytes << " B native x86_64 code, JIT compile: "
+                     << js.compile_time_ms << " ms)\n";
+            }
+        }
+        }
+        return true;
+    }
+
+    // 1. Этап I/O: Чтение исходного кода
+    auto t_read_start = chrono::high_resolution_clock::now();
+    ifstream in(input_path, ios::binary | ios::ate);
+    if (!in.is_open()) {
+        if (opt.lang_ru) cerr << "[GrassError]: Файл не найден -> " << input_path << "\n";
+        else cerr << "[GrassError]: File not found -> " << input_path << "\n";
+        return false;
+    }
+    streamsize src_size = in.tellg();
+    in.seekg(0, ios::beg);
+    string source_code((size_t)max((streamsize)0, src_size), '\0');
+    if (src_size > 0) in.read(&source_code[0], src_size);
+    in.close();
+    auto t_read_end = chrono::high_resolution_clock::now();
+    double read_ms = chrono::duration<double, std::milli>(t_read_end - t_read_start).count();
+
+    if (opt.freestanding) {
+        GrassHAL::set_freestanding(true);
+        if (opt.lang_ru) cout << "[Freestanding]: Автономный режим активирован (ядро независимо от libc)\n";
+        else cout << "[Freestanding]: Freestanding mode active (kernel independent from libc)\n";
+    } else {
+        GrassHAL::set_freestanding(false);
+    }
+
+    // 2. Этап Лексера: Токенизация
+    auto t_lex_start = chrono::high_resolution_clock::now();
+    Lexer lexer(source_code);
+    vector<GrassToken> tokens = lexer.tokenize();
+
+    // 2.1. Разрешение директив импорта (Import Pass)
+    GrassImport::ImportStats import_stats;
+    tokens = GrassImport::resolveImports(tokens, input_path, &import_stats);
+    if (opt.print_timing && import_stats.total_modules_imported > 0) {
+        if (opt.lang_ru) {
+            cout << "[Импорт]: Подключено модулей: " << import_stats.total_modules_imported
+                 << " (итого токенов: " << import_stats.total_tokens_after_import << ")\n";
+        } else {
+            cout << "[Import]: Modules imported: " << import_stats.total_modules_imported
+                 << " (total tokens: " << import_stats.total_tokens_after_import << ")\n";
+        }
+    }
+
+    auto t_lex_end = chrono::high_resolution_clock::now();
+    double lex_ms = chrono::duration<double, std::milli>(t_lex_end - t_lex_start).count();
+
+    // 3. Этап Парсера и Компилятора байт-кода
+    auto t_comp_start = chrono::high_resolution_clock::now();
+    BytecodeCompiler compiler(tokens, input_path);
+    compiler.compileProgram();
+    auto t_comp_end = chrono::high_resolution_clock::now();
+    double comp_ms = chrono::duration<double, std::milli>(t_comp_end - t_comp_start).count();
+
+    if (compiler.has_error) {
+        if (opt.lang_ru) cerr << "\n[GrassCompiler]: Сборка остановлена из-за ошибок синтаксиса в " << input_path << "!\n";
+        else cerr << "\n[GrassCompiler]: Build stopped due to syntax errors in " << input_path << "!\n";
+        return false;
+    }
+
+    // ── Этап Оптимизатора Байт-кода (-O1, -O2, -O3) ──
+    auto t_opt_start = chrono::high_resolution_clock::now();
+    GrassOptimizer::OptimizationStats opt_stats;
+    if (opt.opt_level > 0) {
+        compiler.code = GrassOptimizer::optimize(compiler.code, opt.opt_level, &opt_stats);
+        if (opt.print_timing) {
+            if (opt.lang_ru) {
+                cout << "[Оптимизатор -O" << opt.opt_level << "]: "
+                     << opt_stats.initial_bytes << " B -> " << opt_stats.optimized_bytes
+                     << " B (Свернуто констант: " << opt_stats.constants_folded
+                     << ", Fused-опкодов: " << opt_stats.opcodes_fused
+                     << ", Удалено мертвого кода: " << opt_stats.dead_code_removed << ")\n";
+            } else {
+                cout << "[Optimizer -O" << opt.opt_level << "]: "
+                     << opt_stats.initial_bytes << " B -> " << opt_stats.optimized_bytes
+                     << " B (Folded constants: " << opt_stats.constants_folded
+                     << ", Fused opcodes: " << opt_stats.opcodes_fused
+                     << ", Dead code removed: " << opt_stats.dead_code_removed << ")\n";
+            }
+        }
+    }
+    auto t_opt_end = chrono::high_resolution_clock::now();
+    double opt_ms = chrono::duration<double, std::milli>(t_opt_end - t_opt_start).count();
+
+    // Опция --dump-ast
+    if (opt.dump_ast) {
+        DumpAST(tokens, input_path, opt.lang_ru);
+    }
+
+    // Опция -S (Дизассемблирование)
+    if (opt.dump_disasm) {
+        DisassembleBytecode(compiler.code, opt.lang_ru);
+    }
+
+    // 4. Этап Генерации выходного файла
+    auto t_emit_start = chrono::high_resolution_clock::now();
+    string base_name = input_path;
+    size_t last_dot = base_name.rfind('.');
+    if (last_dot != string::npos) base_name = base_name.substr(0, last_dot);
+
+    if (opt.emit_bytecode_only) {
+        // -c: Чистый байт-код .grassc
+        string out_file = opt.output_file.empty() ? (base_name + ".grassc") : opt.output_file;
+        ofstream out_bc(out_file, ios::binary);
+        if (!out_bc.is_open()) {
+            if (opt.lang_ru) cerr << "[GrassError]: Не удалось записать " << out_file << "\n";
+            else cerr << "[GrassError]: Failed to write " << out_file << "\n";
+            return false;
+        }
+        out_bc.write((const char*)compiler.code.data(), compiler.code.size());
+        out_bc.close();
+
+        if (opt.lang_ru) {
+            cout << "[GrassCompiler]: Скомпилировано " << compiler.code.size()
+                 << " байт чистого байт-кода -> " << out_file << "\n";
+        } else {
+            cout << "[GrassCompiler]: Compiled " << compiler.code.size()
+                 << " bytes of pure bytecode -> " << out_file << "\n";
+        }
+    } else {
+        // -emit-exe или упаковка в .exe
+        string out_file = opt.output_file.empty() ? (base_name + ".exe") : opt.output_file;
+        bool packed_ok = BuildStandaloneExe(out_file, compiler.code);
+        if (packed_ok) {
+            if (opt.lang_ru) {
+                cout << "[GrassCompiler]: Скомпилировано " << compiler.code.size()
+                     << " байт двоичного кода -> " << out_file << "\n";
+            } else {
+                cout << "[GrassCompiler]: Compiled " << compiler.code.size()
+                     << " bytes of bytecode -> " << out_file << "\n";
+            }
+        }
+    }
+    auto t_emit_end = chrono::high_resolution_clock::now();
+    double emit_ms = chrono::duration<double, std::milli>(t_emit_end - t_emit_start).count();
+
+    auto t_end = chrono::high_resolution_clock::now();
+    double total_ms = chrono::duration<double, std::milli>(t_end - t_start).count();
+
+    // Опция --time
+    if (opt.print_timing) {
+        cout << fixed << setprecision(2);
+        if (opt.lang_ru) {
+            cout << "\n=== ЗАМЕР ВРЕМЕНИ ЭТАПОВ КОМПИЛЯЦИИ ===\n"
+                 << "  1. Чтение файла (I/O):        " << setw(6) << read_ms << " ms\n"
+                 << "  2. Лексер (токенизация):      " << setw(6) << lex_ms << " ms\n"
+                 << "  3. Компилятор байт-кода:      " << setw(6) << comp_ms << " ms\n" \
+                 << "  4. Оптимизатор (-O):          " << setw(6) << opt_ms << " ms\n"
+                 << "  4. Генерация вывода:          " << setw(6) << emit_ms << " ms\n"
+                 << "  ИТОГО сборка:                 " << setw(6) << total_ms << " ms\n"
+                 << "========================================\n\n";
+        } else {
+            cout << "\n=== COMPILATION STAGE TIMINGS ===\n"
+                 << "  1. File I/O Read:             " << setw(6) << read_ms << " ms\n"
+                 << "  2. Lexer (tokenization):      " << setw(6) << lex_ms << " ms\n"
+                 << "  3. Bytecode Compiler:         " << setw(6) << comp_ms << " ms\n" \
+                 << "  4. Bytecode Optimizer (-O):   " << setw(6) << opt_ms << " ms\n"
+                 << "  4. Output Generation:         " << setw(6) << emit_ms << " ms\n"
+                 << "  TOTAL build time:             " << setw(6) << total_ms << " ms\n"
+                 << "=================================\n\n";
+        }
+    }
+
+    // Выполнение в VM
+    if (opt.run_after_build) {
+        if (opt.lang_ru) cout << "[GrassVM]: Исполнение двоичного кода...\n\n";
+        else cout << "[GrassVM]: Executing bytecode...\n\n";
+        g_vm_arena.reset();
+        GrassJIT::initialize();
+        if (opt.enable_jit || opt.opt_level >= 3) {
+            GrassJIT::set_enabled(true);
+        } else {
+            GrassJIT::set_enabled(false);
+        }
+        GrassVM vm(compiler.code);
+        vm.execute();
+        GrassThread::shutdown();
+        if (opt.print_timing && GrassJIT::getStats().loops_compiled > 0) {
+            const auto& js = GrassJIT::getStats();
+            if (opt.lang_ru) {
+                cout << "\n[JIT-Компилятор x86_64]: Скомпилировано циклов: " << js.loops_compiled
+                     << " (" << js.machine_code_bytes << " B машинного кода x86_64, время JIT: "
+                     << js.compile_time_ms << " ms)\n";
+            } else {
+                cout << "\n[JIT x86_64]: Loops compiled: " << js.loops_compiled
+                     << " (" << js.machine_code_bytes << " B native x86_64 code, JIT compile: "
+                     << js.compile_time_ms << " ms)\n";
+            }
+        }
+    }
+    return true;
+}
+
+bool CompileAndRunFile(string input_path, bool build_only) {
+    CompilerOptions opt;
+    opt.input_file = input_path;
+    opt.run_after_build = !build_only;
+    return ProcessCompilation(opt);
+}
+
 int main(int argc, char* argv[]) {
     HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
     DWORD origInMode = 0;
@@ -1386,37 +2575,91 @@ int main(int argc, char* argv[]) {
     }
 
     if (argc >= 2) {
-        bool build_only = false;
-        string target_file = "";
+        CompilerOptions opt;
 
         for (int i = 1; i < argc; ++i) {
             string arg = argv[i];
-            if (arg == "--install" || arg == "install" || arg == "-i") {
-                InstallGrassGreenEcosystem();
-                return 0;
-            } else if (arg == "--build" || arg == "-c" || arg == ".//") {
-                build_only = true;
-            } else if (arg == "--run" || arg == "-r" || arg == "./!") {
-                build_only = false;
+            if (arg == "-V" || arg == "--version" || arg == "-v") {
+                opt.show_version = true;
+            } else if (arg == "-h" || arg == "--help" || arg == "/?") {
+                opt.show_help = true;
+            } else if (arg == "--ru") {
+                opt.lang_ru = true;
+            } else if (arg == "--en") {
+                opt.lang_ru = false;
+            } else if (arg == "--install" || arg == "install" || arg == "-i") {
+                opt.install = true;
+            } else if (arg == "-c" || arg == ".//") {
+                opt.emit_bytecode_only = true;
+                opt.run_after_build = false;
+            } else if (arg == "-emit-exe") {
+                opt.emit_exe = true;
+                opt.run_after_build = false;
+            } else if (arg == "-r" || arg == "--run" || arg == "./!") {
+                opt.run_after_build = true;
+                opt.explicit_run = true;
+            } else if (arg == "-S") {
+                opt.dump_disasm = true;
+                if (!opt.explicit_run) opt.run_after_build = false;
+            } else if (arg == "--dump-ast") {
+                opt.dump_ast = true;
+            } else if (arg == "--time") {
+                opt.print_timing = true;
+            } else if (arg == "--freestanding") {
+                opt.freestanding = true;
+            } else if (arg == "--jit") {
+                opt.enable_jit = true;
+            } else if (arg == "-O0") {
+                opt.opt_level = 0;
+            } else if (arg == "-O1") {
+                opt.opt_level = 1;
+            } else if (arg == "-O2") {
+                opt.opt_level = 2;
+            } else if (arg == "-O3") {
+                opt.opt_level = 3;
+            } else if (arg == "-o") {
+                if (i + 1 < argc) {
+                    opt.output_file = argv[++i];
+                } else {
+                    cerr << (opt.lang_ru ? "[GrassError]: Пропущен аргумент для -o\n" : "[GrassError]: Missing argument for -o\n");
+                    return 1;
+                }
+            } else if (!arg.empty() && arg[0] == '-') {
+                cerr << (opt.lang_ru ? "[GrassWarning]: Неизвестный флаг: " : "[GrassWarning]: Unknown flag: ") << arg << "\n";
             } else {
-                target_file = arg;
+                opt.input_file = arg;
             }
         }
 
-        if (target_file.empty()) target_file = FindDefaultGrassFile();
-        if (!target_file.empty()) CompileAndRunFile(target_file, build_only);
-        else cerr << "[GrassError]: Не найден ни один .grass файл в папке." << endl;
+        if (opt.show_version) {
+            PrintVersion(opt.lang_ru);
+            return 0;
+        }
+
+        if (opt.show_help) {
+            PrintHelp(opt.lang_ru);
+            return 0;
+        }
+
+        if (opt.install) {
+            InstallGrassGreenEcosystem();
+            return 0;
+        }
+
+        ProcessCompilation(opt);
 
         if (hIn != INVALID_HANDLE_VALUE) SetConsoleMode(hIn, origInMode);
         return 0;
     }
 
     cout << "========================================================\n";
-    cout << "  GrassGreen Native Bytecode Compiler v3.0 (by m1oky)\n";
+    cout << "  GrassGreen (G&G) Native Compiler & VM v4.0 (grg)\n";
+    cout << "  Repository: github.com/m1oky/GrassGreen\n";
+    cout << "  Type 'help' or '-h' for commands, 'exit' to quit.\n";
     cout << "========================================================\n";
     string line;
     while (true) {
-        cout << "GrassGreen> ";
+        cout << "G&G> ";
         if (!getline(cin, line)) break;
         size_t first = line.find_first_not_of(" \t\r\n");
         if (first == string::npos) continue;
@@ -1424,6 +2667,8 @@ int main(int argc, char* argv[]) {
 
         if (line == "exit" || line == "quit") break;
         if (line == "install" || line == "--install") { InstallGrassGreenEcosystem(); continue; }
+        if (line == "help" || line == "-h" || line == "--help") { PrintHelp(false); continue; }
+        if (line == "version" || line == "-V" || line == "--version") { PrintVersion(false); continue; }
 
         stringstream ss(line);
         string cmd, file_arg;
@@ -1433,13 +2678,29 @@ int main(int argc, char* argv[]) {
         if (f_start != string::npos) file_arg = file_arg.substr(f_start);
         else file_arg = "";
 
+        CompilerOptions opt;
         if (cmd == ".//" || cmd == "compile" || cmd == "build" || cmd == "-c") {
-            CompileAndRunFile(file_arg.empty() ? FindDefaultGrassFile() : file_arg, true);
+            opt.input_file = file_arg.empty() ? FindDefaultGrassFile() : file_arg;
+            opt.emit_bytecode_only = true;
+            opt.run_after_build = false;
+        } else if (cmd == "-S") {
+            opt.input_file = file_arg.empty() ? FindDefaultGrassFile() : file_arg;
+            opt.dump_disasm = true;
+            opt.run_after_build = false;
+        } else if (cmd == "--dump-ast") {
+            opt.input_file = file_arg.empty() ? FindDefaultGrassFile() : file_arg;
+            opt.dump_ast = true;
+        } else if (cmd == "--time") {
+            opt.input_file = file_arg.empty() ? FindDefaultGrassFile() : file_arg;
+            opt.print_timing = true;
         } else if (cmd == "./!" || cmd == "run" || cmd == "-r") {
-            CompileAndRunFile(file_arg.empty() ? FindDefaultGrassFile() : file_arg, false);
+            opt.input_file = file_arg.empty() ? FindDefaultGrassFile() : file_arg;
+            opt.run_after_build = true;
         } else {
-            CompileAndRunFile(cmd, false);
+            opt.input_file = cmd;
+            opt.run_after_build = true;
         }
+        ProcessCompilation(opt);
     }
 
     if (hIn != INVALID_HANDLE_VALUE) SetConsoleMode(hIn, origInMode);

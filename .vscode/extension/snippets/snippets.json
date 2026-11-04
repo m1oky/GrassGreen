@@ -1,0 +1,165 @@
+{
+  "GrassGreen Main Template": {
+    "prefix": "main",
+    "body": [
+      "!GrassGreen!",
+      "",
+      "int main() {",
+      "\tgout << \"${1:Hello from GrassGreen 4.0!}\" << endl;",
+      "\t${0}",
+      "\treturn 0;",
+      "}"
+    ],
+    "description": "Базовый шаблон программы GrassGreen с точкой входа main"
+  },
+  "Grass Output Stream": {
+    "prefix": "gout",
+    "body": [
+      "gout << \"${1:Message}\" << endl;"
+    ],
+    "description": "Потоковый вывод в консоль gout << ... << endl;"
+  },
+  "Grass Input Stream": {
+    "prefix": "gin",
+    "body": [
+      "gin >> ${1:variable};"
+    ],
+    "description": "Потоковый ввод из консоли gin >> var;"
+  },
+  "Function Definition": {
+    "prefix": "fn",
+    "body": [
+      "take ${1:function_name}(${2:args}) {",
+      "\t${0}",
+      "\treturn ${3:0};",
+      "}"
+    ],
+    "description": "Определение функции с возвращаемым значением"
+  },
+  "Struct Declaration": {
+    "prefix": "struct",
+    "body": [
+      "struct ${1:Point} {",
+      "\t${2:x}: ${3:u32},",
+      "\t${4:y}: ${5:u32}",
+      "}"
+    ],
+    "description": "Объявление структуры данных C-ABI"
+  },
+  "Thread Spawn": {
+    "prefix": "thread",
+    "body": [
+      "take ${1:t} = thread(${2:func_name}, ${3:arg1});",
+      "take ${4:res} = thread_join(${1:t});"
+    ],
+    "description": "Запуск функции в системном потоке с ожиданием результата"
+  },
+  "Async Task": {
+    "prefix": "async",
+    "body": [
+      "async ${1:task_function}(${2:args});"
+    ],
+    "description": "Запуск асинхронной задачи в фоновом потоке"
+  },
+  "Mutex Lock Pattern": {
+    "prefix": "mutex",
+    "body": [
+      "take ${1:mtx} = mutex_create();",
+      "mutex_lock(${1:mtx});",
+      "${0}",
+      "mutex_unlock(${1:mtx});",
+      "mutex_destroy(${1:mtx});"
+    ],
+    "description": "Синхронизация потоков через мьютекс"
+  },
+  "Import Module": {
+    "prefix": "import",
+    "body": [
+      "import \"${1:modules/utils.grass}\";"
+    ],
+    "description": "Импорт внешнего модуля GrassGreen"
+  },
+  "While Loop": {
+    "prefix": "while",
+    "body": [
+      "while (${1:condition}) {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "Цикл while"
+  },
+  "For Loop": {
+    "prefix": "for",
+    "body": [
+      "for (take ${1:i} = ${2:0}; ${1:i} < ${3:count}; ${1:i}++) {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "Цикл for со счетчиком"
+  },
+  "If Else": {
+    "prefix": "ifelse",
+    "body": [
+      "if (${1:condition}) {",
+      "\t${2}",
+      "} else {",
+      "\t${0}",
+      "}"
+    ],
+    "description": "Условный оператор if-else"
+  },
+  "MMIO Read": {
+    "prefix": "mmio_read",
+    "body": [
+      "take ${1:val} = mmio_read32(${2:0xB8000});"
+    ],
+    "description": "Прямое чтение из физической памяти MMIO (8/16/32/64)"
+  },
+  "MMIO Write": {
+    "prefix": "mmio_write",
+    "body": [
+      "mmio_write32(${1:0xB8000}, ${2:val});"
+    ],
+    "description": "Прямая запись в физическую память MMIO (8/16/32/64)"
+  },
+  "Port I/O In": {
+    "prefix": "inb",
+    "body": [
+      "take ${1:byte_val} = inb(${2:0x3F8});"
+    ],
+    "description": "Чтение из аппаратного порта x86 (inb/inw/inl)"
+  },
+  "Port I/O Out": {
+    "prefix": "outb",
+    "body": [
+      "outb(${1:0x3F8}, ${2:byte_val});"
+    ],
+    "description": "Запись в аппаратный порт x86 (outb/outw/outl)"
+  },
+  "Memory Barrier": {
+    "prefix": "barrier",
+    "body": [
+      "memory_barrier();"
+    ],
+    "description": "Аппаратный барьер памяти (mfence)"
+  },
+  "2D Graphics Loop": {
+    "prefix": "gfx_app",
+    "body": [
+      "!GrassGreen!",
+      "!2DGraphics!",
+      "",
+      "int main() {",
+      "\tgfx_init(\"${1:Game Window}\", ${2:800}, ${3:600});",
+      "",
+      "\twhile (gfx_running()) {",
+      "\t\tgfx_clear(\"#0d1117\");",
+      "\t\tgfx_text(20, 20, \"GrassGreen 2D Graphics Engine\", 20, \"#00ffcc\");",
+      "\t\t${0}",
+      "\t}",
+      "\treturn 0;",
+      "}"
+    ],
+    "description": "Каркас приложения 2D-графики"
+  }
+}

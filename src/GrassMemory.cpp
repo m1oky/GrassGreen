@@ -1,9 +1,16 @@
 #include "GrassMemory.h"
-#include <windows.h>
-#include <psapi.h>
+#include "GrassHAL.h"
+#include "GrassArena.h"
 #include <iostream>
 #include <sstream>
 #include <iomanip>
+
+#if defined(_WIN32)
+#include <windows.h>
+#include <psapi.h>
+#endif
+
+extern GrassArena g_vm_arena;
 
 namespace GrassMemory {
     static bool g_auto_mode = false;
@@ -12,19 +19,29 @@ namespace GrassMemory {
     static std::unordered_map<int, std::vector<uint8_t>> g_allocated_blocks;
 
     double usit() {
+        if (GrassHAL::is_freestanding()) {
+            return (double)g_vm_arena.used() / (1024.0 * 1024.0);
+        }
+#if defined(_WIN32)
         PROCESS_MEMORY_COUNTERS_EX pmc;
         if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
             return (double)pmc.WorkingSetSize / (1024.0 * 1024.0);
         }
-        return 0.0;
+#endif
+        return (double)g_vm_arena.used() / (1024.0 * 1024.0);
     }
 
     void separ() {
+        if (GrassHAL::is_freestanding()) {
+            return;
+        }
+#if defined(_WIN32)
         // Сжатие и дефрагментация кучи процесса
         HANDLE hHeap = GetProcessHeap();
         if (hHeap) {
             HeapCompact(hHeap, 0);
         }
+#endif
     }
 
     void set_auto(bool enable) {
@@ -40,11 +57,25 @@ namespace GrassMemory {
     }
 
     void clean() {
+        if (GrassHAL::is_freestanding()) {
+            return;
+        }
+#if defined(_WIN32)
         // Сброс рабочего набора страниц памяти обратно в систему
         EmptyWorkingSet(GetCurrentProcess());
+#endif
     }
 
     std::string get_system_free() {
+        if (GrassHAL::is_freestanding()) {
+            double total_gb = (double)GrassHAL::get_total_ram_bytes() / (1024.0 * 1024.0 * 1024.0);
+            double free_gb = (double)GrassHAL::get_free_ram_bytes() / (1024.0 * 1024.0 * 1024.0);
+            std::stringstream ss;
+            ss << std::fixed << std::setprecision(2)
+               << "Свободно: " << free_gb << " GB / Всего: " << total_gb << " GB";
+            return ss.str();
+        }
+#if defined(_WIN32)
         MEMORYSTATUSEX statex;
         statex.dwLength = sizeof(statex);
         if (GlobalMemoryStatusEx(&statex)) {
@@ -55,6 +86,7 @@ namespace GrassMemory {
                << "Свободно: " << free_gb << " GB / Всего: " << total_gb << " GB";
             return ss.str();
         }
+#endif
         return "Не удалось прочитать состояние памяти";
     }
 

@@ -1,4 +1,5 @@
 #include "gui_engine.h"
+#include "GrassHAL.h"
 #include <commctrl.h>
 #include <iostream>
 #include <fstream>
@@ -689,6 +690,10 @@ namespace GrassGUI {
     }
 
     int show_window() {
+        if (GrassHAL::is_freestanding()) {
+            std::cout << "[GrassGUI Freestanding]: Headless window render\n";
+            return 0;
+        }
         GdiplusStartupInput gdiplusStartupInput;
         ULONG_PTR gdiplusToken;
         GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
@@ -828,6 +833,17 @@ namespace GrassGUI {
     }
 
     int run_from_file(const string& filepath) {
+        if (GrassHAL::is_freestanding()) {
+            string content = GrassHAL::vfs_read(filepath);
+            if (content.empty()) return 1;
+            vector<string> lines;
+            stringstream ss(content);
+            string line;
+            while (getline(ss, line)) {
+                lines.push_back(line);
+            }
+            return run_from_lines(lines);
+        }
         ifstream file(filepath);
         if (!file.is_open()) return 1;
         vector<string> lines;

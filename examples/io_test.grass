@@ -1,0 +1,16 @@
+!GrassGreen!
+
+int main() {
+    gout << "=== ТЕСТ СУВЕРЕННОГО ВВОДА-ВЫВОДА (gout / gin) ===" << endl;
+    gout << "GrassGreen v4.0: прямой ввод-вывод через системные вызовы Win32" << endl;
+
+    take user_name = "GrassGreen Hacker";
+    take version = 4.0;
+    take speed_factor = 2.5;
+
+    gout << "Пользователь: " << user_name << endl;
+    gout << "Версия: " << version << " (Ускорение ядра: x" << speed_factor << ")" << endl;
+    gout << "Статус: ГОТОВ К РАБОТЕ!" << endl;
+
+    return 0;
+}

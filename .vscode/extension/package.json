@@ -1,0 +1,129 @@
+{
+  "name": "grassgreen",
+  "displayName": "GrassGreen (G&G) Language Support",
+  "description": "Официальная поддержка системного языка программирования GrassGreen 4.0: синтаксис, TextMate подсветка gout/gin, IntelliSense автодополнение, компиляция по Ctrl+Shift+B, иконки файлов и сниппеты.",
+  "version": "4.0.0",
+  "publisher": "m1oky",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/m1oky/GrassGreen"
+  },
+  "homepage": "https://grassgreen.info",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:grassgreen",
+    "onLanguage:grassdb"
+  ],
+  "categories": [
+    "Programming Languages",
+    "Snippets",
+    "Themes"
+  ],
+  "keywords": [
+    "grassgreen",
+    "grass",
+    "grg",
+    "gout",
+    "gin",
+    "freestanding"
+  ],
+  "icon": "icon.png",
+  "contributes": {
+    "languages": [
+      {
+        "id": "grassgreen",
+        "aliases": ["GrassGreen", "grass", "grg"],
+        "extensions": [".grass"],
+        "icon": {
+          "light": "./icons/logo.svg",
+          "dark": "./icons/logo.svg"
+        },
+        "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "grassdb",
+        "aliases": ["GrassDB", "gdb"],
+        "extensions": [".gdb"],
+        "icon": {
+          "light": "./icons/gdb_logo.svg",
+          "dark": "./icons/gdb_logo.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "grassgreen",
+        "scopeName": "source.grassgreen",
+        "path": "./syntaxes/grassgreen.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "grassgreen",
+        "path": "./snippets/snippets.json"
+      }
+    ],
+    "iconThemes": [
+      {
+        "id": "grassgreen-icons",
+        "label": "GrassGreen Icons",
+        "path": "./icons/grassgreen-icon-theme.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "grassgreen.build",
+        "title": "GrassGreen: Собрать исполняемый файл (.exe) [Ctrl+Shift+B]",
+        "category": "GrassGreen",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "grassgreen.runFile",
+        "title": "GrassGreen: Скомпилировать и запустить [F5]",
+        "category": "GrassGreen",
+        "icon": "$(play)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "grassgreen.build",
+        "key": "ctrl+shift+b",
+        "when": "editorLangId == grassgreen"
+      },
+      {
+        "command": "grassgreen.runFile",
+        "key": "f5",
+        "when": "editorLangId == grassgreen"
+      }
+    ],
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "grassgreen.build",
+          "when": "editorLangId == grassgreen",
+          "group": "navigation@1"
+        },
+        {
+          "command": "grassgreen.runFile",
+          "when": "editorLangId == grassgreen",
+          "group": "navigation@2"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "grassgreen.build",
+          "when": "editorLangId == grassgreen",
+          "group": "1_modification"
+        },
+        {
+          "command": "grassgreen.runFile",
+          "when": "editorLangId == grassgreen",
+          "group": "1_modification"
+        }
+      ]
+    }
+  }
+}

@@ -1,4 +1,5 @@
 #include "Grass2DGraphics.h"
+#include "GrassHAL.h"
 #include <chrono>
 #include <thread>
 #include <algorithm>
@@ -14,8 +15,25 @@ bool Grass2DGraphics::is_running = false;
 uint64_t Grass2DGraphics::last_frame_time = 0;
 
 static uint64_t getNowMs() {
+    if (GrassHAL::is_freestanding()) {
+        return (uint64_t)GrassHAL::get_elapsed_ms(0);
+    }
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+static uint32_t parseColor32(const std::string& hex) {
+    std::string s = hex;
+    if (!s.empty() && s[0] == '#') s = s.substr(1);
+    if (s.rfind("0x", 0) == 0 || s.rfind("0X", 0) == 0) s = s.substr(2);
+    uint32_t val = 0xFFFFFFFF;
+    try {
+        val = std::stoul(s, nullptr, 16);
+        if ((val & 0xFF000000) == 0) val |= 0xFF000000;
+    } catch (...) {
+        return 0xFFFFFFFF;
+    }
+    return val;
 }
 
 COLORREF Grass2DGraphics::parseColor(const std::string& hex) {
@@ -73,6 +91,14 @@ bool Grass2DGraphics::init(const std::string& title, int width, int height) {
     win_width = width;
     win_height = height;
 
+    if (GrassHAL::is_freestanding()) {
+        GrassHAL::g_software_fb.init(width, height);
+        is_running = true;
+        last_frame_time = getNowMs();
+        return true;
+    }
+
+#if defined(_WIN32)
     WNDCLASSEXA wc = {};
     wc.cbSize = sizeof(WNDCLASSEXA);
     wc.lpfnWndProc = WndProc;
@@ -105,10 +131,21 @@ bool Grass2DGraphics::init(const std::string& title, int width, int height) {
     is_running = true;
     last_frame_time = getNowMs();
     return true;
+#else
+    GrassHAL::g_software_fb.init(width, height);
+    is_running = true;
+    last_frame_time = getNowMs();
+    return true;
+#endif
 }
 
 bool Grass2DGraphics::running() {
-    if (!is_running || !hwnd) return false;
+    if (!is_running) return false;
+    if (GrassHAL::is_freestanding()) {
+        return is_running;
+    }
+#if defined(_WIN32)
+    if (!hwnd) return false;
 
     MSG msg;
     while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
@@ -120,27 +157,47 @@ bool Grass2DGraphics::running() {
         DispatchMessageA(&msg);
     }
     return is_running;
+#else
+    return is_running;
+#endif
 }
 
 void Grass2DGraphics::clear(const std::string& hex_color) {
+    if (GrassHAL::is_freestanding()) {
+        GrassHAL::g_software_fb.clear(parseColor32(hex_color));
+        return;
+    }
+#if defined(_WIN32)
     if (!hdc_mem) return;
     COLORREF col = parseColor(hex_color);
     HBRUSH brush = CreateSolidBrush(col);
     RECT rc = {0, 0, win_width, win_height};
     FillRect(hdc_mem, &rc, brush);
     DeleteObject(brush);
+#endif
 }
 
 void Grass2DGraphics::rect(int x, int y, int w, int h, const std::string& hex_color) {
+    if (GrassHAL::is_freestanding()) {
+        GrassHAL::g_software_fb.draw_rect(x, y, w, h, parseColor32(hex_color));
+        return;
+    }
+#if defined(_WIN32)
     if (!hdc_mem) return;
     COLORREF col = parseColor(hex_color);
     HBRUSH brush = CreateSolidBrush(col);
     RECT rc = {x, y, x + w, y + h};
     FillRect(hdc_mem, &rc, brush);
     DeleteObject(brush);
+#endif
 }
 
 void Grass2DGraphics::circle(int x, int y, int r, const std::string& hex_color) {
+    if (GrassHAL::is_freestanding()) {
+        GrassHAL::g_software_fb.draw_circle(x, y, r, parseColor32(hex_color));
+        return;
+    }
+#if defined(_WIN32)
     if (!hdc_mem) return;
     COLORREF col = parseColor(hex_color);
     HBRUSH brush = CreateSolidBrush(col);
@@ -154,9 +211,15 @@ void Grass2DGraphics::circle(int x, int y, int r, const std::string& hex_color) 
     SelectObject(hdc_mem, old_pen);
     DeleteObject(brush);
     DeleteObject(pen);
+#endif
 }
 
 void Grass2DGraphics::line(int x1, int y1, int x2, int y2, const std::string& hex_color, int width) {
+    if (GrassHAL::is_freestanding()) {
+        GrassHAL::g_software_fb.draw_line(x1, y1, x2, y2, parseColor32(hex_color));
+        return;
+    }
+#if defined(_WIN32)
     if (!hdc_mem) return;
     COLORREF col = parseColor(hex_color);
     HPEN pen = CreatePen(PS_SOLID, width, col);
@@ -167,9 +230,15 @@ void Grass2DGraphics::line(int x1, int y1, int x2, int y2, const std::string& he
 
     SelectObject(hdc_mem, old_pen);
     DeleteObject(pen);
+#endif
 }
 
 void Grass2DGraphics::text(int x, int y, const std::string& str, int size, const std::string& hex_color) {
+    if (GrassHAL::is_freestanding()) {
+        // В автономном режиме выводим текстовые метки в консольный журнал
+        return;
+    }
+#if defined(_WIN32)
     if (!hdc_mem) return;
     COLORREF col = parseColor(hex_color);
     SetTextColor(hdc_mem, col);
@@ -185,33 +254,56 @@ void Grass2DGraphics::text(int x, int y, const std::string& str, int size, const
 
     SelectObject(hdc_mem, old_font);
     DeleteObject(hFont);
+#endif
 }
 
 bool Grass2DGraphics::key(const std::string& key_name) {
+    if (GrassHAL::is_freestanding()) {
+        return false;
+    }
+#if defined(_WIN32)
     int vk = parseVkKey(key_name);
     if (!vk) return false;
     return (GetAsyncKeyState(vk) & 0x8000) != 0;
+#else
+    return false;
+#endif
 }
 
 int Grass2DGraphics::mouse_x() {
+    if (GrassHAL::is_freestanding()) return 0;
+#if defined(_WIN32)
     if (!hwnd) return 0;
     POINT pt;
     GetCursorPos(&pt);
     ScreenToClient(hwnd, &pt);
     return pt.x;
+#else
+    return 0;
+#endif
 }
 
 int Grass2DGraphics::mouse_y() {
+    if (GrassHAL::is_freestanding()) return 0;
+#if defined(_WIN32)
     if (!hwnd) return 0;
     POINT pt;
     GetCursorPos(&pt);
     ScreenToClient(hwnd, &pt);
     return pt.y;
+#else
+    return 0;
+#endif
 }
 
 bool Grass2DGraphics::mouse_down(const std::string& btn) {
+    if (GrassHAL::is_freestanding()) return false;
+#if defined(_WIN32)
     if (btn == "right") return (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
     return (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+#else
+    return false;
+#endif
 }
 
 bool Grass2DGraphics::collide(double x1, double y1, double w1, double h1, double x2, double y2, double w2, double h2) {
@@ -219,6 +311,14 @@ bool Grass2DGraphics::collide(double x1, double y1, double w1, double h1, double
 }
 
 void Grass2DGraphics::frame(int target_fps) {
+    if (GrassHAL::is_freestanding()) {
+        if (target_fps > 0) {
+            uint32_t target_ms = 1000 / target_fps;
+            GrassHAL::delay_ms(target_ms);
+        }
+        return;
+    }
+#if defined(_WIN32)
     if (!hdc_screen || !hdc_mem) return;
 
     // Мгновенный сброс буфера на монитор (Double Buffering)
@@ -234,13 +334,17 @@ void Grass2DGraphics::frame(int target_fps) {
         }
         last_frame_time = getNowMs();
     }
+#endif
 }
 
 void Grass2DGraphics::close() {
+    is_running = false;
+    if (GrassHAL::is_freestanding()) return;
+#if defined(_WIN32)
     if (hdc_mem && hbm_old) SelectObject(hdc_mem, hbm_old);
     if (hbm_mem) { DeleteObject(hbm_mem); hbm_mem = nullptr; }
     if (hdc_mem) { DeleteDC(hdc_mem); hdc_mem = nullptr; }
     if (hwnd && hdc_screen) { ReleaseDC(hwnd, hdc_screen); hdc_screen = nullptr; }
     if (hwnd) { DestroyWindow(hwnd); hwnd = nullptr; }
-    is_running = false;
+#endif
 }

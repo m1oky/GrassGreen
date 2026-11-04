@@ -43,7 +43,7 @@ box-start
     hide()
     color(#00ff88)
     thick()
-    G3 ✔️ Доступ получен! Виртуальная машина переведена в режим Host.
+    G3: Доступ получен! Виртуальная машина переведена в режим Host.
 
 box-end
 
@@ -100,7 +100,7 @@ script-start
     // Обработка кнопки-кликера
     on-click(btn_clicker)
         add-var(clicks, 1)
-        set-text(btn_clicker, 🔥 Кликов: {clicks})
+        set-text(btn_clicker, Кликов: {clicks})
         play-anim(btn_clicker, pulse, 0.2s)
     end-click
 

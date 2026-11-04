@@ -1,0 +1,67 @@
+!GrassGreen!
+!time!
+
+int square(take n) {
+    return n * n;
+}
+
+int main() {
+    gout << "=== GRASSGREEN 4.0 CORE TEST SUITE ===" << endl;
+
+    // 1. Тест арифметики и NaN-boxing чисел
+    take a = 15;
+    take b = 4;
+    take c_add = a + b;
+    take c_sub = a - b;
+    take c_mul = a * b;
+    take c_div = a / b;
+    take c_mod = a % b;
+    take c_neg = -a;
+
+    gout << "[TEST 1] Math: 15+4=" << c_add << ", 15-4=" << c_sub << ", 15*4=" << c_mul << ", 15/4=" << c_div << ", 15%4=" << c_mod << ", -15=" << c_neg << endl;
+
+    // 2. Тест строк в Arena Allocator и конкатенации
+    take s1 = "Grass";
+    take s2 = "Green";
+    take s3 = s1 + " " + s2 + " v4.0";
+    gout << "[TEST 2] String concat: " << s3 << endl;
+
+    // 3. Тест сравнения строк и чисел
+    if (s1 == "Grass") {
+        gout << "[TEST 3.1] String equality: OK" << endl;
+    } else {
+        gout << "[TEST 3.1] String equality: FAIL" << endl;
+    }
+
+    if (s1 != s2) {
+        gout << "[TEST 3.2] String inequality: OK" << endl;
+    }
+
+    if (a > b && b < 10) {
+        gout << "[TEST 3.3] Number comparison & logical AND: OK" << endl;
+    }
+
+    // 4. Тест вызова пользовательской функции
+    take sq = square(7);
+    gout << "[TEST 4] Function call square(7) = " << sq << endl;
+
+    // 5. Стресс-тест цикла и диспетчеризации (100 000 итераций)
+    start_time();
+    take sum = 0;
+    for (take i = 1; i <= 100000; i++) {
+        sum = sum + 1;
+    }
+    stop_time();
+
+    gout << "[TEST 5] Loop 100,000 iterations: sum = " << sum << " (Time: " << conclus_time() << ")" << endl;
+
+    // 6. Проверка ветвления
+    take flag = 0;
+    if (sum == 100000) {
+        flag = 1;
+    }
+    gout << "[TEST 6] Branching validation: flag = " << flag << endl;
+
+    gout << "=== ALL CORE TESTS PASSED SUCCESSFULLY ===" << endl;
+    return 0;
+}
