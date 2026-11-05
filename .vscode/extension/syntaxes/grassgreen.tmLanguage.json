@@ -58,7 +58,7 @@
       "patterns": [
         {
           "name": "keyword.control.directive.grassgreen",
-          "match": "!(GrassGreen|2DGraphics|tg|fsys|json|math|FastMath|CoreMath|memory|GrassNet|proc|sys|interface|time|mmio|io|hw|thread|async|rand|audio|video|GrassWeb|database|[a-zA-Z0-9_]+)!"
+          "match": "!(GrassGreen|2DGraphics|tg|fsys|json|math|FastMath|CoreMath|memory|GrassNet|proc|sys|interface|time|mmio|io|hw|thread|async|rand|audio|GrassWeb|database|[a-zA-Z0-9_]+)!"
         }
       ]
     },
