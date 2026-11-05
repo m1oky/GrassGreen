@@ -2,7 +2,7 @@
   "name": "grassgreen",
   "displayName": "GrassGreen (G&G) Language Support",
   "description": "Официальная поддержка системного языка программирования GrassGreen 4.0: синтаксис, TextMate подсветка gout/gin, IntelliSense автодополнение, компиляция по Ctrl+Shift+B, иконки файлов и сниппеты.",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "publisher": "m1oky",
   "repository": {
     "type": "git",
@@ -35,8 +35,14 @@
     "languages": [
       {
         "id": "grassgreen",
-        "aliases": ["GrassGreen", "grass", "grg"],
-        "extensions": [".grass"],
+        "aliases": [
+          "GrassGreen",
+          "grass",
+          "grg"
+        ],
+        "extensions": [
+          ".grass"
+        ],
         "icon": {
           "light": "./icons/logo.svg",
           "dark": "./icons/logo.svg"
@@ -45,8 +51,13 @@
       },
       {
         "id": "grassdb",
-        "aliases": ["GrassDB", "gdb"],
-        "extensions": [".gdb"],
+        "aliases": [
+          "GrassDB",
+          "gdb"
+        ],
+        "extensions": [
+          ".gdb"
+        ],
         "icon": {
           "light": "./icons/gdb_logo.svg",
           "dark": "./icons/gdb_logo.svg"

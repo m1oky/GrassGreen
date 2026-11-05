@@ -4,7 +4,13 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <thread>
+
+#if defined(_WIN32)
 #include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace GrassTime {
     static auto timer_start = std::chrono::high_resolution_clock::now();
@@ -63,6 +69,7 @@ namespace GrassTime {
         if (GrassHAL::is_freestanding()) {
             return GrassHAL::get_rtc_date();
         }
+#if defined(_WIN32)
         SYSTEMTIME st;
         GetLocalTime(&st);
         std::ostringstream oss;
@@ -70,12 +77,23 @@ namespace GrassTime {
             << std::setw(2) << st.wMonth << "-"
             << std::setw(2) << st.wDay;
         return oss.str();
+#else
+        std::time_t t = std::time(nullptr);
+        std::tm tm_buf;
+        localtime_r(&t, &tm_buf);
+        std::ostringstream oss;
+        oss << std::setfill('0') << std::setw(4) << (tm_buf.tm_year + 1900) << "-"
+            << std::setw(2) << (tm_buf.tm_mon + 1) << "-"
+            << std::setw(2) << tm_buf.tm_mday;
+        return oss.str();
+#endif
     }
 
     std::string get_time_str() {
         if (GrassHAL::is_freestanding()) {
             return GrassHAL::get_rtc_time();
         }
+#if defined(_WIN32)
         SYSTEMTIME st;
         GetLocalTime(&st);
         std::ostringstream oss;
@@ -83,6 +101,16 @@ namespace GrassTime {
             << std::setw(2) << st.wMinute << ":"
             << std::setw(2) << st.wSecond;
         return oss.str();
+#else
+        std::time_t t = std::time(nullptr);
+        std::tm tm_buf;
+        localtime_r(&t, &tm_buf);
+        std::ostringstream oss;
+        oss << std::setfill('0') << std::setw(2) << tm_buf.tm_hour << ":"
+            << std::setw(2) << tm_buf.tm_min << ":"
+            << std::setw(2) << tm_buf.tm_sec;
+        return oss.str();
+#endif
     }
 
     void sleep_ms(int ms) {
@@ -90,7 +118,11 @@ namespace GrassTime {
         if (GrassHAL::is_freestanding()) {
             GrassHAL::delay_ms((uint32_t)ms);
         } else {
+#if defined(_WIN32)
             Sleep(ms);
+#else
+            std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+#endif
         }
     }
 }

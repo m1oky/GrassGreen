@@ -161,5 +161,108 @@
       "}"
     ],
     "description": "Каркас приложения 2D-графики"
+  },
+  "VD+ Modern UI Application": {
+    "prefix": "ui_app",
+    "body": [
+      "!GrassGreen!",
+      "!interface!",
+      "",
+      "int main() {",
+      "\twindow {",
+      "\t\tauto_size_display();",
+      "\t\tborder-radius-app(${1:16});",
+      "\t\theader(\"${2:emerald}\");",
+      "\t\ttitle(\"${3:GrassGreen Application}\");",
+      "\t\tsize(${4:800}, ${5:600});",
+      "\t\ttheme(\"dark\");",
+      "\t\tclock();",
+      "",
+      "\t\tlabel \"${6:Title}\" {",
+      "\t\t\twindow-ob(${7:50}, ${8:50});",
+      "\t\t\tsize(400, 36);",
+      "\t\t\tmiddle();",
+      "\t\t}",
+      "",
+      "\t\tbutton \"${9:Click Me}\" {",
+      "\t\t\twindow-ob(${10:50}, ${11:120});",
+      "\t\t\tsize(200, 44);",
+      "\t\t\tmiddle();",
+      "\t\t}",
+      "\t}",
+      "\treturn 0;",
+      "}"
+    ],
+    "description": "Полноценный каркас GUI приложения VD+ с адаптивным разрешением, шапкой, часами и скруглением"
+  },
+  "UI Tab View": {
+    "prefix": "ui_tab",
+    "body": [
+      "\ttab = \"${1:Main}\" {",
+      "\t\tlabel \"${2:Вкладка Главная}\" {",
+      "\t\t\twindow-ob(50, 60);",
+      "\t\t\tsize(300, 32);",
+      "\t\t}",
+      "\t}",
+      "",
+      "\tbutton \"${3:Переключить вкладку}\" {",
+      "\t\twindow-ob(50, 120);",
+      "\t\tsize(220, 40);",
+      "\t\tswitch(\"${4:Профиль}\");",
+      "\t}"
+    ],
+    "description": "Вкладка и переключение интерфейса через switch(name)"
+  },
+  "Audio Play Tone": {
+    "prefix": "audio_tone",
+    "body": [
+      "!audio!",
+      "audio_tone(${1:440}, ${2:1000}); // 440 Hz (Note A), 1000 ms"
+    ],
+    "description": "Генерация чистого звукового тона заданной частоты и длительности"
+  },
+  "Audio Waveform Synthesizer": {
+    "prefix": "audio_synth",
+    "body": [
+      "!audio!",
+      "audio_synth(${1:440}, ${2:800}, ${3:0}); // 0=Sine, 1=Square, 2=Sawtooth, 3=Triangle, 4=Noise"
+    ],
+    "description": "Синтез полифонической волны с выбором формы сигнала"
+  },
+  "Audio Play File": {
+    "prefix": "audio_play",
+    "body": [
+      "!audio!",
+      "audio_play(\"${1:sounds/notify.wav}\");"
+    ],
+    "description": "Воспроизведение WAV аудиофайла"
+  },
+  "Clock Widget": {
+    "prefix": "clock",
+    "body": [
+      "clock();"
+    ],
+    "description": "Виджет часов реального времени с посекундным автообновлением"
+  },
+  "Border Radius App": {
+    "prefix": "border_radius",
+    "body": [
+      "border-radius-app(${1:16});"
+    ],
+    "description": "Скругление углов всего окна приложения"
+  },
+  "Fullscreen Window": {
+    "prefix": "fullscreen",
+    "body": [
+      "fullscreen();"
+    ],
+    "description": "Полноэкранный режим окна приложения"
+  },
+  "Ambient Particles": {
+    "prefix": "particles",
+    "body": [
+      "particles(${1:35}, \"${2:#22c55e}\");"
+    ],
+    "description": "Анимированные светящиеся частицы на фоне окна"
   }
 }

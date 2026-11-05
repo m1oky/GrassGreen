@@ -1,0 +1,21 @@
+!GrassGreen!
+!audio!
+
+int main() {
+    gout << "[Test Audio]: Testing GrassGreen 4.0 Standard Audio Library (!audio!)..." << endl;
+
+    // 1. Процедурный синтез чистого синуса (C5 - 523 Гц)
+    gout << "[Test Audio]: Synthesizing Sine Wave 523 Hz (C5)..." << endl;
+    synth_play("sine", 523, 150, 70);
+
+    // 2. Процедурный 8-битный ретро-звук (A4 - 440 Гц)
+    gout << "[Test Audio]: Synthesizing 8-bit Square Wave 440 Hz (A4)..." << endl;
+    synth_play("square", 440, 150, 70);
+
+    // 3. Быстрый тон (880 Гц)
+    gout << "[Test Audio]: Playing Pure Tone 880 Hz..." << endl;
+    tone(880, 150, 70);
+
+    gout << "[Test Audio]: Procedural audio synthesis verified cleanly!" << endl;
+    return 0;
+}

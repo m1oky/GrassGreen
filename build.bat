@@ -25,6 +25,7 @@ g++ -std=c++20 -O3 -s ^
   src/CoreMath.cpp ^
   src/GrassMemory.cpp ^
   src/GrassRandom.cpp ^
+  src/GrassAudio.cpp ^
   src/GrassTg.cpp ^
   src/Grass2DGraphics.cpp ^
   -o bin/grassc.exe ^
@@ -32,7 +33,12 @@ g++ -std=c++20 -O3 -s ^
 
 if %ERRORLEVEL% equ 0 (
     copy /Y bin\grassc.exe bin\grg.exe >nul
+    if exist "C:\GrassGreen\bin" (
+        copy /Y bin\grassc.exe C:\GrassGreen\bin\grassc.exe >nul
+        copy /Y bin\grassc.exe C:\GrassGreen\bin\grg.exe >nul
+    )
     echo [GrassCompiler] Build SUCCESSFUL: bin\grassc.exe ^& bin\grg.exe
+    if exist "C:\GrassGreen\bin" echo [GrassCompiler] Successfully updated global C:\GrassGreen\bin
 ) else (
     echo [GrassCompiler] Build FAILED with code %ERRORLEVEL%
 )

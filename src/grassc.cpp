@@ -12,7 +12,12 @@
 #include <algorithm>
 #include <filesystem>
 #include <iomanip>
+#if defined(_WIN32)
 #include <windows.h>
+#else
+#include <unistd.h>
+#include <thread>
+#endif
 #include <mutex>
 
 #include "GrassSyntax.h"
@@ -38,6 +43,7 @@
 #include "GrassJIT.h"
 #include "GrassThread.h"
 #include "GrassMMIO.h"
+#include "GrassAudio.h"
 
 using namespace std;
 namespace fs = std::filesystem;
@@ -656,7 +662,13 @@ public:
 
     do_wait: {
         int ms = (int)pop().toNumber();
-        if (ms > 0) Sleep(ms);
+        if (ms > 0) {
+#if defined(_WIN32)
+            Sleep(ms);
+#else
+            std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+#endif
+        }
         DISPATCH_STEP();
     }
 
@@ -782,6 +794,7 @@ public:
                     }
                     else if (fn == "color" && argc >= 1) {
                         string c = args[0].toString();
+#if defined(_WIN32)
                         WORD attr = 7;
                         if (c == "green" || c == "2") attr = 10;
                         else if (c == "cyan" || c == "aqua" || c == "3") attr = 11;
@@ -793,6 +806,17 @@ public:
                         else if (c == "gray" || c == "8") attr = 8;
                         else attr = (WORD)args[0].toNumber();
                         SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), attr);
+#else
+                        if (c == "green" || c == "2") cout << "\033[92m";
+                        else if (c == "cyan" || c == "aqua" || c == "3") cout << "\033[96m";
+                        else if (c == "red" || c == "4") cout << "\033[91m";
+                        else if (c == "purple" || c == "magenta" || c == "5") cout << "\033[95m";
+                        else if (c == "yellow" || c == "6") cout << "\033[93m";
+                        else if (c == "white" || c == "7") cout << "\033[97m";
+                        else if (c == "blue" || c == "1") cout << "\033[94m";
+                        else if (c == "gray" || c == "8") cout << "\033[90m";
+                        else cout << "\033[0m";
+#endif
                         push(GrassValue::Num(1.0));
                     }
                     // ===== БИБЛИОТЕКА !time! =====
@@ -1279,6 +1303,22 @@ public:
                     }
 
                     // !interface! & !GrassWeb!
+                    else if (fn == "surface" && argc >= 1) {
+                        GrassGUI::set_surface_mode(args[0].toString());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "auto_size_display") {
+                        GrassGUI::auto_size_display(true);
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "fullscreen" || fn == "fullscrean") {
+                        GrassGUI::set_fullscreen(true);
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if ((fn == "switch_tab" || fn == "switch") && argc >= 1) {
+                        GrassGUI::switch_tab(args[0].toString());
+                        push(GrassValue::Num(1.0));
+                    }
                     else if (fn == "gui_cmd" && argc >= 1) {
                         syncVarsToGUI();
                         GrassGUI::exec_command(args[0].toString());
@@ -1305,6 +1345,47 @@ public:
                             out.close();
                         }
                         push(GrassValue::Str(html));
+                    }
+                    // ===== БИБЛИОТЕКА !audio! =====
+                    else if (fn == "tone" && argc >= 2) {
+                        double vol = (argc >= 3) ? args[2].toNumber() : 80.0;
+                        GrassAudio::tone(args[0].toNumber(), (int)args[1].toNumber(), vol);
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "beep") {
+                        double f = (argc >= 1) ? args[0].toNumber() : 750.0;
+                        int dur = (argc >= 2) ? (int)args[1].toNumber() : 300;
+                        GrassAudio::beep(f, dur);
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if ((fn == "synth_play" || fn == "synth") && argc >= 3) {
+                        double vol = (argc >= 4) ? args[3].toNumber() : 80.0;
+                        GrassAudio::synth_play(args[0].toString(), args[1].toNumber(), (int)args[2].toNumber(), vol);
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "sound_play" && argc >= 1) {
+                        bool loop = (argc >= 2) ? (args[1].toNumber() != 0.0) : false;
+                        bool ok = GrassAudio::sound_play(args[0].toString(), loop);
+                        push(GrassValue::Num(ok ? 1.0 : 0.0));
+                    }
+                    else if (fn == "sound_stop") {
+                        GrassAudio::sound_stop();
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "sound_pause") {
+                        GrassAudio::sound_pause();
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "sound_resume") {
+                        GrassAudio::sound_resume();
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "sound_volume" && argc >= 1) {
+                        GrassAudio::sound_volume((int)args[0].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "sound_is_playing") {
+                        push(GrassValue::Num(GrassAudio::sound_is_playing() ? 1.0 : 0.0));
                     }
                     // ── Многопоточность (!thread!) ──
                     else if (fn == "thread_join" && argc >= 1) {
@@ -1473,8 +1554,10 @@ public:
     }
 
     do_ui_show: {
+#if defined(_WIN32)
         HWND hConsole = GetConsoleWindow();
         if (hConsole) ShowWindow(hConsole, SW_HIDE);
+#endif
         syncVarsToGUI();
         GrassGUI::show_window();
         DISPATCH_STEP();
@@ -1690,14 +1773,28 @@ public:
 // 2. АВТО-УСТАНОВЩИК ЯЗЫКА И ИКОНОК (.GRASS + .GDB) В VS CODE
 // ============================================================================
 void InstallGrassGreenEcosystem() {
+    string self_path_str;
+#if defined(_WIN32)
     char self_path[MAX_PATH];
     GetModuleFileNameA(NULL, self_path, MAX_PATH);
-    fs::path exe_path(self_path);
+    self_path_str = self_path;
+#else
+    char buf[1024];
+    ssize_t len = ::readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (len > 0) {
+        buf[len] = '\0';
+        self_path_str = buf;
+    } else {
+        self_path_str = "grassc";
+    }
+#endif
+    fs::path exe_path(self_path_str);
     fs::path root_dir = exe_path.parent_path();
     if (root_dir.filename() == "bin") root_dir = root_dir.parent_path();
 
     cout << "\n=== [GrassGreen (G&G) v4.0.0 Installer] ===\n";
 
+#if defined(_WIN32)
     {
         ofstream grgcmd(root_dir / "grg.cmd");
         grgcmd << "@echo off\n\"%~dp0bin\\grassc.exe\" %*\n";
@@ -1715,8 +1812,17 @@ void InstallGrassGreenEcosystem() {
     } catch (...) {}
     cout << "[+] Созданы системные команды: grg <файл.grass>, grass <файл.grass> и gg <файл.grass>\n";
     cout << "[+] Бинарник grg.exe продублирован в bin/grg.exe для интеграции в PATH.\n";
+#else
+    try {
+        fs::copy_file(exe_path, root_dir / "bin" / "grg", fs::copy_options::overwrite_existing);
+    } catch (...) {}
+    cout << "[+] Бинарник grg продублирован в bin/grg для интеграции в PATH.\n";
+#endif
 
     const char* userprofile = getenv("USERPROFILE");
+#if !defined(_WIN32)
+    if (!userprofile) userprofile = getenv("HOME");
+#endif
     if (userprofile) {
         fs::path ext_dir = fs::path(userprofile) / ".vscode" / "extensions" / "m1oky.grassgreen-lang-3.0.0";
         fs::create_directories(ext_dir / "syntaxes");
@@ -1788,7 +1894,7 @@ void InstallGrassGreenEcosystem() {
            << "    { \"name\": \"constant.other.color.grass\", \"match\": \"#[0-9a-fA-F]{3,8}\\\\b\" },\n"
            << "    { \"name\": \"keyword.control.grass\", \"match\": \"\\\\b(if|else|chek|check|for|while|again|loop|break|stop|stoped|return|exit|wait|sleep|window|gout|gin|cout|cin|endl|text|script-start|script-end|on-click|end-click|on-input|end-input|on-hover|end-hover|on-key|end-key|every|end-every|end-wait|end-chek|table|end-table|box-start|box-end|row-start|row-end|col-start|col-end)\\\\b\" },\n"
            << "    { \"name\": \"storage.type.grass\", \"match\": \"\\\\b(int|take|void|func|alt|fn|string|str|float|double|num|bool|auto|set|var|let|fany|invent)\\\\b\" },\n"
-           << "    { \"name\": \"support.function.builtin.grass\", \"match\": \"\\\\b(main|gin\\\\.getline|gin|input\\\\.getline|input|log|print|println|ask|random|random_txt|stop_random|play_random|memory_usit|memory_separ|memory_auto|memory_clean|memory_free|memory_alloc|memory_free_block|memory_limit|memory_dump|len|length|upper|lower|substr|replace|contains|trim|to_str|to_num|typeof|clear|cls|color|time|clock_ms|beep|msgbox|system|sqrt|discor|sin|cos|abs|round|floor|ceil|pow|clamp|min|max|rand|lerp|creat|redact|read|exists|remove|open|run|db_open|db_save|db_set|db_get|db_del|db_has|db_inc|db_dec|db_clear|db_backup|db_export_json|db_hash|db_encrypt|db_decrypt|gui_cmd|gui_get|gui_set|gui_show|gui_file|web_start|web_compile|title|size-top|theme|fon|iconP|button|label|enter|icon|video|window-ob|middle|left|right|text-color|button-color|font-size|font-style|radius|pad|shadow|glass|click-ob|switch|set-text|set-val|clear-val|repaint-color|repaint-bg|hide|show|toggle|play-anim)\\\\b\" },\n"
+           << "    { \"name\": \"support.function.builtin.grass\", \"match\": \"\\\\b(main|gin\\\\.getline|gin|input\\\\.getline|input|print|println|ask|random|random_txt|stop_random|play_random|memory_usit|memory_separ|memory_auto|memory_clean|memory_free|memory_alloc|memory_free_block|memory_limit|memory_dump|len|length|upper|lower|substr|replace|contains|trim|to_str|to_num|typeof|clear|cls|color|time|clock_ms|beep|msgbox|system|sqrt|discor|sin|cos|abs|round|floor|ceil|pow|clamp|min|max|rand|lerp|creat|redact|read|exists|remove|open|run|db_open|db_save|db_set|db_get|db_del|db_has|db_inc|db_dec|db_clear|db_backup|db_export_json|db_hash|db_encrypt|db_decrypt|gui_cmd|gui_get|gui_set|gui_show|gui_file|web_start|web_compile|surface|auto_size_display|border-radius-app|border_radius_app|topmost|z-index|z_index|layer|clock|clock-format|engine|vd_plus|gradient|glow|border|hover-color|active-color|placeholder|title|size-top|theme|fon|iconP|button|label|enter|icon|video|window-ob|middle|left|right|text-color|button-color|font-size|font-style|radius|pad|shadow|glass|click-ob|switch|set-text|set-val|clear-val|repaint-color|repaint-bg|hide|show|toggle|play-anim)\\\\b\" },\n"
            << "    { \"name\": \"constant.numeric.grass\", \"match\": \"\\\\b\\\\d+(\\\\.\\\\d+)?\\\\b\" },\n"
            << "    { \"name\": \"constant.language.boolean.grass\", \"match\": \"\\\\b(true|false)\\\\b\" }\n"
            << "  ]\n"
@@ -1888,6 +1994,7 @@ void InstallGrassGreenEcosystem() {
 // ============================================================================
 static const char MAGIC_FOOTER[8] = {'G','R','A','S','S','E','X','E'};
 
+#if defined(_WIN32)
 bool CheckAndRunEmbeddedBytecode() {
     char self_path[MAX_PATH];
     GetModuleFileNameA(NULL, self_path, MAX_PATH);
@@ -2053,6 +2160,108 @@ bool BuildStandaloneExe(const string& output_exe, const vector<uint8_t>& bytecod
     CloseHandle(hDst);
     return true;
 }
+#else
+// POSIX ELF-PACKER ДЛЯ LINUX
+static int64_t GetCleanStubSize(const char* path, int64_t& out_total_size) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return -1;
+    fseek(f, 0, SEEK_END);
+    int64_t fsize = (int64_t)ftell(f);
+    out_total_size = fsize;
+    int64_t stub_size = fsize;
+    if (stub_size >= 12) {
+        fseek(f, stub_size - 12, SEEK_SET);
+        uint8_t footer[12];
+        if (fread(footer, 1, 12, f) == 12) {
+            uint32_t old_bc = 0;
+            memcpy(&old_bc, footer, 4);
+            if (memcmp(footer + 4, MAGIC_FOOTER, 8) == 0 && (int64_t)(old_bc + 12) < stub_size) {
+                stub_size -= (old_bc + 12);
+            }
+        }
+    }
+    fclose(f);
+    return stub_size;
+}
+
+bool CheckAndRunEmbeddedBytecode() {
+    char self_path[1024];
+    ssize_t len = ::readlink("/proc/self/exe", self_path, sizeof(self_path) - 1);
+    if (len <= 0) return false;
+    self_path[len] = '\0';
+
+    FILE* f = fopen(self_path, "rb");
+    if (!f) return false;
+    fseek(f, 0, SEEK_END);
+    int64_t total_size = (int64_t)ftell(f);
+    if (total_size < 12) { fclose(f); return false; }
+
+    fseek(f, total_size - 12, SEEK_SET);
+    uint8_t footer[12];
+    if (fread(footer, 1, 12, f) != 12 || memcmp(footer + 4, MAGIC_FOOTER, 8) != 0) {
+        fclose(f);
+        return false;
+    }
+
+    uint32_t bc_size = 0;
+    memcpy(&bc_size, footer, 4);
+    if (bc_size == 0 || (int64_t)(bc_size + 12) > total_size) {
+        fclose(f);
+        return false;
+    }
+
+    fseek(f, total_size - 12 - bc_size, SEEK_SET);
+    vector<uint8_t> bytecode(bc_size);
+    if (fread(bytecode.data(), 1, bc_size, f) != bc_size) {
+        fclose(f);
+        return false;
+    }
+    fclose(f);
+
+    g_vm_arena.reset();
+    GrassVM vm(bytecode);
+    vm.execute();
+    GrassThread::shutdown();
+    return true;
+}
+
+bool BuildStandaloneExe(const string& output_exe, const vector<uint8_t>& bytecode) {
+    char self_path[1024];
+    ssize_t len = ::readlink("/proc/self/exe", self_path, sizeof(self_path) - 1);
+    if (len <= 0) return false;
+    self_path[len] = '\0';
+
+    int64_t self_total = 0;
+    int64_t stub_size = GetCleanStubSize(self_path, self_total);
+    if (stub_size <= 0) return false;
+
+    uint32_t bc_size = (uint32_t)bytecode.size();
+    uint8_t footer[12];
+    memcpy(footer, &bc_size, 4);
+    memcpy(footer + 4, MAGIC_FOOTER, 8);
+
+    FILE* fSrc = fopen(self_path, "rb");
+    if (!fSrc) return false;
+    vector<char> stub((size_t)stub_size);
+    if (fread(stub.data(), 1, (size_t)stub_size, fSrc) != (size_t)stub_size) {
+        fclose(fSrc);
+        return false;
+    }
+    fclose(fSrc);
+
+    FILE* fDst = fopen(output_exe.c_str(), "wb");
+    if (!fDst) return false;
+    fwrite(stub.data(), 1, stub.size(), fDst);
+    fwrite(bytecode.data(), 1, bc_size, fDst);
+    fwrite(footer, 1, 12, fDst);
+    fclose(fDst);
+
+    try {
+        fs::permissions(output_exe, fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec | fs::perms::others_read | fs::perms::others_exec, fs::perm_options::replace);
+    } catch (...) {}
+    return true;
+}
+#endif
 
 // ============================================================================
 // 4. ОПЦИИ КОМПИЛЯТОРА И CLI ФЛАГИ (ROADMAP G&G 4.0)
@@ -2562,15 +2771,19 @@ bool CompileAndRunFile(string input_path, bool build_only) {
 }
 
 int main(int argc, char* argv[]) {
+#if defined(_WIN32)
     HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
     DWORD origInMode = 0;
     if (hIn != INVALID_HANDLE_VALUE) GetConsoleMode(hIn, &origInMode);
 
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
+#endif
 
     if (CheckAndRunEmbeddedBytecode()) {
+#if defined(_WIN32)
         if (hIn != INVALID_HANDLE_VALUE) SetConsoleMode(hIn, origInMode);
+#endif
         return 0;
     }
 
@@ -2648,7 +2861,9 @@ int main(int argc, char* argv[]) {
 
         ProcessCompilation(opt);
 
+#if defined(_WIN32)
         if (hIn != INVALID_HANDLE_VALUE) SetConsoleMode(hIn, origInMode);
+#endif
         return 0;
     }
 
@@ -2703,6 +2918,8 @@ int main(int argc, char* argv[]) {
         ProcessCompilation(opt);
     }
 
+#if defined(_WIN32)
     if (hIn != INVALID_HANDLE_VALUE) SetConsoleMode(hIn, origInMode);
+#endif
     return 0;
 }

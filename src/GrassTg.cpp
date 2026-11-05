@@ -1,7 +1,10 @@
 #include "GrassHAL.h"
 #include "GrassTg.h"
+#include <cstdlib>
+#if defined(_WIN32)
 #include <windows.h>
 #include <wininet.h>
+#endif
 #include <sstream>
 #include <iomanip>
 #include <vector>
@@ -38,6 +41,7 @@ std::string GrassTg::httpGet(const std::string& url) {
         return "{\"ok\":true,\"result\":{\"message_id\":1001}}";
     }
     // INTERNET_OPEN_TYPE_PRECONFIG подтягивает системные сетевые настройки и прокси
+#if defined(_WIN32)
     HINTERNET hInternet = InternetOpenA("GrassGreenBot/3.5", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
     if (!hInternet) return "";
 
@@ -59,6 +63,18 @@ std::string GrassTg::httpGet(const std::string& url) {
     InternetCloseHandle(hFile);
     InternetCloseHandle(hInternet);
     return response;
+#else
+    std::string cmd = "curl -s -k \"" + url + "\" 2>/dev/null";
+    FILE* p = popen(cmd.c_str(), "r");
+    if (!p) return "";
+    std::string response;
+    char buffer[4096];
+    while (fgets(buffer, sizeof(buffer), p)) {
+        response += buffer;
+    }
+    pclose(p);
+    return response;
+#endif
 }
 
 // Декодирование \uXXXX и спецсимволов JSON в чистый UTF-8

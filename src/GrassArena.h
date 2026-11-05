@@ -8,7 +8,13 @@
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
+#include <cstdlib>
+
+#if defined(_WIN32)
 #include <windows.h>
+#else
+#include <sys/mman.h>
+#endif
 
 class GrassArena {
 private:
@@ -18,15 +24,20 @@ private:
 
 public:
     // -------------------------------------------------------------------------
-    //  Конструктор: резервирует initial байт через VirtualAlloc (или malloc).
+    //  Конструктор: резервирует initial байт через VirtualAlloc / mmap (или malloc).
     // -------------------------------------------------------------------------
     explicit GrassArena(size_t initial = 1024 * 1024)
         : base(nullptr), capacity(initial), offset(0)
     {
+#if defined(_WIN32)
         base = (uint8_t*)VirtualAlloc(
             nullptr, initial, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+#else
+        base = (uint8_t*)mmap(nullptr, initial, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (base == MAP_FAILED) base = nullptr;
+#endif
         if (!base) {
-            // Fallback для совместимости (non-Windows, WSL, и т.д.)
+            // Fallback для совместимости
             base = (uint8_t*)malloc(initial);
         }
     }
@@ -37,7 +48,11 @@ public:
     ~GrassArena()
     {
         if (base) {
+#if defined(_WIN32)
             VirtualFree(base, 0, MEM_RELEASE);
+#else
+            munmap(base, capacity);
+#endif
         }
         base     = nullptr;
         capacity = 0;
@@ -58,15 +73,24 @@ public:
             while (new_cap < aligned + bytes) {
                 new_cap *= 2;
             }
+#if defined(_WIN32)
             uint8_t* new_base = (uint8_t*)VirtualAlloc(
                 nullptr, new_cap, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+#else
+            uint8_t* new_base = (uint8_t*)mmap(nullptr, new_cap, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            if (new_base == MAP_FAILED) new_base = nullptr;
+#endif
             if (!new_base) {
                 new_base = (uint8_t*)malloc(new_cap);
             }
             if (!new_base) return nullptr;
 
             memcpy(new_base, base, offset);
+#if defined(_WIN32)
             VirtualFree(base, 0, MEM_RELEASE);
+#else
+            munmap(base, capacity);
+#endif
 
             base     = new_base;
             capacity = new_cap;

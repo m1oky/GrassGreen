@@ -294,7 +294,10 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
         requireLib("db", "!database!", fn + "()", line);
     }
     // 6. Проверка !interface!
-    else if (fn.find("gui_") == 0) {
+    else if (fn.find("gui_") == 0 || fn == "surface" || fn == "auto_size_display" ||
+             fn == "border_radius_app" || fn == "border-radius-app" ||
+             fn == "switch_tab" || fn == "switch" ||
+             fn == "fullscreen" || fn == "fullscrean") {
         requireLib("gui", "!interface!", fn + "()", line);
     }
     // 7. Проверка библиотеки !time!
@@ -364,6 +367,12 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
              fn == "outb" || fn == "outw" || fn == "outl" ||
              fn == "memory_barrier" || fn == "read_barrier" || fn == "write_barrier") {
         requireLib("mmio", "!mmio!", fn + "()", line);
+    }
+    // 17. Проверка библиотеки !audio!
+    else if (fn == "tone" || fn == "beep" || fn == "synth_play" || fn == "synth" ||
+             fn == "sound_play" || fn == "sound_stop" || fn == "sound_pause" ||
+             fn == "sound_resume" || fn == "sound_volume" || fn == "sound_is_playing") {
+        requireLib("audio", "!audio!", fn + "()", line);
     }
 }
 
@@ -706,8 +715,8 @@ bool BytecodeCompiler::parseSingleGuiDirective() {
         return true;
     }
 
-    // Элементы интерфейса: button "Текст" { ... }, label "Текст" { ... }, enter "Текст" { ... }
-    if (cmd == "button" || cmd == "label" || cmd == "enter" || cmd == "icon" || cmd == "video") {
+    // Элементы интерфейса: button "Текст" { ... }, label "Текст" { ... }, enter "Текст" { ... }, clock "HH:mm:ss" { ... }
+    if (cmd == "button" || cmd == "label" || cmd == "enter" || cmd == "icon" || cmd == "video" || cmd == "svg" || cmd == "clock") {
         int el_line = peek().line;
         advance();
         string inline_id = "";
@@ -717,7 +726,9 @@ bool BytecodeCompiler::parseSingleGuiDirective() {
         match(TOK_ASSIGN);
 
         string txt = "";
-        if (match(TOK_LPAREN)) {
+        if (cmd == "clock" && peek().kind == TOK_LBRACE) {
+            txt = "HH:mm:ss";
+        } else if (match(TOK_LPAREN)) {
             bool first = true;
             while (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
                 if (!first) txt += " ";
@@ -729,7 +740,7 @@ bool BytecodeCompiler::parseSingleGuiDirective() {
             txt = advance().text;
         }
 
-        if (cmd == "icon" || cmd == "video") {
+        if (cmd == "icon" || cmd == "video" || cmd == "svg") {
             emitUICmd(cmd + "(" + txt + ")");
         } else {
             emitUICmd(cmd + " !!" + txt + "!!");
@@ -752,8 +763,39 @@ bool BytecodeCompiler::parseSingleGuiDirective() {
         return true;
     }
 
+    // ── Система вкладок (Tabs System): tab = "main" { ... }, tab "profile" { ... }, tab("name") ──
+    if (cmd == "tab") {
+        advance();
+        if (match(TOK_ASSIGN)) {
+            // съедаем '=' если написано tab = ...
+        }
+        string tab_name = "main";
+        if (match(TOK_LPAREN)) {
+            if (peek().kind == TOK_STRING || peek().kind == TOK_IDENT) {
+                tab_name = advance().text;
+            }
+            match(TOK_RPAREN);
+        } else if (peek().kind == TOK_STRING || peek().kind == TOK_IDENT) {
+            tab_name = advance().text;
+        }
+
+        emitUICmd("tab(" + tab_name + ")");
+
+        if (match(TOK_LBRACE)) {
+            while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
+                if (!parseSingleGuiDirective()) advance();
+            }
+            match(TOK_RBRACE);
+            match(TOK_SEMI);
+            emitUICmd("tab(main)");
+            return true;
+        }
+        match(TOK_SEMI);
+        return true;
+    }
+
     if (cmd == "middle" || cmd == "center" || cmd == "left" || cmd == "right" ||
-        cmd == "shadow" || cmd == "glass" || cmd == "clear") {
+        cmd == "shadow" || cmd == "glass" || cmd == "clear" || cmd == "topmost" || cmd == "clock") {
         advance();
         string norm_cmd = (cmd == "center") ? "middle" : cmd;
         string arg = "";
@@ -767,23 +809,66 @@ bool BytecodeCompiler::parseSingleGuiDirective() {
         return true;
     }
 
-    if (cmd == "title" || cmd == "name" || cmd == "size" || cmd == "size-top" || cmd == "height" ||
+    if (cmd == "surface" || cmd == "auto_size_display" || cmd == "auto-size-display" ||
+        cmd == "border-radius-app" || cmd == "border_radius_app" ||
+        cmd == "topmost" || cmd == "z-index" || cmd == "z_index" || cmd == "layer" ||
+        cmd == "clock" || cmd == "clock-format" || cmd == "clock_format" || cmd == "time-format" || cmd == "time_format" ||
+        cmd == "header" || cmd == "header-color" || cmd == "header_color" ||
+        cmd == "header-text-color" || cmd == "header_text_color" ||
+        cmd == "header-height" || cmd == "header_height" ||
+        cmd == "header-buttons" || cmd == "header_buttons" ||
+        cmd == "header-buttons-pos" || cmd == "header_buttons_pos" ||
+        cmd == "header-buttons-offset" || cmd == "header_buttons_offset" ||
+        cmd == "header-title-align" || cmd == "header_title_align" ||
+        cmd == "header-align" || cmd == "header_align" ||
+        cmd == "window-border" || cmd == "window_border" ||
+        cmd == "fullscreen" || cmd == "fullscrean" ||
+        cmd == "layout" || cmd == "align-all" || cmd == "align_all" ||
+        cmd == "center-all" || cmd == "center_all" ||
+        cmd == "engine" || cmd == "vd_plus" || cmd == "vdplus" ||
+        cmd == "particles" || cmd == "animate" ||
+        cmd == "gradient" || cmd == "glow" || cmd == "border" || cmd == "placeholder" ||
+        cmd == "placeholder-color" || cmd == "placeholder_color" ||
+        cmd == "hover-color" || cmd == "hover_color" || cmd == "active-color" || cmd == "active_color" ||
+        cmd == "title" || cmd == "name" || cmd == "size" || cmd == "size-top" || cmd == "height" ||
         cmd == "color" || cmd == "bg" || cmd == "background" || cmd == "theme" || cmd == "fon" ||
         cmd == "iconP" || cmd == "id" || cmd == "name_el" || cmd == "window-ob" || cmd == "pos" ||
         cmd == "position" || cmd == "align" || cmd == "text-color" || cmd == "text_color" ||
         cmd == "button-color" || cmd == "button_color" || cmd == "font-size" || cmd == "font_size" ||
-        cmd == "font-style" || cmd == "font_style" || cmd == "radius" || cmd == "pad" ||
-        cmd == "click-ob" || cmd == "switch" || cmd == "run" || cmd == "action") {
+        cmd == "font-style" || cmd == "font_style" || cmd == "font-weight" || cmd == "font_weight" ||
+        cmd == "radius" || cmd == "pad" ||
+        cmd == "click-ob" || cmd == "click-switch" || cmd == "click_switch" ||
+        cmd == "switch" || cmd == "switch_tab" || cmd == "run" || cmd == "action") {
         advance();
         string arg = extractParenArgsAsString();
 
-        if (cmd == "height") cmd = "size-top";
+        if (cmd == "auto-size-display") cmd = "auto_size_display";
+        else if (cmd == "border_radius_app") cmd = "border-radius-app";
+        else if (cmd == "fullscrean") cmd = "fullscreen";
+        else if (cmd == "z_index" || cmd == "layer") cmd = "z-index";
+        else if (cmd == "clock_format" || cmd == "time_format" || cmd == "time-format") cmd = "clock-format";
+        else if (cmd == "align_all" || cmd == "align-all" || cmd == "center-all" || cmd == "center_all") cmd = "layout";
+        else if (cmd == "click_switch") cmd = "click-switch";
+        else if (cmd == "switch_tab") cmd = "switch";
+        else if (cmd == "header_buttons_pos") cmd = "header-buttons-pos";
+        else if (cmd == "header_buttons_offset") cmd = "header-buttons-offset";
+        else if (cmd == "header_title_align" || cmd == "header_align" || cmd == "header-align") cmd = "header-title-align";
+        else if (cmd == "height") cmd = "size-top";
         else if (cmd == "bg" || cmd == "background") cmd = "color";
         else if (cmd == "pos" || cmd == "position") cmd = "window-ob";
         else if (cmd == "text_color") cmd = "text-color";
         else if (cmd == "button_color") cmd = "button-color";
+        else if (cmd == "hover_color") cmd = "hover-color";
+        else if (cmd == "active_color") cmd = "active-color";
+        else if (cmd == "header_color") cmd = "header-color";
+        else if (cmd == "header_text_color") cmd = "header-text-color";
+        else if (cmd == "header_height") cmd = "header-height";
+        else if (cmd == "header_buttons") cmd = "header-buttons";
+        else if (cmd == "window_border") cmd = "window-border";
+        else if (cmd == "placeholder_color") cmd = "placeholder-color";
         else if (cmd == "font_size") cmd = "font-size";
         else if (cmd == "font_style") cmd = "font-style";
+        else if (cmd == "font_weight") cmd = "font-weight";
         else if (cmd == "action") cmd = "run";
 
         if (cmd == "align") {
@@ -819,7 +904,7 @@ void BytecodeCompiler::parseWindowBlock() {
     emitString("GrassGreen UI");
     emitU32(640);
     emitU32(480);
-    emitString("#12131a");
+    emitString("#09090b");
     emitString("");
 
     while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
@@ -930,6 +1015,8 @@ void BytecodeCompiler::parseStatement() {
             included_libs.insert("db");
             if (!included_libs.count("core")) is_special_file = true;
             emitByte(OP_LOAD_DB);
+        } else if (lib == "!audio!" || lib == "!sound!" || lib == "!GrassAudio!") {
+            included_libs.insert("audio");
         } else if (lib == "!GrassWeb!" || lib == "!GREEN_WWW1!") {
             included_libs.insert("web");
             is_special_file = true;
@@ -1045,6 +1132,173 @@ void BytecodeCompiler::parseStatement() {
     // 2. БЛОК ОКНА ИНТЕРФЕЙСА: window { ... }
     if (matchIdent("window")) {
         parseWindowBlock();
+        return;
+    }
+
+    // Директива движка отображения: surface("auto" | "windowed" | "freestanding" | "borderless")
+    if (matchIdent("surface")) {
+        int sf_line = peek(-1).line;
+        requireLib("gui", "!interface!", "surface()", sf_line);
+        string mode = "auto";
+        if (match(TOK_LPAREN)) {
+            if (peek().kind == TOK_STRING || peek().kind == TOK_IDENT) {
+                mode = advance().text;
+            }
+            match(TOK_RPAREN);
+        }
+        match(TOK_SEMI);
+        emitByte(OP_CONST_STR); emitString(mode);
+        emitByte(OP_CALL_BUILTIN); emitString("surface"); emitByte(1);
+        emitByte(OP_POP);
+        return;
+    }
+
+    // Директива авто-масштабирования High-DPI: auto_size_display();
+    if (matchIdent("auto_size_display")) {
+        int as_line = peek(-1).line;
+        requireLib("gui", "!interface!", "auto_size_display()", as_line);
+        if (match(TOK_LPAREN)) match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("auto_size_display"); emitByte(0);
+        emitByte(OP_POP);
+        return;
+    }
+
+    // Директива скругления углов окна приложения: border_radius_app(16) / border-radius-app(16)
+    if (matchIdent("border_radius_app") || matchIdent("border-radius-app")) {
+        int br_line = peek(-1).line;
+        requireLib("gui", "!interface!", "border_radius_app()", br_line);
+        string rad = "12";
+        if (match(TOK_LPAREN)) {
+            if (peek().kind == TOK_NUMBER || peek().kind == TOK_IDENT) {
+                rad = advance().text;
+            }
+            match(TOK_RPAREN);
+        }
+        match(TOK_SEMI);
+        emitByte(OP_CONST_STR); emitString("border-radius-app(" + rad + ")");
+        emitByte(OP_CALL_BUILTIN); emitString("gui_cmd"); emitByte(1);
+        emitByte(OP_POP);
+        return;
+    }
+
+    // ── БИБЛИОТЕКА !audio! ──
+    if (matchIdent("tone")) {
+        int aud_line = peek(-1).line;
+        requireLib("audio", "!audio!", "tone()", aud_line);
+        match(TOK_LPAREN);
+        parseExpression();
+        match(TOK_COMMA);
+        parseExpression();
+        uint8_t argc = 2;
+        if (match(TOK_COMMA)) {
+            parseExpression();
+            argc = 3;
+        }
+        match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("tone"); emitByte(argc);
+        emitByte(OP_POP);
+        return;
+    }
+
+    if (matchIdent("beep")) {
+        int aud_line = peek(-1).line;
+        requireLib("audio", "!audio!", "beep()", aud_line);
+        match(TOK_LPAREN);
+        uint8_t argc = 0;
+        if (peek().kind != TOK_RPAREN) {
+            parseExpression();
+            argc = 1;
+            if (match(TOK_COMMA)) {
+                parseExpression();
+                argc = 2;
+            }
+        }
+        match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("beep"); emitByte(argc);
+        emitByte(OP_POP);
+        return;
+    }
+
+    if (matchIdent("synth_play") || matchIdent("synth")) {
+        int aud_line = peek(-1).line;
+        requireLib("audio", "!audio!", "synth_play()", aud_line);
+        match(TOK_LPAREN);
+        parseExpression();
+        match(TOK_COMMA);
+        parseExpression();
+        match(TOK_COMMA);
+        parseExpression();
+        uint8_t argc = 3;
+        if (match(TOK_COMMA)) {
+            parseExpression();
+            argc = 4;
+        }
+        match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("synth_play"); emitByte(argc);
+        emitByte(OP_POP);
+        return;
+    }
+
+    if (matchIdent("sound_play")) {
+        int aud_line = peek(-1).line;
+        requireLib("audio", "!audio!", "sound_play()", aud_line);
+        match(TOK_LPAREN);
+        parseExpression();
+        uint8_t argc = 1;
+        if (match(TOK_COMMA)) {
+            parseExpression();
+            argc = 2;
+        }
+        match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("sound_play"); emitByte(argc);
+        emitByte(OP_POP);
+        return;
+    }
+
+    if (matchIdent("sound_stop")) {
+        int aud_line = peek(-1).line;
+        requireLib("audio", "!audio!", "sound_stop()", aud_line);
+        if (match(TOK_LPAREN)) match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("sound_stop"); emitByte(0);
+        emitByte(OP_POP);
+        return;
+    }
+
+    if (matchIdent("sound_pause")) {
+        int aud_line = peek(-1).line;
+        requireLib("audio", "!audio!", "sound_pause()", aud_line);
+        if (match(TOK_LPAREN)) match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("sound_pause"); emitByte(0);
+        emitByte(OP_POP);
+        return;
+    }
+
+    if (matchIdent("sound_resume")) {
+        int aud_line = peek(-1).line;
+        requireLib("audio", "!audio!", "sound_resume()", aud_line);
+        if (match(TOK_LPAREN)) match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("sound_resume"); emitByte(0);
+        emitByte(OP_POP);
+        return;
+    }
+
+    if (matchIdent("sound_volume")) {
+        int aud_line = peek(-1).line;
+        requireLib("audio", "!audio!", "sound_volume()", aud_line);
+        match(TOK_LPAREN);
+        parseExpression();
+        match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("sound_volume"); emitByte(1);
+        emitByte(OP_POP);
         return;
     }
 
@@ -1205,8 +1459,14 @@ void BytecodeCompiler::parseStatement() {
         return;
     }
 
-    // 4. ВЫВОД В КОНСОЛЬ
-    if (matchIdent("log") || matchIdent("print") || matchIdent("println")) {
+    // 4. Ключевое слово 'log' устарело и запрещено (используется только потоковый вывод gout)
+    if (matchIdent("log")) {
+        reportError(peek(-1).line, "Функция 'log' устарела и полностью удалена из GrassGreen! Используйте потоковый вывод: gout << ... << endl;");
+        return;
+    }
+
+    // ВЫВОД В КОНСОЛЬ (print / println)
+    if (matchIdent("print") || matchIdent("println")) {
         match(TOK_ASSIGN);
         if (peek().kind == TOK_IDENT && peek().text == "text" &&
             (peek(1).kind == TOK_SEMI || peek(1).kind == TOK_EOF)) {

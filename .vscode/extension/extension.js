@@ -20,11 +20,37 @@ const MODULES = [
     { name: "!fsys!", doc: "Файловая система: чтение, запись, проверка путей и списки файлов." },
     { name: "!tg!", doc: "Интеграция с Telegram Bot API." },
     { name: "!2DGraphics!", doc: "Аппаратная 2D-графика: примитивы, коллизии, игровой цикл." },
+    { name: "!audio!", doc: "Нативный аудио-движок: синтез волн (синус, меандр, пила, треугольник, шум), генерация тонов, воспроизведение WAV и звуковые эффекты." },
+    { name: "!video!", doc: "Движок видеографики VD+: аппаратный фреймбуфер, интеграция медиа и аппаратные поверхности surface." },
     { name: "!mmio!", doc: "Прямой доступ к памяти (MMIO), аппаратные порты (in/out) и барьеры." },
     { name: "!thread!", doc: "Нативная многопоточность: системные потоки ОС и мьютексы." }
 ];
 
 const FUNCTIONS = [
+    // Audio Engine
+    { name: "audio_play", signature: "bool audio_play(string path)", doc: "Воспроизводит аудиофайл WAV.", snippet: "audio_play(${1:\"path/to/file.wav\"})" },
+    { name: "audio_stop", signature: "void audio_stop()", doc: "Останавливает воспроизведение всех текущих звуков.", snippet: "audio_stop()" },
+    { name: "audio_tone", signature: "void audio_tone(int freq, int ms)", doc: "Генерирует чистый звуковой тон частоты freq Гц на протяжении ms миллисекунд.", snippet: "audio_tone(${1:440}, ${2:1000})" },
+    { name: "audio_synth", signature: "void audio_synth(int freq, int ms, int wave_type)", doc: "Синтезирует волну (0=синус, 1=меандр, 2=пила, 3=треугольник, 4=шум) частоты freq на ms миллисекунд.", snippet: "audio_synth(${1:440}, ${2:1000}, ${3:0})" },
+    { name: "audio_volume", signature: "void audio_volume(int vol)", doc: "Устанавливает уровень громкости звука от 0 до 100%.", snippet: "audio_volume(${1:80})" },
+    { name: "audio_is_playing", signature: "bool audio_is_playing()", doc: "Возвращает true, если в данный момент воспроизводится аудиофайл или тон.", snippet: "audio_is_playing()" },
+    { name: "audio_noise", signature: "void audio_noise(int ms)", doc: "Генерирует белый шум заданной длительности в миллисекундах.", snippet: "audio_noise(${1:500})" },
+    { name: "audio_beep", signature: "void audio_beep(int freq, int ms)", doc: "Подает системный звуковой сигнал заданной частоты и длительности.", snippet: "audio_beep(${1:800}, ${2:200})" },
+
+    // GUI VD+ Engine
+    { name: "auto_size_display", signature: "void auto_size_display()", doc: "Автоматически определяет разрешение экрана (включая 2K/4K и масштаб Windows DPI 125%/150%) и оптимизирует окно.", snippet: "auto_size_display()" },
+    { name: "border-radius-app", signature: "void border-radius-app(int radius)", doc: "Задает скругление внешних углов всего окна приложения (например 16px).", snippet: "border-radius-app(${1:16})" },
+    { name: "header", signature: "void header(string style)", doc: "Стиль шапки окна: emerald, native (macOS 3 точки), glass (прозрачная), modern, none.", snippet: "header(\"${1:emerald}\")" },
+    { name: "header-color", signature: "void header-color(string hex_color)", doc: "Цвет фона заголовка окна.", snippet: "header-color(\"${1:#0f172a}\")" },
+    { name: "header-text-color", signature: "void header-text-color(string hex_color)", doc: "Цвет текста заголовка окна.", snippet: "header-text-color(\"${1:#22c55e}\")" },
+    { name: "clock", signature: "void clock()", doc: "Встроенный синхронный виджет часов (ЧЧ:ММ:СС) с автообновлением каждую секунду.", snippet: "clock()" },
+    { name: "tab", signature: "tab = \"Name\" { ... }", doc: "Создает страницу вкладки внутри окна приложения.", snippet: "tab = \"${1:TabName}\" {\n\t${0}\n}" },
+    { name: "switch", signature: "void switch(string tab_name)", doc: "Переключает активную вкладку окна на tab_name.", snippet: "switch(\"${1:TabName}\")" },
+    { name: "fullscreen", signature: "void fullscreen()", doc: "Разворачивает окно приложения на весь экран (Fullscreen mode).", snippet: "fullscreen()" },
+    { name: "z-index", signature: "void z-index(int level)", doc: "Слой отрисовки виджета или окна. При клике окно автоматически всплывает на верхний z-слой.", snippet: "z-index(${1:10})" },
+    { name: "particles", signature: "void particles(int count, string color)", doc: "Анимированные светящиеся частицы на фоне окна.", snippet: "particles(${1:35}, \"${2:#22c55e}\")" },
+    { name: "surface", signature: "void surface(string mode)", doc: "Режим аппаратного рендеринга: freestanding (прямо в видеопамять без системных окон) или direct.", snippet: "surface(\"${1:freestanding}\")" },
+
     // Concurrency / Threads
     { name: "thread", signature: "take thread(take func, take arg)", doc: "Запускает функцию `func` в отдельном потоке ОС с аргументом `arg`. Возвращает хэндл потока.", snippet: "thread(${1:function_name}, ${2:argument})" },
     { name: "thread_join", signature: "take thread_join(take handle)", doc: "Блокирует текущий поток до завершения потока `handle` и возвращает результат его выполнения.", snippet: "thread_join(${1:handle})" },

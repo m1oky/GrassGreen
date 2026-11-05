@@ -1,5 +1,10 @@
 #include "GrassHAL.h"
+#if defined(_WIN32)
 #include <windows.h>
+#else
+#include <cstdlib>
+#include <cwchar>
+#endif
 #include "GSE.h"
 #include <iostream>
 #include <fstream>
@@ -16,12 +21,20 @@ map<string, wstring> variables_cache;
 
 wstring utf8_to_wstring_gse(const string& str) {
     if (str.empty()) return L"";
+#if defined(_WIN32)
     int len = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, NULL, 0);
     if (len <= 0) return L"";
     wstring wstr(len, 0);
     MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &wstr[0], len);
     if (!wstr.empty() && wstr.back() == L'\0') wstr.pop_back();
     return wstr;
+#else
+    size_t len = mbstowcs(nullptr, str.c_str(), 0);
+    if (len == (size_t)-1) return L"";
+    wstring wstr(len, 0);
+    mbstowcs(&wstr[0], str.c_str(), len);
+    return wstr;
+#endif
 }
 
 namespace GrassDB {

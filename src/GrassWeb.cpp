@@ -1,6 +1,18 @@
 #include "GrassHAL.h"
+#if defined(_WIN32)
 #include <winsock2.h> 
 #include <windows.h>
+#pragma comment(lib, "ws2_32.lib")
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#define SOCKET int
+#define INVALID_SOCKET (-1)
+#define SOCKET_ERROR (-1)
+#define closesocket close
+#endif
 #include "GrassWeb.h"
 #include "WebTheme.h"
 #include <iostream>
@@ -458,9 +470,32 @@ string CompileGrassToHTML(const string& filename) {
                 continue;
             }
 
-            // Всплывающее окно и консоль: alert(), log()
+            // Всплывающее окно и вывод в консоль: alert(), gout <<
             if (trimmed.find("alert(") == 0) {
                 html_content << "  alert(" << FormatJSTextValue(ExtractArg(trimmed)) << ");\n";
+                continue;
+            }
+            if (trimmed.find("gout") == 0) {
+                string rest = trimmed.substr(4);
+                size_t p = 0;
+                string out_val = "";
+                while ((p = rest.find("<<")) != string::npos) {
+                    rest = rest.substr(p + 2);
+                    size_t next_p = rest.find("<<");
+                    string part = (next_p != string::npos) ? rest.substr(0, next_p) : rest;
+                    size_t semi = part.find(';');
+                    if (semi != string::npos) part = part.substr(0, semi);
+                    while (!part.empty() && (part.front() == ' ' || part.front() == '\t')) part.erase(0, 1);
+                    while (!part.empty() && (part.back() == ' ' || part.back() == '\t')) part.pop_back();
+                    if (part == "endl") continue;
+                    if (!part.empty()) {
+                        if (!out_val.empty()) out_val += " + ";
+                        out_val += FormatJSTextValue(part);
+                    }
+                }
+                if (!out_val.empty()) {
+                    html_content << "  console.log(" << out_val << ");\n";
+                }
                 continue;
             }
             if (trimmed.find("log(") == 0) {
@@ -728,8 +763,10 @@ void GrassWeb_LoadPage(const string& filename) {
         cout << "[GrassWeb Freestanding]: Скомпилировано в RamFS: " << filename << ".html (" << html_body.size() << " байт)\n";
         return;
     }
+#if defined(_WIN32)
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) return;
+#endif
 
     SOCKET server_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     int opt = 1;
@@ -740,15 +777,22 @@ void GrassWeb_LoadPage(const string& filename) {
     server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
     server_addr.sin_port = htons(8080);
 
-    if (bind(server_socket, (SOCKADDR*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
+    if (bind(server_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
         closesocket(server_socket);
+#if defined(_WIN32)
         WSACleanup();
+#endif
         return;
     }
 
     listen(server_socket, SOMAXCONN);
     cout << "\n[GrassWeb]: Сервер запущен -> http://127.0.0.1:8080/\n" << endl;
+#if defined(_WIN32)
     ShellExecuteA(NULL, "open", "http://127.0.0.1:8080/", NULL, NULL, SW_SHOWNORMAL);
+#else
+    int r = system("xdg-open http://127.0.0.1:8080/ >/dev/null 2>&1 &");
+    (void)r;
+#endif
 
     while (true) {
         SOCKET client_socket = accept(server_socket, NULL, NULL);
@@ -779,5 +823,7 @@ void GrassWeb_LoadPage(const string& filename) {
         closesocket(client_socket);
     }
     closesocket(server_socket);
+#if defined(_WIN32)
     WSACleanup();
+#endif
 }

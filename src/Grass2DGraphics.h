@@ -1,7 +1,19 @@
 #ifndef GRASS_2D_GRAPHICS_H
 #define GRASS_2D_GRAPHICS_H
 
+#if defined(_WIN32)
 #include <windows.h>
+#else
+#include <cstdint>
+typedef void* HWND;
+typedef void* HDC;
+typedef void* HBITMAP;
+typedef uint32_t COLORREF;
+typedef int64_t LRESULT;
+typedef uint32_t UINT;
+typedef uintptr_t WPARAM;
+typedef intptr_t LPARAM;
+#endif
 #include <string>
 #include <cstdint>
 

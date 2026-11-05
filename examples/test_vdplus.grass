@@ -1,0 +1,161 @@
+!GrassGreen!
+!interface!
+
+int main() {
+    window {
+        auto_size_display();
+        border-radius-app(16);
+        header("dots");
+        header-color("#0f172a");
+        header-text-color("#22c55e");
+        title("GrassGreen VD+ Video Graphics Plus Studio");
+        size(720, 560);
+        color("#09090b");
+        theme("dark");
+        layout("center");                 // Автоматическое адаптивное центрирование всех элементов
+        particles(45, "#22c55e", 1.0);   // Адаптивные неоновые частицы на весь экран
+
+        // ── ВИДЖЕТ ЧАСОВ В ПРАВОМ ВЕРХНЕМ УГЛУ ──
+        clock "HH:mm:ss" {
+            id(sys_clock);
+            window-ob(590, 8);
+            size(105, 22);
+            right();
+            text-color("#22c55e");
+            font-size(13);
+            font-style("Consolas");
+            font-weight("bold");
+            glow("#22c55e", 6);
+        }
+
+        svg "logo.svg" {
+            window-ob(336, 50);
+            size(48, 48);
+            middle();
+        }
+
+        label "GrassGreen VD+ Video Graphics Engine" {
+            id(lbl_header);
+            window-ob(50, 110);
+            size(620, 36);
+            middle();
+            text-color("#22c55e");
+            font-size(22);
+            font-style("Segoe UI");
+            glow("#22c55e", 8);
+        }
+
+        label "CSS-grade vector compositing without legacy Win32 controls" {
+            window-ob(50, 150);
+            size(620, 26);
+            middle();
+            text-color("#a1a1aa");
+            font-size(14);
+        }
+
+        // ── ВКЛАДКА 1: ОСНОВНОЙ ЭКРАН (MAIN) ──
+        tab = "main" {
+            enter "" {
+                id(user_input);
+                window-ob(160, 195);
+                size(400, 42);
+                middle();
+                placeholder("Введите текст для обработки...");
+                radius(10);
+                border(1, "#27272a");
+                text-color("#f4f4f5");
+                font-size(15);
+            }
+
+            button "Применить эффект" {
+                id(btn_action);
+                window-ob(235, 255);
+                size(250, 44);
+                middle();
+                gradient("#22c55e", "#16a34a", 90);
+                hover-color("#4ade80");
+                active-color("#15803d");
+                glow("#22c55e", 10);
+                shadow(14, "#000000");
+                radius(10);
+                text-color("#ffffff");
+                font-size(15);
+                animate("pulse", 1000);
+                click-ob(user_input, lbl_result);
+            }
+
+            label "Ожидание ввода данных..." {
+                id(lbl_result);
+                window-ob(110, 320);
+                size(500, 46);
+                middle();
+                radius(8);
+                border(1, "#27272a");
+                button-color("#18181b");
+                text-color("#f4f4f5");
+                font-size(15);
+                shadow(10, "#000000");
+            }
+
+            button "Открыть вкладку Профиль ->" {
+                id(btn_to_profile);
+                window-ob(235, 385);
+                size(250, 40);
+                middle();
+                gradient("#3b82f6", "#1d4ed8", 90);
+                hover-color("#60a5fa");
+                active-color("#1e40af");
+                glow("#3b82f6", 8);
+                radius(8);
+                text-color("#ffffff");
+                font-size(14);
+                click-switch("profile");
+            }
+        }
+
+        // ── ВКЛАДКА 2: ПРОФИЛЬ (PROFILE) ──
+        tab = "profile" {
+            label "Личный кабинет GrassGreen ID" {
+                id(lbl_profile_title);
+                window-ob(160, 205);
+                size(400, 36);
+                middle();
+                text-color("#38bdf8");
+                font-size(20);
+                glow("#38bdf8", 8);
+                animate("fade-in", 300);
+            }
+
+            label "Статус разработчика: Pro Active" {
+                id(lbl_profile_status);
+                window-ob(160, 255);
+                size(400, 46);
+                middle();
+                radius(8);
+                border(1, "#1e293b");
+                button-color("#0f172a");
+                text-color("#94a3b8");
+                font-size(15);
+                animate("slide-up", 400);
+            }
+
+            button "<- Назад на Главную" {
+                id(btn_to_main);
+                window-ob(235, 330);
+                size(250, 42);
+                middle();
+                gradient("#10b981", "#059669", 90);
+                hover-color("#34d399");
+                active-color("#047857");
+                glow("#10b981", 8);
+                radius(8);
+                text-color("#ffffff");
+                font-size(14);
+                click-switch("main");
+            }
+        }
+    }
+
+    gout << "VD+ Engine verification test passed cleanly!" << endl;
+    return 0;
+}

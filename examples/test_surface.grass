@@ -1,0 +1,33 @@
+!GrassGreen!
+!interface!
+
+int main() {
+    // 1. Проверка установки режима auto
+    surface("auto");
+
+    // 2. Проверка работы режима freestanding (без создания окон ОС Win32)
+    surface("freestanding");
+
+    window {
+        surface("freestanding");
+        title("GrassGreen Bare-Metal Interface");
+        size(640, 480);
+        color("#0d1117");
+
+        label "GrassGreen Universal Surface" {
+            window-ob(40, 40);
+            size(360, 30);
+            text-color("#22c55e");
+        }
+
+        button "Hardware Direct Render" {
+            window-ob(40, 100);
+            size(220, 40);
+            button-color("#166534");
+            text-color("#ffffff");
+        }
+    }
+
+    gout << "Surface freestanding test completed successfully!" << endl;
+    return 0;
+}

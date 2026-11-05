@@ -3,18 +3,42 @@
   "name": "GrassGreen",
   "scopeName": "source.grassgreen",
   "patterns": [
-    { "include": "#comments" },
-    { "include": "#directives" },
-    { "include": "#imports" },
-    { "include": "#strings" },
-    { "include": "#stream_io" },
-    { "include": "#keywords" },
-    { "include": "#types" },
-    { "include": "#constants" },
-    { "include": "#builtins" },
-    { "include": "#functions" },
-    { "include": "#operators" },
-    { "include": "#punctuation" }
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#directives"
+    },
+    {
+      "include": "#imports"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#stream_io"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#constants"
+    },
+    {
+      "include": "#builtins"
+    },
+    {
+      "include": "#functions"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#punctuation"
+    }
   ],
   "repository": {
     "comments": {
@@ -34,7 +58,7 @@
       "patterns": [
         {
           "name": "keyword.control.directive.grassgreen",
-          "match": "!(GrassGreen|2DGraphics|tg|fsys|json|math|memory|GrassNet|proc|sys|interface|time|mmio|io|hw|thread|async|rand|[a-zA-Z0-9_]+)!"
+          "match": "!(GrassGreen|2DGraphics|tg|fsys|json|math|FastMath|CoreMath|memory|GrassNet|proc|sys|interface|time|mmio|io|hw|thread|async|rand|audio|video|GrassWeb|database|[a-zA-Z0-9_]+)!"
         }
       ]
     },
@@ -81,7 +105,7 @@
       "patterns": [
         {
           "name": "keyword.control.grassgreen",
-          "match": "\\b(if|else|while|for|return|break|continue)\\b"
+          "match": "\\b(if|else|while|for|return|break|continue|switch|tab)\\b"
         },
         {
           "name": "storage.modifier.grassgreen",
@@ -185,11 +209,15 @@
         },
         {
           "name": "support.function.ui.grassgreen",
-          "match": "\\b(window|title|size|color|theme|glass|label|enter|button|id|window-ob|text-color|font-size|font-style|shadow|radius|middle|border-color)\\b"
+          "match": "\\b(window|title|size|color|theme|glass|label|enter|button|id|window-ob|ob-window|text-color|font-size|font-style|font-family|shadow|radius|middle|center|border-color|bg-color|hover-color|active-color|focus-color|cursor-color|align|placeholder|cursor|text|auto_size_display|border-radius-app|border_radius_app|header|header-color|header_color|header-text-color|header_text_color|clock|tab|switch|surface|fullscreen|fullscrean|z-index|z_index|animation|animate|particles|svg|image|video)\\b"
         },
         {
           "name": "support.function.array.grassgreen",
           "match": "\\b(push|pop|len)\\b"
+        },
+        {
+          "name": "support.function.audio.grassgreen",
+          "match": "\\b(audio_play|audio_stop|audio_tone|audio_synth|audio_volume|audio_is_playing|audio_noise|audio_beep|audio)\\b"
         }
       ]
     },
