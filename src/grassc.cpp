@@ -328,7 +328,8 @@ public:
     do_add_const: {
         double c = readDouble();
         GrassValue a = pop();
-        if (a.is_str()) push(GrassValue::Str(a.toString() + to_string(c)));
+        if (a.isNumeric()) push(GrassValue::Num(a.toNumber() + c));
+        else if (a.is_str()) push(GrassValue::Str(a.toString() + GrassValue::Num(c).toString()));
         else push(GrassValue::Num(a.toNumber() + c));
         DISPATCH_STEP();
     }
@@ -535,7 +536,8 @@ public:
 
     do_add: {
         GrassValue b = pop(), a = pop();
-        if (a.is_str() || b.is_str()) push(GrassValue::Str(a.toString() + b.toString()));
+        if (a.isNumeric() && b.isNumeric()) push(GrassValue::Num(a.toNumber() + b.toNumber()));
+        else if (a.is_str() || b.is_str()) push(GrassValue::Str(a.toString() + b.toString()));
         else push(GrassValue::Num(a.toNumber() + b.toNumber()));
         DISPATCH_STEP();
     }
@@ -719,7 +721,14 @@ public:
                         size_t len = GrassIO::read_line(buf, sizeof(buf));
                         char* space = strpbrk(buf, " \t\r\n");
                         if (space) *space = '\0';
-                        push(GrassValue::Str(string(buf)));
+                        string val_str(buf);
+                        char* end_ptr = nullptr;
+                        double num_val = strtod(val_str.c_str(), &end_ptr);
+                        if (!val_str.empty() && end_ptr != val_str.c_str() && *end_ptr == '\0') {
+                            push(GrassValue::Num(num_val));
+                        } else {
+                            push(GrassValue::Str(val_str));
+                        }
                     }
                     else if (fn == "gin.getline" || fn == "input.getline" || fn == "getline" || fn == "ask") {
                         if (argc >= 1) {
@@ -728,7 +737,15 @@ public:
                         }
                         char buf[1024];
                         size_t len = GrassIO::read_line(buf, sizeof(buf));
-                        push(GrassValue::Str(string(buf, len)));
+                        string val_str(buf, len);
+                        while (!val_str.empty() && (val_str.back() == '\r' || val_str.back() == '\n')) val_str.pop_back();
+                        char* end_ptr = nullptr;
+                        double num_val = strtod(val_str.c_str(), &end_ptr);
+                        if (!val_str.empty() && end_ptr != val_str.c_str() && *end_ptr == '\0') {
+                            push(GrassValue::Num(num_val));
+                        } else {
+                            push(GrassValue::Str(val_str));
+                        }
                     }
                     else if ((fn == "len" || fn == "length" || fn == "size") && argc >= 1) {
                         if (args[0].is_array()) {

@@ -167,6 +167,21 @@ struct GrassValue {
         uint64_t t = bits & 0xFFFF000000000000ULL;
         return t != TAG_NIL && t != TAG_BOOL && t != TAG_STR && t != TAG_ARRAY && t != TAG_STRUCT;
     }
+    bool isNumeric() const {
+        if (is_num()) return true;
+        if (is_str()) {
+            const char* s = asCStr();
+            if (!s || !*s) return false;
+            while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') s++;
+            if (!*s) return false;
+            char* end = nullptr;
+            (void)std::strtod(s, &end);
+            if (end == s) return false;
+            while (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n') end++;
+            return *end == '\0';
+        }
+        return false;
+    }
 
     // ── Извлечение значений ──
     const char* asCStr() const {
