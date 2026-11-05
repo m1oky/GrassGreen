@@ -172,6 +172,7 @@ struct GrassValue {
         if (is_str()) {
             const char* s = asCStr();
             if (!s || !*s) return false;
+            if ((unsigned char)s[0] == 0xEF && (unsigned char)s[1] == 0xBB && (unsigned char)s[2] == 0xBF) s += 3;
             while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') s++;
             if (!*s) return false;
             char* end = nullptr;
@@ -200,7 +201,9 @@ struct GrassValue {
         if (is_str()) {
             const char* s = asCStr();
             if (!s || !*s) return 0.0;
-            char* end;
+            if ((unsigned char)s[0] == 0xEF && (unsigned char)s[1] == 0xBB && (unsigned char)s[2] == 0xBF) s += 3;
+            while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') s++;
+            char* end = nullptr;
             double v = std::strtod(s, &end);
             return (end != s) ? v : 0.0;
         }

@@ -719,9 +719,12 @@ public:
                         }
                         char buf[1024];
                         size_t len = GrassIO::read_line(buf, sizeof(buf));
-                        char* space = strpbrk(buf, " \t\r\n");
+                        char* p = buf;
+                        if ((unsigned char)p[0] == 0xEF && (unsigned char)p[1] == 0xBB && (unsigned char)p[2] == 0xBF) p += 3;
+                        while (*p == ' ' || *p == '\t') p++;
+                        char* space = strpbrk(p, " \t\r\n");
                         if (space) *space = '\0';
-                        string val_str(buf);
+                        string val_str(p);
                         char* end_ptr = nullptr;
                         double num_val = strtod(val_str.c_str(), &end_ptr);
                         if (!val_str.empty() && end_ptr != val_str.c_str() && *end_ptr == '\0') {
@@ -737,7 +740,9 @@ public:
                         }
                         char buf[1024];
                         size_t len = GrassIO::read_line(buf, sizeof(buf));
-                        string val_str(buf, len);
+                        char* p = buf;
+                        if ((unsigned char)p[0] == 0xEF && (unsigned char)p[1] == 0xBB && (unsigned char)p[2] == 0xBF) p += 3;
+                        string val_str(p);
                         while (!val_str.empty() && (val_str.back() == '\r' || val_str.back() == '\n')) val_str.pop_back();
                         char* end_ptr = nullptr;
                         double num_val = strtod(val_str.c_str(), &end_ptr);
@@ -1809,7 +1814,7 @@ void InstallGrassGreenEcosystem() {
     fs::path root_dir = exe_path.parent_path();
     if (root_dir.filename() == "bin") root_dir = root_dir.parent_path();
 
-    cout << "\n=== [GrassGreen (G&G) v4.0.0 Installer] ===\n";
+    cout << "\n=== [GrassGreen (G&G) v4.1.0 Installer] ===\n";
 
 #if defined(_WIN32)
     {
@@ -1841,7 +1846,7 @@ void InstallGrassGreenEcosystem() {
     if (!userprofile) userprofile = getenv("HOME");
 #endif
     if (userprofile) {
-        fs::path ext_dir = fs::path(userprofile) / ".vscode" / "extensions" / "m1oky.grassgreen-lang-3.0.0";
+        fs::path ext_dir = fs::path(userprofile) / ".vscode" / "extensions" / "m1oky.grassgreen-lang-4.1.0";
         fs::create_directories(ext_dir / "syntaxes");
         fs::create_directories(ext_dir / "snippets");
 
@@ -2109,58 +2114,6 @@ bool BuildStandaloneExe(const string& output_exe, const vector<uint8_t>& bytecod
     memcpy(footer, &bc_size, 4);
     memcpy(footer + 4, MAGIC_FOOTER, 8);
 
-    // 1. БЫСТРЫЙ ПУТЬ: если выходной .exe уже существует и имеет то же ядро — обновляем только хвост с байт-кодом!
-    LONGLONG out_total = 0;
-    LONGLONG out_stub = GetCleanStubSize(output_exe.c_str(), out_total);
-
-    if (out_stub == stub_size) {
-        HANDLE hOut = CreateFileA(output_exe.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-        if (hOut != INVALID_HANDLE_VALUE) {
-            // Если размер старого и нового байт-кода совпадает, проверяем: вдруг код вообще не менялся?
-            if (out_total == stub_size + (LONGLONG)bc_size + 12) {
-                LARGE_INTEGER pos;
-                pos.QuadPart = stub_size;
-                SetFilePointerEx(hOut, pos, NULL, FILE_BEGIN);
-                vector<uint8_t> existing_bc(bc_size);
-                DWORD r = 0;
-                if (ReadFile(hOut, existing_bc.data(), bc_size, &r, NULL) && r == bc_size &&
-                    memcmp(existing_bc.data(), bytecode.data(), bc_size) == 0) {
-                    CloseHandle(hOut);
-                    return true; // 0.1 мс — файл уже идентичен!
-                }
-            }
-
-            // Перезаписываем только крошечный блок байт-кода в конце файла (0.3 мс)
-            LARGE_INTEGER pos;
-            pos.QuadPart = stub_size;
-            SetFilePointerEx(hOut, pos, NULL, FILE_BEGIN);
-
-            DWORD written = 0;
-            WriteFile(hOut, bytecode.data(), bc_size, &written, NULL);
-            WriteFile(hOut, footer, 12, &written, NULL);
-            SetEndOfFile(hOut);
-            CloseHandle(hOut);
-            return true;
-        }
-    }
-
-    // 2. Если .exe создаётся впервые: используем системное копирование ядра CopyFileA
-    if (self_total == stub_size && CopyFileA(self_path, output_exe.c_str(), FALSE)) {
-        HANDLE hOut = CreateFileA(output_exe.c_str(), GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-        if (hOut != INVALID_HANDLE_VALUE) {
-            LARGE_INTEGER pos;
-            pos.QuadPart = stub_size;
-            SetFilePointerEx(hOut, pos, NULL, FILE_BEGIN);
-            DWORD written = 0;
-            WriteFile(hOut, bytecode.data(), bc_size, &written, NULL);
-            WriteFile(hOut, footer, 12, &written, NULL);
-            SetEndOfFile(hOut);
-            CloseHandle(hOut);
-            return true;
-        }
-    }
-
-    // 3. Резервный путь (если сам компилятор имел встроенный хвост)
     HANDLE hSrc = CreateFileA(self_path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hSrc == INVALID_HANDLE_VALUE) return false;
     vector<char> pe_stub((size_t)stub_size);
