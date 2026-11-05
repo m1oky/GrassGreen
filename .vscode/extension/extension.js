@@ -1,10 +1,10 @@
 const vscode = require('vscode');
 
 /**
- * GrassGreen 4.0 Standard Library Reference & API Catalog
+ * GrassGreen 4.1 Standard Library Reference & API Catalog
  */
 const MODULES = [
-    { name: "!GrassGreen!", doc: "Базовое ядро языка GrassGreen 4.0, потоковый ввод-вывод (gout/gin), типы данных и операторы." },
+    { name: "!GrassGreen!", doc: "Базовое ядро языка GrassGreen 4.1, потоковый ввод-вывод (gout/gin), типы данных и операторы." },
     { name: "!time!", doc: "Модуль профилирования, таймеров и работы с системным временем." },
     { name: "!interface!", doc: "Графический Fluent GUI движок (Win32 / GDI+), окна, кнопки, поля ввода." },
     { name: "!FastMath!", doc: "Быстрая математика: тригонометрия, интерполяция lerp/clamp, расстояния." },
@@ -181,7 +181,7 @@ function getOrCreateTerminal(name) {
 }
 
 /**
- * Activates the GrassGreen 4.0 extension
+ * Activates the GrassGreen 4.1 extension
  * @param {vscode.ExtensionContext} context
  */
 function activate(context) {
@@ -262,7 +262,7 @@ function activate(context) {
             if (mod) {
                 const md = new vscode.MarkdownString();
                 md.appendCodeblock(mod.name, 'grassgreen');
-                md.appendMarkdown(`**Модуль GrassGreen 4.0**\n\n${mod.doc}`);
+                md.appendMarkdown(`**Модуль GrassGreen 4.1**\n\n${mod.doc}`);
                 return new vscode.Hover(md);
             }
 
