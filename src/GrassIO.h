@@ -1,11 +1,12 @@
 // =============================================================================
-//  GrassGreen 4.0 — Freestanding I/O (Win32 & POSIX native)
-//  Файл создан Архитектором. Реализация — Кодер Ядра.
+//  GrassGreen 4.2.0 — Freestanding I/O (Win32 & POSIX native + Bare-Metal Fallback)
 // =============================================================================
 #ifndef GRASS_IO_H
 #define GRASS_IO_H
 
 #include <cstddef>
+#include <string>
+#include <cstring>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -13,6 +14,14 @@
 #include <unistd.h>
 #include <cstdio>
 #endif
+
+namespace GrassKeyboard {
+    std::string read_line();
+}
+
+namespace GrassHAL {
+    bool is_freestanding();
+}
 
 namespace GrassIO {
 
@@ -67,6 +76,8 @@ inline void write_string(const char* str)
 // -----------------------------------------------------------------------------
 //  Читает строку из stdin в buf (макс. buf_size байт).
 //  Возвращает количество фактически прочитанных байт.
+//  В режиме Bare-Metal / без дескрипторов ОС автоматически опрашивает контроллер
+//  клавиатуры PS/2 через драйвер GrassKeyboard.
 // -----------------------------------------------------------------------------
 inline size_t read_line(char* buf, size_t buf_size)
 {
@@ -74,8 +85,13 @@ inline size_t read_line(char* buf, size_t buf_size)
 #if defined(_WIN32)
     HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
     if (h == INVALID_HANDLE_VALUE) {
-        buf[0] = '\0';
-        return 0;
+        // Резервный аппаратный опрос контроллера клавиатуры (bare-metal fallback)
+        std::string line = GrassKeyboard::read_line();
+        size_t len = line.size();
+        if (len >= buf_size) len = buf_size - 1;
+        std::memcpy(buf, line.data(), len);
+        buf[len] = '\0';
+        return len;
     }
     DWORD mode = 0;
     if (GetConsoleMode(h, &mode)) {
