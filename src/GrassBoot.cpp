@@ -3,6 +3,8 @@
 //  Поддержка: --multiboot, --kernel (.bin), --sys (.sys), --iso (.iso)
 // =============================================================================
 #include "GrassBoot.h"
+#include "GrassSyntax.h"
+#include <unordered_map>
 #include <fstream>
 #include <iostream>
 #include <iomanip>
@@ -153,6 +155,16 @@ namespace GrassBoot {
         append_u8(bin_data, 0xB0); append_u8(bin_data, 0x03);
         append_u8(bin_data, 0xEE);
 
+        // mov dx, 0x3FA; mov al, 0xC7; out dx, al (Enable 16-byte FIFO & clear buffers)
+        append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03FA); append_u16(bin_data, 0x0000);
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0xC7);
+        append_u8(bin_data, 0xEE);
+
+        // mov dx, 0x3FC; mov al, 0x0B; out dx, al (Modem Control: DTR, RTS, OUT2)
+        append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03FC); append_u16(bin_data, 0x0000);
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0B);
+        append_u8(bin_data, 0xEE);
+
         // 1.4. Вывод приветственного баннера в видеотранслятор VGA (0xB8000)
         const char* banner = "GrassGreen OS v4.2.0 Kernel [Multiboot Online]";
         size_t banner_len = strlen(banner);
@@ -174,17 +186,681 @@ namespace GrassBoot {
             append_u8(bin_data, 0xEE);
         }
 
-        // 1.5. Вставка машинного кода пользователя (если были inline asm { ... } блоки)
-        if (!asm_machine_code.empty()) {
-            for (uint8_t b : asm_machine_code) {
-                append_u8(bin_data, b);
-            }
-        }
+        // 1.5. Нативный 32-битный Protected Mode рантайм для ядра GrassGreen
+        if (!bytecode.empty()) {
+            // Прыжок через встроенные процедуры ядра
+            append_u8(bin_data, 0xE9); // jmp rel32
+            size_t jmp_helpers_fixup = bin_data.size();
+            append_u32(bin_data, 0); // placeholder
 
-        // 1.6. Завершающий бесконечный цикл ядра: cli; hlt; jmp $-2
-        append_u8(bin_data, 0xFA); // cli
-        append_u8(bin_data, 0xF4); // hlt
-        append_u8(bin_data, 0xEB); append_u8(bin_data, 0xFD); // jmp -3 (hlt)
+            // PS/2 Lookup Table (52 байта, сканкоды 0x02..0x35)
+            uint32_t addr_ps2_table = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            static const uint8_t ps2_lut[52] = {
+                '1','2','3','4','5','6','7','8','9','0','-','=', 0,
+                '\t','q','w','e','r','t','y','u','i','o','p','[',']',
+                0, 0,
+                'a','s','d','f','g','h','j','k','l',';','\'','`',
+                0,'\\','z','x','c','v','b','n','m',',','.','/'
+            };
+            for (int i = 0; i < 52; ++i) append_u8(bin_data, ps2_lut[i]);
+
+            // --- Helper 1: helper_print_char (AL = char) ---
+            uint32_t addr_print_char = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x50); // push eax
+            append_u8(bin_data, 0x53); // push ebx
+            append_u8(bin_data, 0x51); // push ecx
+            append_u8(bin_data, 0x52); // push edx
+            append_u8(bin_data, 0x88); append_u8(bin_data, 0xC4); // mov ah, al (save char in AH)
+
+            // COM1 TX
+            append_u8(bin_data, 0x66); append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03FD);
+            size_t wait_tx1 = bin_data.size();
+            append_u8(bin_data, 0xEC); // in al, dx
+            append_u8(bin_data, 0xA8); append_u8(bin_data, 0x20); // test al, 0x20
+            append_u8(bin_data, 0x74);
+            append_u8(bin_data, (uint8_t)(int8_t)(wait_tx1 - (bin_data.size() + 1)));
+
+            append_u8(bin_data, 0x66); append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03F8);
+            append_u8(bin_data, 0x88); append_u8(bin_data, 0xE0); // mov al, ah (restore char)
+            append_u8(bin_data, 0xEE); // out dx, al
+
+            // Newline? Send '\r' to COM1
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0xFC); append_u8(bin_data, 0x0A); // cmp ah, 0x0A
+            size_t jne_skip_cr = bin_data.size();
+            append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            append_u8(bin_data, 0x66); append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03FD);
+            size_t wait_tx2 = bin_data.size();
+            append_u8(bin_data, 0xEC);
+            append_u8(bin_data, 0xA8); append_u8(bin_data, 0x20);
+            append_u8(bin_data, 0x74);
+            append_u8(bin_data, (uint8_t)(int8_t)(wait_tx2 - (bin_data.size() + 1)));
+
+            append_u8(bin_data, 0x66); append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03F8);
+            append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0D);
+            append_u8(bin_data, 0xEE);
+
+            bin_data[jne_skip_cr + 1] = (uint8_t)(bin_data.size() - (jne_skip_cr + 2));
+
+            // VGA Display Step
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091000); // mov ebx, [0x91000]
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0xFC); append_u8(bin_data, 0x0A); // cmp ah, 0x0A
+            size_t jne_vga_nl = bin_data.size();
+            append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            // ebx = (ebx / 160 + 1) * 160
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xD8);
+            append_u8(bin_data, 0x31); append_u8(bin_data, 0xD2);
+            append_u8(bin_data, 0xB9); append_u32(bin_data, 160);
+            append_u8(bin_data, 0xF7); append_u8(bin_data, 0xF1);
+            append_u8(bin_data, 0x40);
+            append_u8(bin_data, 0xF7); append_u8(bin_data, 0xE1);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xC3);
+            size_t jmp_bounds = bin_data.size();
+            append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            bin_data[jne_vga_nl + 1] = (uint8_t)(bin_data.size() - (jne_vga_nl + 2));
+
+            // Backspace 0x08
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0xFC); append_u8(bin_data, 0x08); // cmp ah, 0x08
+            size_t jne_bksp = bin_data.size();
+            append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xFB); append_u8(bin_data, 0x02);
+            size_t jb_vga = bin_data.size();
+            append_u8(bin_data, 0x72); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x02);
+            append_u8(bin_data, 0x66); append_u8(bin_data, 0xC7); append_u8(bin_data, 0x83);
+            append_u32(bin_data, 0x000B8000);
+            append_u16(bin_data, 0x0720);
+            size_t jmp_done1 = bin_data.size();
+            append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            bin_data[jne_bksp + 1] = (uint8_t)(bin_data.size() - (jne_bksp + 2));
+
+            // CR 0x0D -> ignore
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0xFC); append_u8(bin_data, 0x0D); // cmp ah, 0x0D
+            size_t je_cr = bin_data.size();
+            append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            // Printable character: write to VGA
+            append_u8(bin_data, 0x88); append_u8(bin_data, 0xA3); append_u32(bin_data, 0x000B8000); // mov [ebx + 0xB8000], ah
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x83); append_u32(bin_data, 0x000B8001);
+            append_u8(bin_data, 0x0A); // GrassGreen bright green
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xC3); append_u8(bin_data, 0x02);
+
+            bin_data[jmp_bounds + 1] = (uint8_t)(bin_data.size() - (jmp_bounds + 2));
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0xFB); append_u32(bin_data, 4000);
+            size_t jb_bounds = bin_data.size();
+            append_u8(bin_data, 0x72); append_u8(bin_data, 0x02);
+            append_u8(bin_data, 0x31); append_u8(bin_data, 0xDB);
+
+            size_t vga_done_pos = bin_data.size();
+            bin_data[jb_vga + 1]   = (uint8_t)(vga_done_pos - (jb_vga + 2));
+            bin_data[jmp_done1 + 1] = (uint8_t)(vga_done_pos - (jmp_done1 + 2));
+            bin_data[je_cr + 1]    = (uint8_t)(vga_done_pos - (je_cr + 2));
+
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091000);
+            append_u8(bin_data, 0x5A); // pop edx
+            append_u8(bin_data, 0x59); // pop ecx
+            append_u8(bin_data, 0x5B); // pop ebx
+            append_u8(bin_data, 0x58); // pop eax
+            append_u8(bin_data, 0xC3); // ret
+
+            // --- Helper 2: helper_print_string (ESI = string ptr) ---
+            uint32_t addr_print_string = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x56); // push esi
+            append_u8(bin_data, 0x50); // push eax
+            size_t loop_str = bin_data.size();
+            append_u8(bin_data, 0xAC); // lodsb
+            append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0); // test al, al
+            size_t jz_str_done = bin_data.size();
+            append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE8); // call helper_print_char
+            append_u32(bin_data, addr_print_char - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0xEB); // jmp loop_str
+            append_u8(bin_data, (uint8_t)(int8_t)(loop_str - (bin_data.size() + 1)));
+
+            bin_data[jz_str_done + 1] = (uint8_t)(bin_data.size() - (jz_str_done + 2));
+            append_u8(bin_data, 0x58); // pop eax
+            append_u8(bin_data, 0x5E); // pop esi
+            append_u8(bin_data, 0xC3); // ret
+
+            // --- Helper 3: helper_print_num (EAX = int) ---
+            uint32_t addr_print_num = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x50); // push eax
+            append_u8(bin_data, 0x53); // push ebx
+            append_u8(bin_data, 0x51); // push ecx
+            append_u8(bin_data, 0x52); // push edx
+            append_u8(bin_data, 0x57); // push edi
+            append_u8(bin_data, 0x56); // push esi
+
+            append_u8(bin_data, 0xBF); append_u32(bin_data, 0x0008E020);
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x07); append_u8(bin_data, 0x00); // mov byte [edi], 0
+
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0); // test eax, eax
+            size_t jns_pos = bin_data.size();
+            append_u8(bin_data, 0x79); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xF7); append_u8(bin_data, 0xD8); // neg eax
+            append_u8(bin_data, 0x50); // push eax
+            append_u8(bin_data, 0xB0); append_u8(bin_data, '-');
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_print_char - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0x58); // pop eax
+
+            bin_data[jns_pos + 1] = (uint8_t)(bin_data.size() - (jns_pos + 2));
+            append_u8(bin_data, 0xB9); append_u32(bin_data, 10);
+
+            size_t num_loop_pos = bin_data.size();
+            append_u8(bin_data, 0x31); append_u8(bin_data, 0xD2); // xor edx, edx
+            append_u8(bin_data, 0xF7); append_u8(bin_data, 0xF1); // div ecx
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0xC2); append_u8(bin_data, '0'); // add dl, '0'
+            append_u8(bin_data, 0x4F); // dec edi
+            append_u8(bin_data, 0x88); append_u8(bin_data, 0x17); // mov [edi], dl
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0); // test eax, eax
+            append_u8(bin_data, 0x75);
+            append_u8(bin_data, (uint8_t)(int8_t)(num_loop_pos - (bin_data.size() + 1)));
+
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xFE); // mov esi, edi
+            append_u8(bin_data, 0xE8); // call helper_print_string
+            append_u32(bin_data, addr_print_string - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+            append_u8(bin_data, 0x5E); // pop esi
+            append_u8(bin_data, 0x5F); // pop edi
+            append_u8(bin_data, 0x5A); // pop edx
+            append_u8(bin_data, 0x59); // pop ecx
+            append_u8(bin_data, 0x5B); // pop ebx
+            append_u8(bin_data, 0x58); // pop eax
+            append_u8(bin_data, 0xC3); // ret
+
+            // --- Helper 4: helper_read_char (AL = returned char) ---
+            uint32_t addr_read_char = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x52); // push edx
+            append_u8(bin_data, 0x53); // push ebx
+
+            size_t poll_top = bin_data.size();
+            // COM1 check
+            append_u8(bin_data, 0x66); append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03FD);
+            append_u8(bin_data, 0xEC);
+            append_u8(bin_data, 0xA8); append_u8(bin_data, 0x01);
+            size_t jnz_com = bin_data.size();
+            append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            // PS/2 check
+            append_u8(bin_data, 0xE4); append_u8(bin_data, 0x64);
+            append_u8(bin_data, 0xA8); append_u8(bin_data, 0x01);
+            size_t jnz_ps2 = bin_data.size();
+            append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            // pause; jmp poll_top
+            append_u8(bin_data, 0xF3); append_u8(bin_data, 0x90);
+            append_u8(bin_data, 0xEB);
+            append_u8(bin_data, (uint8_t)(int8_t)(poll_top - (bin_data.size() + 1)));
+
+            // COM1 ready
+            bin_data[jnz_com + 1] = (uint8_t)(bin_data.size() - (jnz_com + 2));
+            append_u8(bin_data, 0x66); append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03F8);
+            append_u8(bin_data, 0xEC);
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x0D);
+            size_t jne_com_cr = bin_data.size();
+            append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            // It was 0x0D: check if 0x0A is waiting in FIFO
+            append_u8(bin_data, 0x66); append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03FD);
+            append_u8(bin_data, 0xEC);
+            append_u8(bin_data, 0xA8); append_u8(bin_data, 0x01);
+            size_t jz_no_lf = bin_data.size();
+            append_u8(bin_data, 0x74); append_u8(bin_data, 0x06);
+            append_u8(bin_data, 0x66); append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03F8);
+            append_u8(bin_data, 0xEC); // consume 0x0A
+            bin_data[jz_no_lf + 1] = 0x06;
+
+            append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0A);
+            size_t jmp_got1 = bin_data.size();
+            append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            bin_data[jne_com_cr + 1] = (uint8_t)(bin_data.size() - (jne_com_cr + 2));
+
+            // PS/2 ready
+            bin_data[jnz_ps2 + 1] = (uint8_t)(bin_data.size() - (jnz_ps2 + 2));
+            append_u8(bin_data, 0xE4); append_u8(bin_data, 0x60);
+            append_u8(bin_data, 0xA8); append_u8(bin_data, 0x80); // key release?
+            append_u8(bin_data, 0x75);
+            append_u8(bin_data, (uint8_t)(int8_t)(poll_top - (bin_data.size() + 1)));
+
+            // Enter 0x1C
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x1C);
+            size_t jne_ps2_enter = bin_data.size();
+            append_u8(bin_data, 0x75); append_u8(bin_data, 0x04);
+            append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0A);
+            size_t jmp_got2 = bin_data.size();
+            append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // Backspace 0x0E
+            bin_data[jne_ps2_enter + 1] = (uint8_t)(bin_data.size() - (jne_ps2_enter + 2));
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x0E);
+            size_t jne_ps2_bksp = bin_data.size();
+            append_u8(bin_data, 0x75); append_u8(bin_data, 0x04);
+            append_u8(bin_data, 0xB0); append_u8(bin_data, 0x08);
+            size_t jmp_got3 = bin_data.size();
+            append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // Space 0x39
+            bin_data[jne_ps2_bksp + 1] = (uint8_t)(bin_data.size() - (jne_ps2_bksp + 2));
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x39);
+            size_t jne_ps2_space = bin_data.size();
+            append_u8(bin_data, 0x75); append_u8(bin_data, 0x04);
+            append_u8(bin_data, 0xB0); append_u8(bin_data, 0x20);
+            size_t jmp_got4 = bin_data.size();
+            append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // Table lookup
+            bin_data[jne_ps2_space + 1] = (uint8_t)(bin_data.size() - (jne_ps2_space + 2));
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x02);
+            append_u8(bin_data, 0x72);
+            append_u8(bin_data, (uint8_t)(int8_t)(poll_top - (bin_data.size() + 1)));
+
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x35);
+            append_u8(bin_data, 0x77);
+            append_u8(bin_data, (uint8_t)(int8_t)(poll_top - (bin_data.size() + 1)));
+
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB6); append_u8(bin_data, 0xD8);
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x02);
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x83); append_u32(bin_data, addr_ps2_table);
+            append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0);
+            append_u8(bin_data, 0x74);
+            append_u8(bin_data, (uint8_t)(int8_t)(poll_top - (bin_data.size() + 1)));
+
+            // got_char:
+            size_t got_char_pos = bin_data.size();
+            bin_data[jmp_got1 + 1] = (uint8_t)(got_char_pos - (jmp_got1 + 2));
+            bin_data[jmp_got2 + 1] = (uint8_t)(got_char_pos - (jmp_got2 + 2));
+            bin_data[jmp_got3 + 1] = (uint8_t)(got_char_pos - (jmp_got3 + 2));
+            bin_data[jmp_got4 + 1] = (uint8_t)(got_char_pos - (jmp_got4 + 2));
+
+            append_u8(bin_data, 0x5B); // pop ebx
+            append_u8(bin_data, 0x5A); // pop edx
+            append_u8(bin_data, 0xC3); // ret
+
+            // --- Helper 5: helper_read_line (EDI = buffer) ---
+            uint32_t addr_read_line = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x57); // push edi
+            append_u8(bin_data, 0x53); // push ebx
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xFB); // mov ebx, edi
+
+            size_t rl_top = bin_data.size();
+            append_u8(bin_data, 0xE8); // call helper_read_char
+            append_u32(bin_data, addr_read_char - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x0A); // Enter
+            size_t je_rl_enter = bin_data.size();
+            append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x08); // Backspace
+            size_t je_rl_bksp = bin_data.size();
+            append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            // Regular char
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xFA);
+            append_u8(bin_data, 0x29); append_u8(bin_data, 0xDA);
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0xFA); append_u32(bin_data, 250);
+            append_u8(bin_data, 0x73);
+            append_u8(bin_data, (uint8_t)(int8_t)(rl_top - (bin_data.size() + 1)));
+
+            append_u8(bin_data, 0x88); append_u8(bin_data, 0x07);
+            append_u8(bin_data, 0x47);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_print_char - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0xEB);
+            append_u8(bin_data, (uint8_t)(int8_t)(rl_top - (bin_data.size() + 1)));
+
+            // rl_bksp
+            bin_data[je_rl_bksp + 1] = (uint8_t)(bin_data.size() - (je_rl_bksp + 2));
+            append_u8(bin_data, 0x39); append_u8(bin_data, 0xDF);
+            append_u8(bin_data, 0x76);
+            append_u8(bin_data, (uint8_t)(int8_t)(rl_top - (bin_data.size() + 1)));
+
+            append_u8(bin_data, 0x4F); // dec edi
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x07); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xB0); append_u8(bin_data, 0x08);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_print_char - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0xEB);
+            append_u8(bin_data, (uint8_t)(int8_t)(rl_top - (bin_data.size() + 1)));
+
+            // rl_enter
+            bin_data[je_rl_enter + 1] = (uint8_t)(bin_data.size() - (je_rl_enter + 2));
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x07); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0A);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_print_char - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+            append_u8(bin_data, 0x5B); // pop ebx
+            append_u8(bin_data, 0x5F); // pop edi
+            append_u8(bin_data, 0xC3); // ret
+
+            // --- Helper 6: helper_copy_string (ESI = src, EDI = dst) ---
+            uint32_t addr_copy_string = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x56); // push esi
+            append_u8(bin_data, 0x57); // push edi
+            append_u8(bin_data, 0x50); // push eax
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0xFE); append_u32(bin_data, 0x00010000);
+            size_t jae_cpy = bin_data.size();
+            append_u8(bin_data, 0x73); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x07); append_u8(bin_data, 0x00);
+            size_t jmp_cpydone = bin_data.size();
+            append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            bin_data[jae_cpy + 1] = (uint8_t)(bin_data.size() - (jae_cpy + 2));
+            size_t cpy_loop = bin_data.size();
+            append_u8(bin_data, 0xAC);
+            append_u8(bin_data, 0xAA);
+            append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0);
+            append_u8(bin_data, 0x75);
+            append_u8(bin_data, (uint8_t)(int8_t)(cpy_loop - (bin_data.size() + 1)));
+
+            bin_data[jmp_cpydone + 1] = (uint8_t)(bin_data.size() - (jmp_cpydone + 2));
+            append_u8(bin_data, 0x58); // pop eax
+            append_u8(bin_data, 0x5F); // pop edi
+            append_u8(bin_data, 0x5E); // pop esi
+            append_u8(bin_data, 0xC3); // ret
+
+            // Fixup jump over helpers
+            uint32_t after_helpers_offset = (uint32_t)bin_data.size();
+            uint32_t rel_helpers = after_helpers_offset - (uint32_t)(jmp_helpers_fixup + 4);
+            write_u32_le(bin_data, jmp_helpers_fixup, rel_helpers);
+
+            // Инициализация позиции VGA курсора: строка 1 (смещение 160)
+            append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05);
+            append_u32(bin_data, 0x00091000);
+            append_u32(bin_data, 160);
+
+            // Исполнение inline asm вставок (если есть)
+            if (!asm_machine_code.empty()) {
+                for (uint8_t b : asm_machine_code) append_u8(bin_data, b);
+            }
+
+            // Трансляция байт-кода программы в машинный код Protected Mode
+            struct StrFixup { size_t mc_pos; std::string text; };
+            std::vector<StrFixup> str_fixups;
+
+            struct BranchFixup { size_t mc_pos; uint32_t target_bc; };
+            std::vector<BranchFixup> branch_fixups;
+
+            std::unordered_map<uint32_t, size_t> bc_to_mc;
+            std::unordered_map<std::string, uint32_t> var_slots;
+            uint32_t next_var_addr = 0x00080000;
+
+            size_t ip = 0;
+            auto readU8 = [&]() -> uint8_t {
+                return (ip < bytecode.size()) ? bytecode[ip++] : 0;
+            };
+            auto readU32 = [&]() -> uint32_t {
+                if (ip + 4 > bytecode.size()) { ip = bytecode.size(); return 0; }
+                uint32_t val = (uint32_t)bytecode[ip] |
+                               ((uint32_t)bytecode[ip + 1] << 8) |
+                               ((uint32_t)bytecode[ip + 2] << 16) |
+                               ((uint32_t)bytecode[ip + 3] << 24);
+                ip += 4;
+                return val;
+            };
+            auto readDouble = [&]() -> double {
+                if (ip + 8 > bytecode.size()) { ip = bytecode.size(); return 0.0; }
+                double v = 0.0;
+                std::memcpy(&v, &bytecode[ip], 8);
+                ip += 8;
+                return v;
+            };
+            auto readString = [&]() -> std::string {
+                uint32_t len = readU32();
+                if (ip + len > bytecode.size()) { ip = bytecode.size(); return ""; }
+                std::string s((const char*)&bytecode[ip], len);
+                ip += len;
+                return s;
+            };
+
+            while (ip < bytecode.size()) {
+                uint32_t cur_bc = (uint32_t)ip;
+                bc_to_mc[cur_bc] = bin_data.size();
+                uint8_t op = readU8();
+
+                switch (op) {
+                    case 0x00: // OP_HALT
+                        append_u8(bin_data, 0xFA); // cli
+                        append_u8(bin_data, 0xF4); // hlt
+                        append_u8(bin_data, 0xEB); append_u8(bin_data, 0xFD); // jmp -3
+                        break;
+                    case 0x01: { // OP_CONST_NUM
+                        double d = readDouble();
+                        int32_t val = (int32_t)d;
+                        append_u8(bin_data, 0x68); append_u32(bin_data, (uint32_t)val);
+                        break;
+                    }
+                    case 0x02: { // OP_CONST_STR
+                        std::string s = readString();
+                        append_u8(bin_data, 0x68);
+                        str_fixups.push_back({bin_data.size(), s});
+                        append_u32(bin_data, 0);
+                        break;
+                    }
+                    case 0x03: { // OP_LOAD_VAR
+                        std::string vname = readString();
+                        if (var_slots.find(vname) == var_slots.end()) {
+                            var_slots[vname] = next_var_addr;
+                            next_var_addr += 256;
+                        }
+                        append_u8(bin_data, 0x68); append_u32(bin_data, var_slots[vname]);
+                        break;
+                    }
+                    case 0x04: { // OP_STORE_VAR
+                        std::string vname = readString();
+                        if (var_slots.find(vname) == var_slots.end()) {
+                            var_slots[vname] = next_var_addr;
+                            next_var_addr += 256;
+                        }
+                        append_u8(bin_data, 0x5E); // pop esi
+                        append_u8(bin_data, 0xBF); append_u32(bin_data, var_slots[vname]); // mov edi, var_addr
+                        append_u8(bin_data, 0xE8); // call helper_copy_string
+                        append_u32(bin_data, addr_copy_string - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+                        break;
+                    }
+                    case 0x05: // OP_POP
+                        append_u8(bin_data, 0x58); // pop eax
+                        break;
+                    case 0x0E: // OP_NOP
+                        append_u8(bin_data, 0x90);
+                        break;
+                    case 0x10: // OP_ADD
+                        append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
+                        append_u8(bin_data, 0x01); append_u8(bin_data, 0xD8);
+                        append_u8(bin_data, 0x50);
+                        break;
+                    case 0x11: // OP_SUB
+                        append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
+                        append_u8(bin_data, 0x29); append_u8(bin_data, 0xD8);
+                        append_u8(bin_data, 0x50);
+                        break;
+                    case 0x12: // OP_MUL
+                        append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
+                        append_u8(bin_data, 0x0F); append_u8(bin_data, 0xAF); append_u8(bin_data, 0xC3);
+                        append_u8(bin_data, 0x50);
+                        break;
+                    case 0x13: // OP_DIV
+                        append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
+                        append_u8(bin_data, 0x99); append_u8(bin_data, 0xF7); append_u8(bin_data, 0xFB);
+                        append_u8(bin_data, 0x50);
+                        break;
+                    case 0x20: // OP_CMP_EQ
+                        append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
+                        append_u8(bin_data, 0x39); append_u8(bin_data, 0xD8);
+                        append_u8(bin_data, 0x0F); append_u8(bin_data, 0x94); append_u8(bin_data, 0xC0);
+                        append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB6); append_u8(bin_data, 0xC0);
+                        append_u8(bin_data, 0x50);
+                        break;
+                    case 0x21: // OP_CMP_NEQ
+                        append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
+                        append_u8(bin_data, 0x39); append_u8(bin_data, 0xD8);
+                        append_u8(bin_data, 0x0F); append_u8(bin_data, 0x95); append_u8(bin_data, 0xC0);
+                        append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB6); append_u8(bin_data, 0xC0);
+                        append_u8(bin_data, 0x50);
+                        break;
+                    case 0x22: // OP_CMP_LT
+                        append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
+                        append_u8(bin_data, 0x39); append_u8(bin_data, 0xD8);
+                        append_u8(bin_data, 0x0F); append_u8(bin_data, 0x9C); append_u8(bin_data, 0xC0);
+                        append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB6); append_u8(bin_data, 0xC0);
+                        append_u8(bin_data, 0x50);
+                        break;
+                    case 0x23: // OP_CMP_GT
+                        append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
+                        append_u8(bin_data, 0x39); append_u8(bin_data, 0xD8);
+                        append_u8(bin_data, 0x0F); append_u8(bin_data, 0x9F); append_u8(bin_data, 0xC0);
+                        append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB6); append_u8(bin_data, 0xC0);
+                        append_u8(bin_data, 0x50);
+                        break;
+                    case 0x24: // OP_CMP_LTE
+                        append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
+                        append_u8(bin_data, 0x39); append_u8(bin_data, 0xD8);
+                        append_u8(bin_data, 0x0F); append_u8(bin_data, 0x9E); append_u8(bin_data, 0xC0);
+                        append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB6); append_u8(bin_data, 0xC0);
+                        append_u8(bin_data, 0x50);
+                        break;
+                    case 0x25: // OP_CMP_GTE
+                        append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
+                        append_u8(bin_data, 0x39); append_u8(bin_data, 0xD8);
+                        append_u8(bin_data, 0x0F); append_u8(bin_data, 0x9D); append_u8(bin_data, 0xC0);
+                        append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB6); append_u8(bin_data, 0xC0);
+                        append_u8(bin_data, 0x50);
+                        break;
+                    case 0x30:   // OP_JMP
+                    case 0xF0: { // OP_JUMP
+                        uint32_t target_bc = readU32();
+                        append_u8(bin_data, 0xE9);
+                        branch_fixups.push_back({bin_data.size(), target_bc});
+                        append_u32(bin_data, 0);
+                        break;
+                    }
+                    case 0x31: { // OP_JMP_IF_FALSE
+                        uint32_t target_bc = readU32();
+                        append_u8(bin_data, 0x58); // pop eax
+                        append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0); // test eax, eax
+                        append_u8(bin_data, 0x0F); append_u8(bin_data, 0x84); // jz rel32
+                        branch_fixups.push_back({bin_data.size(), target_bc});
+                        append_u32(bin_data, 0);
+                        break;
+                    }
+                    case 0x32:   // OP_CALL_FUNC
+                    case 0xF1: { // OP_CALL_USER
+                        uint32_t target_bc = readU32();
+                        append_u8(bin_data, 0xE8); // call rel32
+                        branch_fixups.push_back({bin_data.size(), target_bc});
+                        append_u32(bin_data, 0);
+                        break;
+                    }
+                    case 0x33: // OP_RET
+                        append_u8(bin_data, 0x58); // pop eax
+                        append_u8(bin_data, 0xC3); // ret
+                        break;
+                    case 0x40: { // OP_LOG
+                        append_u8(bin_data, 0x5E); // pop esi
+                        append_u8(bin_data, 0x81); append_u8(bin_data, 0xFE); append_u32(bin_data, 0x00010000);
+                        size_t jae_log = bin_data.size();
+                        append_u8(bin_data, 0x73); append_u8(bin_data, 0x00);
+                        append_u8(bin_data, 0x89); append_u8(bin_data, 0xF0); // mov eax, esi
+                        append_u8(bin_data, 0xE8); // call print_num
+                        append_u32(bin_data, addr_print_num - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+                        size_t jmp_log_done = bin_data.size();
+                        append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+                        bin_data[jae_log + 1] = (uint8_t)(bin_data.size() - (jae_log + 2));
+                        append_u8(bin_data, 0xE8); // call print_string
+                        append_u32(bin_data, addr_print_string - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+                        bin_data[jmp_log_done + 1] = (uint8_t)(bin_data.size() - (jmp_log_done + 2));
+                        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0A);
+                        append_u8(bin_data, 0xE8); // call print_char
+                        append_u32(bin_data, addr_print_char - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+                        break;
+                    }
+                    case 0x41: { // OP_LOG_EMPTY
+                        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0A);
+                        append_u8(bin_data, 0xE8);
+                        append_u32(bin_data, addr_print_char - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+                        break;
+                    }
+                    case 0x44: { // OP_PRINT_RAW
+                        append_u8(bin_data, 0x5E); // pop esi
+                        append_u8(bin_data, 0x81); append_u8(bin_data, 0xFE); append_u32(bin_data, 0x00010000);
+                        size_t jae_praw = bin_data.size();
+                        append_u8(bin_data, 0x73); append_u8(bin_data, 0x00);
+                        append_u8(bin_data, 0x89); append_u8(bin_data, 0xF0); // mov eax, esi
+                        append_u8(bin_data, 0xE8); // call print_num
+                        append_u32(bin_data, addr_print_num - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+                        size_t jmp_praw_done = bin_data.size();
+                        append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+                        bin_data[jae_praw + 1] = (uint8_t)(bin_data.size() - (jae_praw + 2));
+                        append_u8(bin_data, 0xE8); // call print_string
+                        append_u32(bin_data, addr_print_string - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+                        bin_data[jmp_praw_done + 1] = (uint8_t)(bin_data.size() - (jmp_praw_done + 2));
+                        break;
+                    }
+                    case 0x50: { // OP_CALL_BUILTIN
+                        std::string fn = readString();
+                        uint8_t argc = readU8();
+                        if (fn == "gin" || fn == "input") {
+                            append_u8(bin_data, 0xBF); append_u32(bin_data, 0x0008F000); // mov edi, 0x8F000
+                            append_u8(bin_data, 0xE8); // call read_line
+                            append_u32(bin_data, addr_read_line - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+                            append_u8(bin_data, 0x68); append_u32(bin_data, 0x0008F000); // push 0x8F000
+                        } else if (fn == "clear") {
+                            append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091000); append_u32(bin_data, 0);
+                            append_u8(bin_data, 0xBF); append_u32(bin_data, 0x000B8000);
+                            append_u8(bin_data, 0xB9); append_u32(bin_data, 2000);
+                            append_u8(bin_data, 0x66); append_u8(bin_data, 0xB8); append_u16(bin_data, 0x0720);
+                            append_u8(bin_data, 0xF3); append_u8(bin_data, 0x66); append_u8(bin_data, 0xAB);
+                        }
+                        break;
+                    }
+                    default:
+                        break;
+                }
+            }
+
+            bc_to_mc[(uint32_t)bytecode.size()] = bin_data.size();
+
+            // Исправление относительных адресов переходов
+            for (const auto& bf : branch_fixups) {
+                auto it = bc_to_mc.find(bf.target_bc);
+                if (it != bc_to_mc.end()) {
+                    uint32_t target_mc = (uint32_t)it->second;
+                    uint32_t src_mc = (uint32_t)(bf.mc_pos + 4);
+                    int32_t rel = (int32_t)(target_mc - src_mc);
+                    write_u32_le(bin_data, bf.mc_pos, (uint32_t)rel);
+                }
+            }
+
+            // Безопасный останов в конце программы
+            append_u8(bin_data, 0xFA); // cli
+            append_u8(bin_data, 0xF4); // hlt
+            append_u8(bin_data, 0xEB); append_u8(bin_data, 0xFD); // jmp -3
+
+            // Размещение строковых констант
+            std::unordered_map<std::string, uint32_t> emitted_strings;
+            for (const auto& sf : str_fixups) {
+                if (emitted_strings.find(sf.text) == emitted_strings.end()) {
+                    uint32_t str_linear_addr = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+                    emitted_strings[sf.text] = str_linear_addr;
+                    for (char c : sf.text) append_u8(bin_data, (uint8_t)c);
+                    append_u8(bin_data, 0); // null-терминатор
+                }
+                write_u32_le(bin_data, sf.mc_pos, emitted_strings[sf.text]);
+            }
+        } else {
+            // Если байт-кода нет — только asm вставки и останов
+            if (!asm_machine_code.empty()) {
+                for (uint8_t b : asm_machine_code) append_u8(bin_data, b);
+            }
+            append_u8(bin_data, 0xFA); // cli
+            append_u8(bin_data, 0xF4); // hlt
+            append_u8(bin_data, 0xEB); append_u8(bin_data, 0xFD); // jmp -3
+        }
 
         // 1.7. Встраивание байт-кода программы для VM/JIT ядра
         while (bin_data.size() % 16 != 0) append_u8(bin_data, 0x90); // nop
