@@ -3,6 +3,7 @@
 //  Поддержка: --multiboot, --kernel (.bin), --sys (.sys), --iso (.iso)
 // =============================================================================
 #include "GrassBoot.h"
+#include "GrassCyrillicFont.h"
 #include "GrassSyntax.h"
 #include <unordered_map>
 #include <fstream>
@@ -74,24 +75,22 @@ namespace GrassBoot {
         std::vector<uint8_t> bin_data;
         bin_data.reserve(65536);
 
-        // 1.1. Multiboot 1 Header (размещается строго в первых 8192 байтах с выравниванием по 4 байтам)
+        // 1.1. Multiboot 1 Header (32 байта)
         const uint32_t MULTIBOOT_MAGIC = 0x1BADB002;
-        // Флаги: бит 0 (выравнивание модулей по 4K), бит 1 (информация о памяти), бит 16 (AOUT_KLUDGE для плоских .bin)
         const uint32_t MULTIBOOT_FLAGS = 0x00010003;
         const uint32_t MULTIBOOT_CHECKSUM = (uint32_t)(-(int64_t)(MULTIBOOT_MAGIC + MULTIBOOT_FLAGS));
 
-        const uint32_t KERNEL_LOAD_ADDR   = 0x00100000; // 1 MB (стандартная точка загрузки ядра)
+        const uint32_t KERNEL_LOAD_ADDR   = 0x00100000; // 1 MB
         const uint32_t KERNEL_HEADER_ADDR = 0x00100000;
-        const uint32_t KERNEL_ENTRY_ADDR  = 0x00100040; // Точка входа в Protected Mode (смещение 0x40)
+        const uint32_t KERNEL_ENTRY_ADDR  = 0x00100040; // Entry point
 
-        // Запись заголовка Multiboot 1 (32 байта, смещение 0x00)
         write_u32_le(bin_data, 0x00, MULTIBOOT_MAGIC);
         write_u32_le(bin_data, 0x04, MULTIBOOT_FLAGS);
         write_u32_le(bin_data, 0x08, MULTIBOOT_CHECKSUM);
         write_u32_le(bin_data, 0x0C, KERNEL_HEADER_ADDR);
         write_u32_le(bin_data, 0x10, KERNEL_LOAD_ADDR);
-        write_u32_le(bin_data, 0x14, 0); // load_end_addr = 0 (загрузчик читает весь файл)
-        write_u32_le(bin_data, 0x18, 0); // bss_end_addr = 0
+        write_u32_le(bin_data, 0x14, 0);
+        write_u32_le(bin_data, 0x18, 0);
         write_u32_le(bin_data, 0x1C, KERNEL_ENTRY_ADDR);
 
         // 1.2. Multiboot 2 Header (смещение 0x20..0x3F)
@@ -103,7 +102,6 @@ namespace GrassBoot {
         write_u32_le(bin_data, 0x24, MB2_ARCH);
         write_u32_le(bin_data, 0x28, MB2_LEN);
         write_u32_le(bin_data, 0x2C, MB2_CHECKSUM);
-        // Завершающий тег Multiboot 2 (type = 0, size = 8)
         write_u16_le(bin_data, 0x30, 0);
         write_u16_le(bin_data, 0x32, 0);
         write_u32_le(bin_data, 0x34, 8);
@@ -113,201 +111,444 @@ namespace GrassBoot {
         // 1.3. Точка входа ядра в 32-битном Protected Mode (смещение 0x40 / 0x00100040)
         bin_data.resize(0x40, 0);
 
-        // cli (0xFA), cld (0xFC)
+        // cli, cld
         append_u8(bin_data, 0xFA);
         append_u8(bin_data, 0xFC);
 
-        // mov esp, 0x001FFFF0 (BC F0 FF 1F 00)
+        // mov esp, 0x001FFFF0
         append_u8(bin_data, 0xBC);
         append_u32(bin_data, 0x001FFFF0);
 
-        // mov [0x00090000], eax (Multiboot Magic: A3 00 00 09 00)
+        // mov [0x00090000], eax (Multiboot Magic)
         append_u8(bin_data, 0xA3);
         append_u32(bin_data, 0x00090000);
 
-        // mov [0x00090004], ebx (Multiboot Info: 89 1D 04 00 09 00)
+        // mov [0x00090004], ebx (Multiboot Info)
         append_u8(bin_data, 0x89); append_u8(bin_data, 0x1D);
         append_u32(bin_data, 0x00090004);
 
-        // Инициализация последовательного порта COM1 (0x3F8)
-        // mov dx, 0x3F9; xor al, al; out dx, al (отключение прерываний COM1)
-        append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03F9); append_u16(bin_data, 0x0000);
-        append_u8(bin_data, 0x30); append_u8(bin_data, 0xC0);
-        append_u8(bin_data, 0xEE);
+        // --- 1. Очистка ВСЕГО экрана VGA (0xB8000..0xB8FA0, 2000 ячеек / 4000 байт) ---
+        append_u8(bin_data, 0xBF); append_u32(bin_data, 0x000B8000); // mov edi, 0x000B8000
+        append_u8(bin_data, 0xB9); append_u32(bin_data, 1000);       // mov ecx, 1000 dwords
+        append_u8(bin_data, 0xB8); append_u32(bin_data, 0x07200720); // mov eax, 0x07200720 (space cells)
+        append_u8(bin_data, 0xF3); append_u8(bin_data, 0xAB);        // rep stosd
 
-        // mov dx, 0x3FB; mov al, 0x80; out dx, al (DLAB)
-        append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03FB); append_u16(bin_data, 0x0000);
-        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x80);
-        append_u8(bin_data, 0xEE);
+        // --- 2. Включение аппаратного мигающего текстового курсора VGA (CRTC 0x3D4/0x3D5) ---
+        append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03D4); append_u16(bin_data, 0x0000);
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0A); append_u8(bin_data, 0xEE);
+        append_u8(bin_data, 0x42); // inc edx (0x3D5)
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0E); append_u8(bin_data, 0xEE); // scanline start 14, enable
+        append_u8(bin_data, 0x4A); // dec edx (0x3D4)
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0B); append_u8(bin_data, 0xEE);
+        append_u8(bin_data, 0x42); // inc edx (0x3D5)
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0F); append_u8(bin_data, 0xEE); // scanline end 15
 
-        // mov dx, 0x3F8; mov al, 0x03; out dx, al (divisor 38400)
-        append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03F8); append_u16(bin_data, 0x0000);
-        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x03);
-        append_u8(bin_data, 0xEE);
+        // --- 3. Загрузка кириллического шрифта 8x16 в VGA Plane 2 (0x000A1800) ---
+        // Sequencer -> Plane 2 write mode
+        append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03C4); append_u16(bin_data, 0x0000);
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x00); append_u8(bin_data, 0xEE);
+        append_u8(bin_data, 0x42); append_u8(bin_data, 0xB0); append_u8(bin_data, 0x01); append_u8(bin_data, 0xEE); append_u8(bin_data, 0x4A);
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x02); append_u8(bin_data, 0xEE);
+        append_u8(bin_data, 0x42); append_u8(bin_data, 0xB0); append_u8(bin_data, 0x04); append_u8(bin_data, 0xEE); append_u8(bin_data, 0x4A);
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x04); append_u8(bin_data, 0xEE);
+        append_u8(bin_data, 0x42); append_u8(bin_data, 0xB0); append_u8(bin_data, 0x06); append_u8(bin_data, 0xEE); append_u8(bin_data, 0x4A);
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x00); append_u8(bin_data, 0xEE);
+        append_u8(bin_data, 0x42); append_u8(bin_data, 0xB0); append_u8(bin_data, 0x03); append_u8(bin_data, 0xEE); append_u8(bin_data, 0x4A);
 
-        // mov dx, 0x3F9; xor al, al; out dx, al (divisor high)
-        append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03F9); append_u16(bin_data, 0x0000);
-        append_u8(bin_data, 0x30); append_u8(bin_data, 0xC0);
-        append_u8(bin_data, 0xEE);
+        // Graphics Controller -> Plane 2
+        append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03CE); append_u16(bin_data, 0x0000);
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x04); append_u8(bin_data, 0xEE);
+        append_u8(bin_data, 0x42); append_u8(bin_data, 0xB0); append_u8(bin_data, 0x02); append_u8(bin_data, 0xEE); append_u8(bin_data, 0x4A);
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x05); append_u8(bin_data, 0xEE);
+        append_u8(bin_data, 0x42); append_u8(bin_data, 0xB0); append_u8(bin_data, 0x00); append_u8(bin_data, 0xEE); append_u8(bin_data, 0x4A);
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x06); append_u8(bin_data, 0xEE);
+        append_u8(bin_data, 0x42); append_u8(bin_data, 0xB0); append_u8(bin_data, 0x04); append_u8(bin_data, 0xEE); append_u8(bin_data, 0x4A);
 
-        // mov dx, 0x3FB; mov al, 0x03; out dx, al (8N1)
-        append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03FB); append_u16(bin_data, 0x0000);
-        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x03);
-        append_u8(bin_data, 0xEE);
+        // Копирование 64 глифов шрифта в Plane 2 (0x000A1800)
+        append_u8(bin_data, 0xBE);
+        size_t fixup_font_addr = bin_data.size();
+        append_u32(bin_data, 0); // fixup later to addr_cyrillic_font
+        append_u8(bin_data, 0xBF); append_u32(bin_data, 0x000A1800);
+        append_u8(bin_data, 0xB9); append_u32(bin_data, 64);
+        size_t copy_font_top = bin_data.size();
+        append_u8(bin_data, 0x51); // push ecx
+        append_u8(bin_data, 0xB9); append_u32(bin_data, 16); // mov ecx, 16
+        append_u8(bin_data, 0xF3); append_u8(bin_data, 0xA4); // rep movsb
+        append_u8(bin_data, 0x83); append_u8(bin_data, 0xC7); append_u8(bin_data, 16); // add edi, 16
+        append_u8(bin_data, 0x59); // pop ecx
+        append_u8(bin_data, 0x49); // dec ecx
+        append_u8(bin_data, 0x75); append_u8(bin_data, (uint8_t)(int8_t)(copy_font_top - (bin_data.size() + 1)));
 
-        // mov dx, 0x3FA; mov al, 0xC7; out dx, al (Enable 16-byte FIFO & clear buffers)
-        append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03FA); append_u16(bin_data, 0x0000);
-        append_u8(bin_data, 0xB0); append_u8(bin_data, 0xC7);
-        append_u8(bin_data, 0xEE);
+        // Восстановление Sequencer в текстовый режим
+        append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03C4); append_u16(bin_data, 0x0000);
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x00); append_u8(bin_data, 0xEE);
+        append_u8(bin_data, 0x42); append_u8(bin_data, 0xB0); append_u8(bin_data, 0x01); append_u8(bin_data, 0xEE); append_u8(bin_data, 0x4A);
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x02); append_u8(bin_data, 0xEE);
+        append_u8(bin_data, 0x42); append_u8(bin_data, 0xB0); append_u8(bin_data, 0x03); append_u8(bin_data, 0xEE); append_u8(bin_data, 0x4A);
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x04); append_u8(bin_data, 0xEE);
+        append_u8(bin_data, 0x42); append_u8(bin_data, 0xB0); append_u8(bin_data, 0x02); append_u8(bin_data, 0xEE); append_u8(bin_data, 0x4A);
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x00); append_u8(bin_data, 0xEE);
+        append_u8(bin_data, 0x42); append_u8(bin_data, 0xB0); append_u8(bin_data, 0x03); append_u8(bin_data, 0xEE); append_u8(bin_data, 0x4A);
 
-        // mov dx, 0x3FC; mov al, 0x0B; out dx, al (Modem Control: DTR, RTS, OUT2)
-        append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03FC); append_u16(bin_data, 0x0000);
-        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0B);
-        append_u8(bin_data, 0xEE);
+        // Восстановление Graphics Controller в текстовый режим
+        append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03CE); append_u16(bin_data, 0x0000);
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x04); append_u8(bin_data, 0xEE);
+        append_u8(bin_data, 0x42); append_u8(bin_data, 0xB0); append_u8(bin_data, 0x00); append_u8(bin_data, 0xEE); append_u8(bin_data, 0x4A);
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x05); append_u8(bin_data, 0xEE);
+        append_u8(bin_data, 0x42); append_u8(bin_data, 0xB0); append_u8(bin_data, 0x10); append_u8(bin_data, 0xEE); append_u8(bin_data, 0x4A);
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x06); append_u8(bin_data, 0xEE);
+        append_u8(bin_data, 0x42); append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0E); append_u8(bin_data, 0xEE); append_u8(bin_data, 0x4A);
 
-        // 1.4. Вывод приветственного баннера в видеотранслятор VGA (0xB8000)
+        // --- 4. Инициализация переменных рантайма ядра в памяти ---
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091000); append_u32(bin_data, 160); // vga_offset = 160
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091004); append_u8(bin_data, 0);   // utf8_lead = 0
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091008); append_u8(bin_data, 0);   // pending_char = 0
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100A); append_u8(bin_data, 0);   // shift_state = 0
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100B); append_u8(bin_data, 0);   // alt_state = 0
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100C); append_u8(bin_data, 0);   // layout = 0 (EN)
+
+        // --- 5. Вывод приветственного баннера GrassGreen в строку 0 ---
         const char* banner = "GrassGreen OS v4.2.0 Kernel [Multiboot Online]";
         size_t banner_len = strlen(banner);
         for (size_t i = 0; i < banner_len; ++i) {
             uint32_t vga_offset = 0x000B8000 + (uint32_t)(i * 2);
             uint16_t cell = (uint16_t)(0x0A00 | (uint8_t)banner[i]);
-            // mov word [vga_offset], cell -> 66 C7 05 <offset> <cell>
             append_u8(bin_data, 0x66); append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05);
             append_u32(bin_data, vga_offset);
             append_u16(bin_data, cell);
         }
 
-        // Вывод сообщения в COM1 (0x3F8)
+        // --- 6. Инициализация курсора на строку 1 (смещение 160) ---
+        append_u8(bin_data, 0xBB); append_u32(bin_data, 160); // mov ebx, 160
+        append_u8(bin_data, 0xE8);
+        size_t fixup_init_cursor = bin_data.size();
+        append_u32(bin_data, 0); // fixup later to addr_update_cursor
+
+        // --- 7. Инициализация последовательного порта COM1 (0x3F8) ---
+        append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03F9); append_u16(bin_data, 0x0000);
+        append_u8(bin_data, 0x30); append_u8(bin_data, 0xC0);
+        append_u8(bin_data, 0xEE);
+
+        append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03FB); append_u16(bin_data, 0x0000);
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x80);
+        append_u8(bin_data, 0xEE);
+
+        append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03F8); append_u16(bin_data, 0x0000);
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x03);
+        append_u8(bin_data, 0xEE);
+
+        append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03F9); append_u16(bin_data, 0x0000);
+        append_u8(bin_data, 0x30); append_u8(bin_data, 0xC0);
+        append_u8(bin_data, 0xEE);
+
+        append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03FB); append_u16(bin_data, 0x0000);
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x03);
+        append_u8(bin_data, 0xEE);
+
+        append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03FA); append_u16(bin_data, 0x0000);
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0xC7);
+        append_u8(bin_data, 0xEE);
+
+        append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03FC); append_u16(bin_data, 0x0000);
+        append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0B);
+        append_u8(bin_data, 0xEE);
+
         const char* com_msg = "\r\n[GrassGreen OS v4.2.0]: Booted successfully via Multiboot!\r\n";
         for (size_t i = 0; i < strlen(com_msg); ++i) {
-            // mov dx, 0x3F8; mov al, ch; out dx, al
             append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03F8); append_u16(bin_data, 0x0000);
             append_u8(bin_data, 0xB0); append_u8(bin_data, (uint8_t)com_msg[i]);
             append_u8(bin_data, 0xEE);
         }
 
-        // 1.5. Нативный 32-битный Protected Mode рантайм для ядра GrassGreen
+        // --- 8. Встроенные структуры данных и процедуры ядра ---
         if (!bytecode.empty()) {
-            // Прыжок через встроенные процедуры ядра
-            append_u8(bin_data, 0xE9); // jmp rel32
+            append_u8(bin_data, 0xE9); // jmp rel32 over helpers
             size_t jmp_helpers_fixup = bin_data.size();
             append_u32(bin_data, 0); // placeholder
 
-            // PS/2 Lookup Table (52 байта, сканкоды 0x02..0x35)
-            uint32_t addr_ps2_table = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
-            static const uint8_t ps2_lut[52] = {
+            // 8.1. Таблица кириллического шрифта 8x16 (1024 байта)
+            uint32_t addr_cyrillic_font = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            for (size_t i = 0; i < 1024; ++i) append_u8(bin_data, s_cyrillic_font_8x16[i]);
+
+            // 8.2. Таблицы скан-кодов PS/2 Set 1 (сканкоды 0x02..0x35)
+            // English Lower (52 байта)
+            uint32_t addr_ps2_lut_en_lower = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            static const uint8_t ps2_lut_en_lower[52] = {
                 '1','2','3','4','5','6','7','8','9','0','-','=', 0,
                 '\t','q','w','e','r','t','y','u','i','o','p','[',']',
                 0, 0,
                 'a','s','d','f','g','h','j','k','l',';','\'','`',
                 0,'\\','z','x','c','v','b','n','m',',','.','/'
             };
-            for (int i = 0; i < 52; ++i) append_u8(bin_data, ps2_lut[i]);
+            for (int i = 0; i < 52; ++i) append_u8(bin_data, ps2_lut_en_lower[i]);
 
-            // --- Helper 1: helper_print_char (AL = char) ---
+            // English Upper (52 байта)
+            uint32_t addr_ps2_lut_en_upper = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            static const uint8_t ps2_lut_en_upper[52] = {
+                '!','@','#','$','%','^','&','*','(',')','_','+', 0,
+                '\t','Q','W','E','R','T','Y','U','I','O','P','{','}',
+                0, 0,
+                'A','S','D','F','G','H','J','K','L',':','"','~',
+                0,'|','Z','X','C','V','B','N','M','<','>','?'
+            };
+            for (int i = 0; i < 52; ++i) append_u8(bin_data, ps2_lut_en_upper[i]);
+
+            // Russian Lower ЙЦУКЕН (104 байта: 2 байта UTF-8 на символ)
+            uint32_t addr_ps2_lut_ru_lower = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            static const uint8_t ps2_lut_ru_lower[104] = {
+                0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0,0,
+                0,0,
+                0xD0,0xB9, 0xD1,0x86, 0xD1,0x83, 0xD0,0xBA, 0xD0,0xB5, 0xD0,0xBD,
+                0xD0,0xB3, 0xD1,0x88, 0xD1,0x89, 0xD0,0xB7, 0xD1,0x85, 0xD1,0x8A,
+                0,0, 0,0,
+                0xD1,0x84, 0xD1,0x8B, 0xD0,0xB2, 0xD0,0xB0, 0xD0,0xBF, 0xD1,0x80,
+                0xD0,0xBE, 0xD0,0xBB, 0xD0,0xB4, 0xD0,0xB6, 0xD1,0x8D, 0xD1,0x91,
+                0,0, 0,0,
+                0xD1,0x8F, 0xD1,0x87, 0xD1,0x81, 0xD0,0xBC, 0xD0,0xB8, 0xD1,0x82,
+                0xD1,0x8C, 0xD0,0xB1, 0xD1,0x8E, 0x2E,0x00
+            };
+            for (int i = 0; i < 104; ++i) append_u8(bin_data, ps2_lut_ru_lower[i]);
+
+            // Russian Upper ЙЦУКЕН (104 байта: 2 байта UTF-8 на символ)
+            uint32_t addr_ps2_lut_ru_upper = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            static const uint8_t ps2_lut_ru_upper[104] = {
+                0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0,0, 0,0,
+                0,0,
+                0xD0,0x99, 0xD0,0xA6, 0xD0,0xA3, 0xD0,0x9A, 0xD0,0x95, 0xD0,0x9D,
+                0xD0,0x93, 0xD0,0xA8, 0xD0,0xA9, 0xD0,0x97, 0xD0,0xA5, 0xD0,0xAA,
+                0,0, 0,0,
+                0xD0,0xA4, 0xD0,0xAB, 0xD0,0x92, 0xD0,0x90, 0xD0,0x9F, 0xD0,0xA0,
+                0xD0,0x9E, 0xD0,0x9B, 0xD0,0x94, 0xD0,0x96, 0xD0,0xAD, 0xD0,0x81,
+                0,0, 0,0,
+                0xD0,0xAF, 0xD0,0xA7, 0xD0,0xA1, 0xD0,0x9C, 0xD0,0x98, 0xD0,0xA2,
+                0xD0,0xAC, 0xD0,0x91, 0xD0,0xAE, 0x2C,0x00
+            };
+            for (int i = 0; i < 104; ++i) append_u8(bin_data, ps2_lut_ru_upper[i]);
+
+            // 8.3. Helper: helper_update_cursor (EBX = vga_offset)
+            uint32_t addr_update_cursor = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x50); // push eax
+            append_u8(bin_data, 0x51); // push ecx
+            append_u8(bin_data, 0x52); // push edx
+
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xD8); // mov eax, ebx
+            append_u8(bin_data, 0xD1); append_u8(bin_data, 0xE8); // shr eax, 1 (cell index)
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xC1); // mov ecx, eax
+
+            // Port 0x3D4, Index 0x0E (Cursor High)
+            append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03D4); append_u16(bin_data, 0x0000);
+            append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0E); append_u8(bin_data, 0xEE);
+            append_u8(bin_data, 0x42); // inc edx (0x3D5)
+            append_u8(bin_data, 0x88); append_u8(bin_data, 0xE8); append_u8(bin_data, 0xEE); // mov al, ch; out dx, al
+
+            // Port 0x3D4, Index 0x0F (Cursor Low)
+            append_u8(bin_data, 0x4A); // dec edx (0x3D4)
+            append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0F); append_u8(bin_data, 0xEE);
+            append_u8(bin_data, 0x42); // inc edx (0x3D5)
+            append_u8(bin_data, 0x88); append_u8(bin_data, 0xC8); append_u8(bin_data, 0xEE); // mov al, cl; out dx, al
+
+            append_u8(bin_data, 0x5A); // pop edx
+            append_u8(bin_data, 0x59); // pop ecx
+            append_u8(bin_data, 0x58); // pop eax
+            append_u8(bin_data, 0xC3); // ret
+
+            // 8.4. Helper: helper_print_char (AL = char)
             uint32_t addr_print_char = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
             append_u8(bin_data, 0x50); // push eax
             append_u8(bin_data, 0x53); // push ebx
             append_u8(bin_data, 0x51); // push ecx
             append_u8(bin_data, 0x52); // push edx
-            append_u8(bin_data, 0x88); append_u8(bin_data, 0xC4); // mov ah, al (save char in AH)
+            append_u8(bin_data, 0x56); // push esi
+            append_u8(bin_data, 0x57); // push edi
+
+            append_u8(bin_data, 0x88); append_u8(bin_data, 0xC4); // mov ah, al
 
             // COM1 TX
-            append_u8(bin_data, 0x66); append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03FD);
+            append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03FD); append_u16(bin_data, 0x0000);
             size_t wait_tx1 = bin_data.size();
-            append_u8(bin_data, 0xEC); // in al, dx
-            append_u8(bin_data, 0xA8); append_u8(bin_data, 0x20); // test al, 0x20
-            append_u8(bin_data, 0x74);
-            append_u8(bin_data, (uint8_t)(int8_t)(wait_tx1 - (bin_data.size() + 1)));
+            append_u8(bin_data, 0xEC); append_u8(bin_data, 0xA8); append_u8(bin_data, 0x20);
+            append_u8(bin_data, 0x74); append_u8(bin_data, (uint8_t)(int8_t)(wait_tx1 - (bin_data.size() + 1)));
+            append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03F8); append_u16(bin_data, 0x0000);
+            append_u8(bin_data, 0x88); append_u8(bin_data, 0xE0); append_u8(bin_data, 0xEE);
 
-            append_u8(bin_data, 0x66); append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03F8);
-            append_u8(bin_data, 0x88); append_u8(bin_data, 0xE0); // mov al, ah (restore char)
-            append_u8(bin_data, 0xEE); // out dx, al
+            // Newline -> \r to COM1
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0xFC); append_u8(bin_data, 0x0A);
+            size_t jne_com1_cr = bin_data.size();
+            append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03FD); append_u16(bin_data, 0x0000);
+            size_t wait_tx2 = bin_data.size();
+            append_u8(bin_data, 0xEC); append_u8(bin_data, 0xA8); append_u8(bin_data, 0x20);
+            append_u8(bin_data, 0x74); append_u8(bin_data, (uint8_t)(int8_t)(wait_tx2 - (bin_data.size() + 1)));
+            append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03F8); append_u16(bin_data, 0x0000);
+            append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0D); append_u8(bin_data, 0xEE);
+            bin_data[jne_com1_cr + 1] = (uint8_t)(bin_data.size() - (jne_com1_cr + 2));
 
-            // Newline? Send '\r' to COM1
-            append_u8(bin_data, 0x80); append_u8(bin_data, 0xFC); append_u8(bin_data, 0x0A); // cmp ah, 0x0A
-            size_t jne_skip_cr = bin_data.size();
+            // VGA UTF-8 State Machine
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091004); // mov al, [0x00091004]
+            append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0); // test al, al
+            size_t jnz_has_lead = bin_data.size();
             append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
 
-            append_u8(bin_data, 0x66); append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03FD);
-            size_t wait_tx2 = bin_data.size();
-            append_u8(bin_data, 0xEC);
-            append_u8(bin_data, 0xA8); append_u8(bin_data, 0x20);
-            append_u8(bin_data, 0x74);
-            append_u8(bin_data, (uint8_t)(int8_t)(wait_tx2 - (bin_data.size() + 1)));
+            // No lead byte yet: is AH 0xD0 or 0xD1?
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0xFC); append_u8(bin_data, 0xD0);
+            size_t je_lead_d0 = bin_data.size();
+            append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0xFC); append_u8(bin_data, 0xD1);
+            size_t je_lead_d1 = bin_data.size();
+            append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
 
-            append_u8(bin_data, 0x66); append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03F8);
-            append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0D);
-            append_u8(bin_data, 0xEE);
+            // Not a lead byte -> process ASCII / control
+            size_t jmp_ascii = bin_data.size();
+            append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
 
-            bin_data[jne_skip_cr + 1] = (uint8_t)(bin_data.size() - (jne_skip_cr + 2));
+            // Record lead byte
+            size_t set_lead_pos = bin_data.size();
+            bin_data[je_lead_d0 + 1] = (uint8_t)(set_lead_pos - (je_lead_d0 + 2));
+            bin_data[je_lead_d1 + 1] = (uint8_t)(set_lead_pos - (je_lead_d1 + 2));
+            append_u8(bin_data, 0x88); append_u8(bin_data, 0x25); append_u32(bin_data, 0x00091004);
+            append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E);
+            append_u8(bin_data, 0x5A); append_u8(bin_data, 0x59);
+            append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
+            append_u8(bin_data, 0xC3); // ret
 
-            // VGA Display Step
-            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091000); // mov ebx, [0x91000]
-            append_u8(bin_data, 0x80); append_u8(bin_data, 0xFC); append_u8(bin_data, 0x0A); // cmp ah, 0x0A
+            // Process second byte of UTF-8 Cyrillic
+            size_t has_lead_pos = bin_data.size();
+            bin_data[jnz_has_lead + 1] = (uint8_t)(has_lead_pos - (jnz_has_lead + 2));
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091004); append_u8(bin_data, 0);
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0xD0);
+            size_t jne_lead_d1_check = bin_data.size();
+            append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            // Lead was 0xD0:
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0xFC); append_u8(bin_data, 0x81); // 'Ё'
+            size_t jne_not_yo_cap = bin_data.size();
+            append_u8(bin_data, 0x75); append_u8(bin_data, 0x04);
+            append_u8(bin_data, 0xB4); append_u8(bin_data, 0xC5); // 'Е'
+            size_t jmp_to_draw1 = bin_data.size();
+            append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            bin_data[jne_not_yo_cap + 1] = (uint8_t)(bin_data.size() - (jne_not_yo_cap + 2));
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0xC4); append_u8(bin_data, 0x30); // byte2 + 0x30
+            size_t jmp_to_draw2 = bin_data.size();
+            append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // Lead was 0xD1:
+            bin_data[jne_lead_d1_check + 1] = (uint8_t)(bin_data.size() - (jne_lead_d1_check + 2));
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0xFC); append_u8(bin_data, 0x91); // 'ё'
+            size_t jne_not_yo_sml = bin_data.size();
+            append_u8(bin_data, 0x75); append_u8(bin_data, 0x04);
+            append_u8(bin_data, 0xB4); append_u8(bin_data, 0xE5); // 'е'
+            size_t jmp_to_draw3 = bin_data.size();
+            append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            bin_data[jne_not_yo_sml + 1] = (uint8_t)(bin_data.size() - (jne_not_yo_sml + 2));
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0xC4); append_u8(bin_data, 0x70); // byte2 + 0x70
+            size_t jmp_to_draw4 = bin_data.size();
+            append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // ASCII and Control Character Processing
+            size_t ascii_pos = bin_data.size();
+            bin_data[jmp_ascii + 1] = (uint8_t)(ascii_pos - (jmp_ascii + 2));
+
+            // \n (Newline)
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0xFC); append_u8(bin_data, 0x0A);
             size_t jne_vga_nl = bin_data.size();
             append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
 
             // ebx = (ebx / 160 + 1) * 160
-            append_u8(bin_data, 0x89); append_u8(bin_data, 0xD8);
-            append_u8(bin_data, 0x31); append_u8(bin_data, 0xD2);
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091000);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xD8); append_u8(bin_data, 0x31); append_u8(bin_data, 0xD2);
             append_u8(bin_data, 0xB9); append_u32(bin_data, 160);
             append_u8(bin_data, 0xF7); append_u8(bin_data, 0xF1);
             append_u8(bin_data, 0x40);
             append_u8(bin_data, 0xF7); append_u8(bin_data, 0xE1);
             append_u8(bin_data, 0x89); append_u8(bin_data, 0xC3);
-            size_t jmp_bounds = bin_data.size();
+            size_t jmp_check_scroll1 = bin_data.size();
             append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
 
+            // \b (Backspace)
             bin_data[jne_vga_nl + 1] = (uint8_t)(bin_data.size() - (jne_vga_nl + 2));
-
-            // Backspace 0x08
-            append_u8(bin_data, 0x80); append_u8(bin_data, 0xFC); append_u8(bin_data, 0x08); // cmp ah, 0x08
-            size_t jne_bksp = bin_data.size();
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0xFC); append_u8(bin_data, 0x08);
+            size_t jne_vga_bksp = bin_data.size();
             append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
 
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091000);
             append_u8(bin_data, 0x83); append_u8(bin_data, 0xFB); append_u8(bin_data, 0x02);
-            size_t jb_vga = bin_data.size();
+            size_t jb_bksp_done = bin_data.size();
             append_u8(bin_data, 0x72); append_u8(bin_data, 0x00);
             append_u8(bin_data, 0x83); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x02);
             append_u8(bin_data, 0x66); append_u8(bin_data, 0xC7); append_u8(bin_data, 0x83);
-            append_u32(bin_data, 0x000B8000);
-            append_u16(bin_data, 0x0720);
-            size_t jmp_done1 = bin_data.size();
+            append_u32(bin_data, 0x000B8000); append_u16(bin_data, 0x0720);
+            size_t jmp_bksp_done = bin_data.size();
             append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
 
-            bin_data[jne_bksp + 1] = (uint8_t)(bin_data.size() - (jne_bksp + 2));
+            bin_data[jb_bksp_done + 1] = (uint8_t)(bin_data.size() - (jb_bksp_done + 2));
+            bin_data[jmp_bksp_done + 1] = (uint8_t)(bin_data.size() - (jmp_bksp_done + 2));
+            size_t jmp_save_pos1 = bin_data.size();
+            append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
 
-            // CR 0x0D -> ignore
-            append_u8(bin_data, 0x80); append_u8(bin_data, 0xFC); append_u8(bin_data, 0x0D); // cmp ah, 0x0D
-            size_t je_cr = bin_data.size();
-            append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            // \r (Ignore)
+            bin_data[jne_vga_bksp + 1] = (uint8_t)(bin_data.size() - (jne_vga_bksp + 2));
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0xFC); append_u8(bin_data, 0x0D);
+            size_t jne_vga_draw = bin_data.size();
+            append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091000);
+            size_t jmp_save_pos2 = bin_data.size();
+            append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
 
-            // Printable character: write to VGA
-            append_u8(bin_data, 0x88); append_u8(bin_data, 0xA3); append_u32(bin_data, 0x000B8000); // mov [ebx + 0xB8000], ah
+            // Draw Glyph to VGA Memory
+            size_t draw_glyph_pos = bin_data.size();
+            bin_data[jmp_to_draw1 + 1] = (uint8_t)(draw_glyph_pos - (jmp_to_draw1 + 2));
+            bin_data[jmp_to_draw2 + 1] = (uint8_t)(draw_glyph_pos - (jmp_to_draw2 + 2));
+            bin_data[jmp_to_draw3 + 1] = (uint8_t)(draw_glyph_pos - (jmp_to_draw3 + 2));
+            bin_data[jmp_to_draw4 + 1] = (uint8_t)(draw_glyph_pos - (jmp_to_draw4 + 2));
+            bin_data[jne_vga_draw + 1] = (uint8_t)(draw_glyph_pos - (jne_vga_draw + 2));
+
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091000);
+            append_u8(bin_data, 0x88); append_u8(bin_data, 0xA3); append_u32(bin_data, 0x000B8000);
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x83); append_u32(bin_data, 0x000B8001);
             append_u8(bin_data, 0x0A); // GrassGreen bright green
             append_u8(bin_data, 0x83); append_u8(bin_data, 0xC3); append_u8(bin_data, 0x02);
 
-            bin_data[jmp_bounds + 1] = (uint8_t)(bin_data.size() - (jmp_bounds + 2));
+            // Check Screen Scroll (>= 4000)
+            size_t check_scroll_pos = bin_data.size();
+            bin_data[jmp_check_scroll1 + 1] = (uint8_t)(check_scroll_pos - (jmp_check_scroll1 + 2));
+
             append_u8(bin_data, 0x81); append_u8(bin_data, 0xFB); append_u32(bin_data, 4000);
-            size_t jb_bounds = bin_data.size();
-            append_u8(bin_data, 0x72); append_u8(bin_data, 0x02);
-            append_u8(bin_data, 0x31); append_u8(bin_data, 0xDB);
+            size_t jb_no_scroll = bin_data.size();
+            append_u8(bin_data, 0x72); append_u8(bin_data, 0x00);
 
-            size_t vga_done_pos = bin_data.size();
-            bin_data[jb_vga + 1]   = (uint8_t)(vga_done_pos - (jb_vga + 2));
-            bin_data[jmp_done1 + 1] = (uint8_t)(vga_done_pos - (jmp_done1 + 2));
-            bin_data[je_cr + 1]    = (uint8_t)(vga_done_pos - (je_cr + 2));
+            // Scroll lines 1..24 up by 1 line (keeps line 0 banner intact!)
+            append_u8(bin_data, 0xFC);
+            append_u8(bin_data, 0xBE); append_u32(bin_data, 0x000B8140);
+            append_u8(bin_data, 0xBF); append_u32(bin_data, 0x000B80A0);
+            append_u8(bin_data, 0xB9); append_u32(bin_data, 920);
+            append_u8(bin_data, 0xF3); append_u8(bin_data, 0xA5);
+            append_u8(bin_data, 0xBF); append_u32(bin_data, 0x000B8F00);
+            append_u8(bin_data, 0xB9); append_u32(bin_data, 40);
+            append_u8(bin_data, 0xB8); append_u32(bin_data, 0x07200720);
+            append_u8(bin_data, 0xF3); append_u8(bin_data, 0xAB);
+            append_u8(bin_data, 0xBB); append_u32(bin_data, 3840);
 
+            size_t no_scroll_pos = bin_data.size();
+            bin_data[jb_no_scroll + 1] = (uint8_t)(no_scroll_pos - (jb_no_scroll + 2));
+            bin_data[jmp_save_pos1 + 1] = (uint8_t)(no_scroll_pos - (jmp_save_pos1 + 2));
+            bin_data[jmp_save_pos2 + 1] = (uint8_t)(no_scroll_pos - (jmp_save_pos2 + 2));
+
+            // Save EBX & Update Hardware Cursor
             append_u8(bin_data, 0x89); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091000);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_update_cursor - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+            append_u8(bin_data, 0x5F); // pop edi
+            append_u8(bin_data, 0x5E); // pop esi
             append_u8(bin_data, 0x5A); // pop edx
             append_u8(bin_data, 0x59); // pop ecx
             append_u8(bin_data, 0x5B); // pop ebx
             append_u8(bin_data, 0x58); // pop eax
             append_u8(bin_data, 0xC3); // ret
 
-            // --- Helper 2: helper_print_string (ESI = string ptr) ---
+            // 8.5. Helper: helper_print_string (ESI = string ptr)
             uint32_t addr_print_string = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
             append_u8(bin_data, 0x56); // push esi
             append_u8(bin_data, 0x50); // push eax
@@ -318,7 +559,7 @@ namespace GrassBoot {
             append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
             append_u8(bin_data, 0xE8); // call helper_print_char
             append_u32(bin_data, addr_print_char - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-            append_u8(bin_data, 0xEB); // jmp loop_str
+            append_u8(bin_data, 0xEB);
             append_u8(bin_data, (uint8_t)(int8_t)(loop_str - (bin_data.size() + 1)));
 
             bin_data[jz_str_done + 1] = (uint8_t)(bin_data.size() - (jz_str_done + 2));
@@ -326,7 +567,7 @@ namespace GrassBoot {
             append_u8(bin_data, 0x5E); // pop esi
             append_u8(bin_data, 0xC3); // ret
 
-            // --- Helper 3: helper_print_num (EAX = int) ---
+            // 8.6. Helper: helper_print_num (EAX = int)
             uint32_t addr_print_num = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
             append_u8(bin_data, 0x50); // push eax
             append_u8(bin_data, 0x53); // push ebx
@@ -335,16 +576,16 @@ namespace GrassBoot {
             append_u8(bin_data, 0x57); // push edi
             append_u8(bin_data, 0x56); // push esi
 
-            append_u8(bin_data, 0xBF); append_u32(bin_data, 0x0008E020);
+            append_u8(bin_data, 0xBF); append_u32(bin_data, 0x00093020);
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x07); append_u8(bin_data, 0x00); // mov byte [edi], 0
-
             append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0); // test eax, eax
             size_t jns_pos = bin_data.size();
             append_u8(bin_data, 0x79); append_u8(bin_data, 0x00);
+
             append_u8(bin_data, 0xF7); append_u8(bin_data, 0xD8); // neg eax
             append_u8(bin_data, 0x50); // push eax
             append_u8(bin_data, 0xB0); append_u8(bin_data, '-');
-            append_u8(bin_data, 0xE8);
+            append_u8(bin_data, 0xE8); // call helper_print_char
             append_u32(bin_data, addr_print_char - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
             append_u8(bin_data, 0x58); // pop eax
 
@@ -354,7 +595,7 @@ namespace GrassBoot {
             size_t num_loop_pos = bin_data.size();
             append_u8(bin_data, 0x31); append_u8(bin_data, 0xD2); // xor edx, edx
             append_u8(bin_data, 0xF7); append_u8(bin_data, 0xF1); // div ecx
-            append_u8(bin_data, 0x80); append_u8(bin_data, 0xC2); append_u8(bin_data, '0'); // add dl, '0'
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0xC2); append_u8(bin_data, '0');
             append_u8(bin_data, 0x4F); // dec edi
             append_u8(bin_data, 0x88); append_u8(bin_data, 0x17); // mov [edi], dl
             append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0); // test eax, eax
@@ -373,188 +614,301 @@ namespace GrassBoot {
             append_u8(bin_data, 0x58); // pop eax
             append_u8(bin_data, 0xC3); // ret
 
-            // --- Helper 4: helper_read_char (AL = returned char) ---
+            // 8.7. Helper: helper_read_char (returns char in AL)
             uint32_t addr_read_char = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
             append_u8(bin_data, 0x52); // push edx
             append_u8(bin_data, 0x53); // push ebx
+            append_u8(bin_data, 0x51); // push ecx
+
+            // Проверка наличия ожидающего 2-го байта UTF-8 в 0x00091008
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091008);
+            append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0);
+            size_t jz_poll_top = bin_data.size();
+            append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091008); append_u8(bin_data, 0);
+            append_u8(bin_data, 0x59); append_u8(bin_data, 0x5B); append_u8(bin_data, 0x5A); append_u8(bin_data, 0xC3); // direct return: pop ecx, pop ebx, pop edx, ret
 
             size_t poll_top = bin_data.size();
-            // COM1 check
-            append_u8(bin_data, 0x66); append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03FD);
-            append_u8(bin_data, 0xEC);
-            append_u8(bin_data, 0xA8); append_u8(bin_data, 0x01);
-            size_t jnz_com = bin_data.size();
-            append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            bin_data[jz_poll_top + 1] = (uint8_t)(poll_top - (jz_poll_top + 2));
 
-            // PS/2 check
+            auto jmp_poll = [&]() {
+                append_u8(bin_data, 0xE9);
+                int32_t rel = (int32_t)poll_top - (int32_t)(bin_data.size() + 4);
+                append_u32(bin_data, (uint32_t)rel);
+            };
+
+            // Проверка COM1 (порт 0x3FD)
+            append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03FD); append_u16(bin_data, 0x0000);
+            append_u8(bin_data, 0xEC); append_u8(bin_data, 0xA8); append_u8(bin_data, 0x01);
+            size_t jz_com_skip = bin_data.size();
+            append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            // COM1 чтение символа
+            append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03F8); append_u16(bin_data, 0x0000);
+            append_u8(bin_data, 0xEC);
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x0D); // CR?
+            size_t jne_com1_kbd_cr = bin_data.size();
+            append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03FD); append_u16(bin_data, 0x0000);
+            append_u8(bin_data, 0xEC); append_u8(bin_data, 0xA8); append_u8(bin_data, 0x01);
+            size_t jz_com_nolf = bin_data.size();
+            append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03F8); append_u16(bin_data, 0x0000); append_u8(bin_data, 0xEC);
+            bin_data[jz_com_nolf + 1] = (uint8_t)(bin_data.size() - (jz_com_nolf + 2));
+            append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0A); // Enter (LF)
+            bin_data[jne_com1_kbd_cr + 1] = (uint8_t)(bin_data.size() - (jne_com1_kbd_cr + 2));
+            append_u8(bin_data, 0x59); append_u8(bin_data, 0x5B); append_u8(bin_data, 0x5A); append_u8(bin_data, 0xC3); // direct return
+
+            bin_data[jz_com_skip + 1] = (uint8_t)(bin_data.size() - (jz_com_skip + 2));
+
+            // Проверка PS/2 (порт 0x64)
             append_u8(bin_data, 0xE4); append_u8(bin_data, 0x64);
             append_u8(bin_data, 0xA8); append_u8(bin_data, 0x01);
             size_t jnz_ps2 = bin_data.size();
             append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xF3); append_u8(bin_data, 0x90); // pause
+            jmp_poll();
 
-            // pause; jmp poll_top
-            append_u8(bin_data, 0xF3); append_u8(bin_data, 0x90);
-            append_u8(bin_data, 0xEB);
-            append_u8(bin_data, (uint8_t)(int8_t)(poll_top - (bin_data.size() + 1)));
-
-            // COM1 ready
-            bin_data[jnz_com + 1] = (uint8_t)(bin_data.size() - (jnz_com + 2));
-            append_u8(bin_data, 0x66); append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03F8);
-            append_u8(bin_data, 0xEC);
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x0D);
-            size_t jne_com_cr = bin_data.size();
-            append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-
-            // It was 0x0D: check if 0x0A is waiting in FIFO
-            append_u8(bin_data, 0x66); append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03FD);
-            append_u8(bin_data, 0xEC);
-            append_u8(bin_data, 0xA8); append_u8(bin_data, 0x01);
-            size_t jz_no_lf = bin_data.size();
-            append_u8(bin_data, 0x74); append_u8(bin_data, 0x06);
-            append_u8(bin_data, 0x66); append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03F8);
-            append_u8(bin_data, 0xEC); // consume 0x0A
-            bin_data[jz_no_lf + 1] = 0x06;
-
-            append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0A);
-            size_t jmp_got1 = bin_data.size();
-            append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
-            bin_data[jne_com_cr + 1] = (uint8_t)(bin_data.size() - (jne_com_cr + 2));
-
-            // PS/2 ready
             bin_data[jnz_ps2 + 1] = (uint8_t)(bin_data.size() - (jnz_ps2 + 2));
-            append_u8(bin_data, 0xE4); append_u8(bin_data, 0x60);
-            append_u8(bin_data, 0xA8); append_u8(bin_data, 0x80); // key release?
-            append_u8(bin_data, 0x75);
-            append_u8(bin_data, (uint8_t)(int8_t)(poll_top - (bin_data.size() + 1)));
+            append_u8(bin_data, 0xE4); append_u8(bin_data, 0x60); // in al, 0x60
 
-            // Enter 0x1C
+            // Shift press (0x2A or 0x36)
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x2A);
+            size_t je_sh_dn = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x36);
+            size_t jne_not_sh_dn = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            bin_data[je_sh_dn + 1] = (uint8_t)(bin_data.size() - (je_sh_dn + 2));
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100A); append_u8(bin_data, 1);
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x0D); append_u32(bin_data, 0x0009100B);
+            append_u8(bin_data, 0x84); append_u8(bin_data, 0xC9);
+            size_t jz_no_alt_tog = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x35); append_u32(bin_data, 0x0009100C); append_u8(bin_data, 1);
+            bin_data[jz_no_alt_tog + 1] = (uint8_t)(bin_data.size() - (jz_no_alt_tog + 2));
+            jmp_poll();
+
+            bin_data[jne_not_sh_dn + 1] = (uint8_t)(bin_data.size() - (jne_not_sh_dn + 2));
+
+            // Shift release (0xAA or 0xB6)
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0xAA);
+            size_t je_sh_up = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0xB6);
+            size_t jne_not_sh_up = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            bin_data[je_sh_up + 1] = (uint8_t)(bin_data.size() - (je_sh_up + 2));
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100A); append_u8(bin_data, 0);
+            jmp_poll();
+
+            bin_data[jne_not_sh_up + 1] = (uint8_t)(bin_data.size() - (jne_not_sh_up + 2));
+
+            // Alt press (0x38)
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x38);
+            size_t jne_not_alt_dn = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100B); append_u8(bin_data, 1);
+            jmp_poll();
+            bin_data[jne_not_alt_dn + 1] = (uint8_t)(bin_data.size() - (jne_not_alt_dn + 2));
+
+            // Alt release (0xB8)
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0xB8);
+            size_t jne_not_alt_up = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100B); append_u8(bin_data, 0);
+            jmp_poll();
+            bin_data[jne_not_alt_up + 1] = (uint8_t)(bin_data.size() - (jne_not_alt_up + 2));
+
+            // Key release (bit 7 set) -> ignore
+            append_u8(bin_data, 0xA8); append_u8(bin_data, 0x80);
+            size_t jz_not_rel = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            jmp_poll();
+            bin_data[jz_not_rel + 1] = (uint8_t)(bin_data.size() - (jz_not_rel + 2));
+
+            // Enter (0x1C) -> LF (0x0A)
             append_u8(bin_data, 0x3C); append_u8(bin_data, 0x1C);
-            size_t jne_ps2_enter = bin_data.size();
-            append_u8(bin_data, 0x75); append_u8(bin_data, 0x04);
+            size_t jne_not_ent = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
             append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0A);
-            size_t jmp_got2 = bin_data.size();
-            append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x59); append_u8(bin_data, 0x5B); append_u8(bin_data, 0x5A); append_u8(bin_data, 0xC3); // direct return
+            bin_data[jne_not_ent + 1] = (uint8_t)(bin_data.size() - (jne_not_ent + 2));
 
-            // Backspace 0x0E
-            bin_data[jne_ps2_enter + 1] = (uint8_t)(bin_data.size() - (jne_ps2_enter + 2));
+            // Backspace (0x0E) -> 0x08
             append_u8(bin_data, 0x3C); append_u8(bin_data, 0x0E);
-            size_t jne_ps2_bksp = bin_data.size();
-            append_u8(bin_data, 0x75); append_u8(bin_data, 0x04);
+            size_t jne_not_bk = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
             append_u8(bin_data, 0xB0); append_u8(bin_data, 0x08);
-            size_t jmp_got3 = bin_data.size();
-            append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x59); append_u8(bin_data, 0x5B); append_u8(bin_data, 0x5A); append_u8(bin_data, 0xC3); // direct return
+            bin_data[jne_not_bk + 1] = (uint8_t)(bin_data.size() - (jne_not_bk + 2));
 
-            // Space 0x39
-            bin_data[jne_ps2_bksp + 1] = (uint8_t)(bin_data.size() - (jne_ps2_bksp + 2));
+            // Space (0x39) -> 0x20
             append_u8(bin_data, 0x3C); append_u8(bin_data, 0x39);
-            size_t jne_ps2_space = bin_data.size();
-            append_u8(bin_data, 0x75); append_u8(bin_data, 0x04);
+            size_t jne_not_sp = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
             append_u8(bin_data, 0xB0); append_u8(bin_data, 0x20);
-            size_t jmp_got4 = bin_data.size();
-            append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x59); append_u8(bin_data, 0x5B); append_u8(bin_data, 0x5A); append_u8(bin_data, 0xC3); // direct return
+            bin_data[jne_not_sp + 1] = (uint8_t)(bin_data.size() - (jne_not_sp + 2));
 
-            // Table lookup
-            bin_data[jne_ps2_space + 1] = (uint8_t)(bin_data.size() - (jne_ps2_space + 2));
+            // Range check 0x02..0x35
             append_u8(bin_data, 0x3C); append_u8(bin_data, 0x02);
-            append_u8(bin_data, 0x72);
-            append_u8(bin_data, (uint8_t)(int8_t)(poll_top - (bin_data.size() + 1)));
+            size_t jae_min = bin_data.size(); append_u8(bin_data, 0x73); append_u8(bin_data, 0x00);
+            jmp_poll();
+            bin_data[jae_min + 1] = (uint8_t)(bin_data.size() - (jae_min + 2));
 
             append_u8(bin_data, 0x3C); append_u8(bin_data, 0x35);
-            append_u8(bin_data, 0x77);
-            append_u8(bin_data, (uint8_t)(int8_t)(poll_top - (bin_data.size() + 1)));
+            size_t jbe_max = bin_data.size(); append_u8(bin_data, 0x76); append_u8(bin_data, 0x00);
+            jmp_poll();
+            bin_data[jbe_max + 1] = (uint8_t)(bin_data.size() - (jbe_max + 2));
 
-            append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB6); append_u8(bin_data, 0xD8);
-            append_u8(bin_data, 0x83); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x02);
-            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x83); append_u32(bin_data, addr_ps2_table);
+            // Layout check: [0x0009100C] (0 = EN, 1 = RU)
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x0D); append_u32(bin_data, 0x0009100C);
+            append_u8(bin_data, 0x84); append_u8(bin_data, 0xC9);
+            size_t jnz_ru_mode = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            // English Layout
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB6); append_u8(bin_data, 0xD8); // movzx ebx, al
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x02); // sub ebx, 2
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x15); append_u32(bin_data, 0x0009100A); // mov dl, [shift]
+            append_u8(bin_data, 0x84); append_u8(bin_data, 0xD2); // test dl, dl
+            size_t jnz_en_up = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x83); append_u32(bin_data, addr_ps2_lut_en_lower); // mov al, [ebx + lower]
+            size_t jmp_en_done = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            bin_data[jnz_en_up + 1] = (uint8_t)(bin_data.size() - (jnz_en_up + 2));
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x83); append_u32(bin_data, addr_ps2_lut_en_upper); // mov al, [ebx + upper]
+            bin_data[jmp_en_done + 1] = (uint8_t)(bin_data.size() - (jmp_en_done + 2));
+
+            append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0); // valid char?
+            size_t jnz_en_ok = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            jmp_poll();
+            bin_data[jnz_en_ok + 1] = (uint8_t)(bin_data.size() - (jnz_en_ok + 2));
+            append_u8(bin_data, 0x59); append_u8(bin_data, 0x5B); append_u8(bin_data, 0x5A); append_u8(bin_data, 0xC3); // direct return
+
+            // Russian Layout
+            size_t ru_mode_pos = bin_data.size();
+            bin_data[jnz_ru_mode + 1] = (uint8_t)(ru_mode_pos - (jnz_ru_mode + 2));
+
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB6); append_u8(bin_data, 0xD8); // movzx ebx, al
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x02); // sub ebx, 2
+            append_u8(bin_data, 0xD1); append_u8(bin_data, 0xE3);                             // shl ebx, 1 (2 bytes per entry)
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x15); append_u32(bin_data, 0x0009100A); // mov dl, [shift]
+            append_u8(bin_data, 0x84); append_u8(bin_data, 0xD2);
+            size_t jnz_ru_up = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x83); append_u32(bin_data, addr_ps2_lut_ru_lower);
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0xA3); append_u32(bin_data, addr_ps2_lut_ru_lower + 1);
+            size_t jmp_ru_done = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            bin_data[jnz_ru_up + 1] = (uint8_t)(bin_data.size() - (jnz_ru_up + 2));
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x83); append_u32(bin_data, addr_ps2_lut_ru_upper);
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0xA3); append_u32(bin_data, addr_ps2_lut_ru_upper + 1);
+            bin_data[jmp_ru_done + 1] = (uint8_t)(bin_data.size() - (jmp_ru_done + 2));
+
             append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0);
-            append_u8(bin_data, 0x74);
-            append_u8(bin_data, (uint8_t)(int8_t)(poll_top - (bin_data.size() + 1)));
+            size_t jnz_ru_ok = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            jmp_poll();
+            bin_data[jnz_ru_ok + 1] = (uint8_t)(bin_data.size() - (jnz_ru_ok + 2));
 
-            // got_char:
-            size_t got_char_pos = bin_data.size();
-            bin_data[jmp_got1 + 1] = (uint8_t)(got_char_pos - (jmp_got1 + 2));
-            bin_data[jmp_got2 + 1] = (uint8_t)(got_char_pos - (jmp_got2 + 2));
-            bin_data[jmp_got3 + 1] = (uint8_t)(got_char_pos - (jmp_got3 + 2));
-            bin_data[jmp_got4 + 1] = (uint8_t)(got_char_pos - (jmp_got4 + 2));
+            append_u8(bin_data, 0x84); append_u8(bin_data, 0xE4); // test ah, ah
+            size_t jz_single_byte = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x88); append_u8(bin_data, 0x25); append_u32(bin_data, 0x00091008); // store 2nd byte in 0x00091008
+            bin_data[jz_single_byte + 1] = (uint8_t)(bin_data.size() - (jz_single_byte + 2));
 
-            append_u8(bin_data, 0x5B); // pop ebx
-            append_u8(bin_data, 0x5A); // pop edx
-            append_u8(bin_data, 0xC3); // ret
+            append_u8(bin_data, 0x59); append_u8(bin_data, 0x5B); append_u8(bin_data, 0x5A); append_u8(bin_data, 0xC3); // direct return
 
-            // --- Helper 5: helper_read_line (EDI = buffer) ---
+            // 8.8. Helper: helper_read_line (EDI = buffer)
             uint32_t addr_read_line = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
             append_u8(bin_data, 0x57); // push edi
             append_u8(bin_data, 0x53); // push ebx
+            append_u8(bin_data, 0x52); // push edx
             append_u8(bin_data, 0x89); append_u8(bin_data, 0xFB); // mov ebx, edi
 
             size_t rl_top = bin_data.size();
             append_u8(bin_data, 0xE8); // call helper_read_char
             append_u32(bin_data, addr_read_char - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
 
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x0A); // Enter
-            size_t je_rl_enter = bin_data.size();
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x0A); // Enter (LF)?
+            size_t je_rl_enter1 = bin_data.size();
+            append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x0D); // Enter (CR)?
+            size_t je_rl_enter2 = bin_data.size();
             append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
 
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x08); // Backspace
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x08); // Backspace?
             size_t je_rl_bksp = bin_data.size();
             append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
 
-            // Regular char
-            append_u8(bin_data, 0x89); append_u8(bin_data, 0xFA);
-            append_u8(bin_data, 0x29); append_u8(bin_data, 0xDA);
-            append_u8(bin_data, 0x81); append_u8(bin_data, 0xFA); append_u32(bin_data, 250);
-            append_u8(bin_data, 0x73);
-            append_u8(bin_data, (uint8_t)(int8_t)(rl_top - (bin_data.size() + 1)));
+            // Regular character
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xFA); // mov edx, edi
+            append_u8(bin_data, 0x29); append_u8(bin_data, 0xDA); // sub edx, ebx
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0xFA); append_u32(bin_data, 250); // max 250 bytes
+            size_t jb_rl_store = bin_data.size();
+            append_u8(bin_data, 0x72); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(rl_top - (bin_data.size() + 1)));
+            bin_data[jb_rl_store + 1] = (uint8_t)(bin_data.size() - (jb_rl_store + 2));
 
-            append_u8(bin_data, 0x88); append_u8(bin_data, 0x07);
-            append_u8(bin_data, 0x47);
-            append_u8(bin_data, 0xE8);
+            append_u8(bin_data, 0x88); append_u8(bin_data, 0x07); // mov [edi], al
+            append_u8(bin_data, 0x47);                             // inc edi
+            append_u8(bin_data, 0xE8); // echo char
             append_u32(bin_data, addr_print_char - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
             append_u8(bin_data, 0xEB);
             append_u8(bin_data, (uint8_t)(int8_t)(rl_top - (bin_data.size() + 1)));
 
-            // rl_bksp
+            // Backspace handling
             bin_data[je_rl_bksp + 1] = (uint8_t)(bin_data.size() - (je_rl_bksp + 2));
-            append_u8(bin_data, 0x39); append_u8(bin_data, 0xDF);
-            append_u8(bin_data, 0x76);
-            append_u8(bin_data, (uint8_t)(int8_t)(rl_top - (bin_data.size() + 1)));
+            append_u8(bin_data, 0x39); append_u8(bin_data, 0xDF); // cmp edi, ebx
+            size_t ja_rl_bksp_ok = bin_data.size();
+            append_u8(bin_data, 0x77); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(rl_top - (bin_data.size() + 1)));
+            bin_data[ja_rl_bksp_ok + 1] = (uint8_t)(bin_data.size() - (ja_rl_bksp_ok + 2));
 
             append_u8(bin_data, 0x4F); // dec edi
-            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x07); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x39); append_u8(bin_data, 0xDF);
+            size_t jbe_no_extra_utf = bin_data.size();
+            append_u8(bin_data, 0x76); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x57); append_u8(bin_data, 0xFF); // mov dl, [edi - 1]
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0xFA); append_u8(bin_data, 0xD0);
+            size_t je_utf_extra_d0 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0xFA); append_u8(bin_data, 0xD1);
+            size_t jne_no_extra_d1 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            bin_data[je_utf_extra_d0 + 1] = (uint8_t)(bin_data.size() - (je_utf_extra_d0 + 2));
+            append_u8(bin_data, 0x4F); // dec edi (remove lead byte too)
+            bin_data[jne_no_extra_d1 + 1] = (uint8_t)(bin_data.size() - (jne_no_extra_d1 + 2));
+            bin_data[jbe_no_extra_utf + 1] = (uint8_t)(bin_data.size() - (jbe_no_extra_utf + 2));
+
             append_u8(bin_data, 0xB0); append_u8(bin_data, 0x08);
-            append_u8(bin_data, 0xE8);
+            append_u8(bin_data, 0xE8); // erase glyph on screen
             append_u32(bin_data, addr_print_char - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
             append_u8(bin_data, 0xEB);
             append_u8(bin_data, (uint8_t)(int8_t)(rl_top - (bin_data.size() + 1)));
 
-            // rl_enter
-            bin_data[je_rl_enter + 1] = (uint8_t)(bin_data.size() - (je_rl_enter + 2));
-            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x07); append_u8(bin_data, 0x00);
+            // Enter handling
+            bin_data[je_rl_enter1 + 1] = (uint8_t)(bin_data.size() - (je_rl_enter1 + 2));
+            bin_data[je_rl_enter2 + 1] = (uint8_t)(bin_data.size() - (je_rl_enter2 + 2));
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x07); append_u8(bin_data, 0x00); // null terminator
             append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0A);
-            append_u8(bin_data, 0xE8);
+            append_u8(bin_data, 0xE8); // echo newline
             append_u32(bin_data, addr_print_char - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
 
+            append_u8(bin_data, 0x5A); // pop edx
             append_u8(bin_data, 0x5B); // pop ebx
             append_u8(bin_data, 0x5F); // pop edi
             append_u8(bin_data, 0xC3); // ret
 
-            // --- Helper 6: helper_copy_string (ESI = src, EDI = dst) ---
+            // 8.9. Helper: helper_copy_string (ESI = src/val, EDI = dst)
             uint32_t addr_copy_string = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
             append_u8(bin_data, 0x56); // push esi
             append_u8(bin_data, 0x57); // push edi
             append_u8(bin_data, 0x50); // push eax
+
+            // Check if esi < 0x00010000 (number) or >= 0x00010000 (string pointer)
             append_u8(bin_data, 0x81); append_u8(bin_data, 0xFE); append_u32(bin_data, 0x00010000);
-            size_t jae_cpy = bin_data.size();
+            size_t jae_is_str = bin_data.size();
             append_u8(bin_data, 0x73); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x07); append_u8(bin_data, 0x00);
+
+            // Number: tag=0, val=esi
+            append_u8(bin_data, 0xC7); append_u8(bin_data, 0x07); append_u32(bin_data, 0); // mov dword [edi], 0
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0x77); append_u8(bin_data, 0x04); // mov [edi + 4], esi
             size_t jmp_cpydone = bin_data.size();
             append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
 
-            bin_data[jae_cpy + 1] = (uint8_t)(bin_data.size() - (jae_cpy + 2));
+            // String: tag=1, text at edi + 4
+            bin_data[jae_is_str + 1] = (uint8_t)(bin_data.size() - (jae_is_str + 2));
+            append_u8(bin_data, 0xC7); append_u8(bin_data, 0x07); append_u32(bin_data, 1); // mov dword [edi], 1
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xC7); append_u8(bin_data, 0x04); // add edi, 4
+
             size_t cpy_loop = bin_data.size();
-            append_u8(bin_data, 0xAC);
-            append_u8(bin_data, 0xAA);
-            append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0);
+            append_u8(bin_data, 0xAC); // lodsb
+            append_u8(bin_data, 0xAA); // stosb
+            append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0); // test al, al
             append_u8(bin_data, 0x75);
             append_u8(bin_data, (uint8_t)(int8_t)(cpy_loop - (bin_data.size() + 1)));
 
@@ -569,17 +923,16 @@ namespace GrassBoot {
             uint32_t rel_helpers = after_helpers_offset - (uint32_t)(jmp_helpers_fixup + 4);
             write_u32_le(bin_data, jmp_helpers_fixup, rel_helpers);
 
-            // Инициализация позиции VGA курсора: строка 1 (смещение 160)
-            append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05);
-            append_u32(bin_data, 0x00091000);
-            append_u32(bin_data, 160);
+            // Fixup initial font load and cursor calls
+            write_u32_le(bin_data, fixup_font_addr, addr_cyrillic_font);
+            write_u32_le(bin_data, fixup_init_cursor, addr_update_cursor - (KERNEL_LOAD_ADDR + (uint32_t)fixup_init_cursor + 4));
 
-            // Исполнение inline asm вставок (если есть)
+            // Execute inline ASM if present
             if (!asm_machine_code.empty()) {
                 for (uint8_t b : asm_machine_code) append_u8(bin_data, b);
             }
 
-            // Трансляция байт-кода программы в машинный код Protected Mode
+            // --- 9. Трансляция байт-кода программы в нативный x86 Protected Mode ---
             struct StrFixup { size_t mc_pos; std::string text; };
             std::vector<StrFixup> str_fixups;
 
@@ -588,7 +941,7 @@ namespace GrassBoot {
 
             std::unordered_map<uint32_t, size_t> bc_to_mc;
             std::unordered_map<std::string, uint32_t> var_slots;
-            uint32_t next_var_addr = 0x00080000;
+            uint32_t next_var_addr = 0x00094000;
 
             size_t ip = 0;
             auto readU8 = [&]() -> uint8_t {
@@ -648,7 +1001,19 @@ namespace GrassBoot {
                             var_slots[vname] = next_var_addr;
                             next_var_addr += 256;
                         }
-                        append_u8(bin_data, 0x68); append_u32(bin_data, var_slots[vname]);
+                        uint32_t var_addr = var_slots[vname];
+                        // Check type tag at var_addr: 0 = number, 1 = string
+                        append_u8(bin_data, 0x81); append_u8(bin_data, 0x3D); append_u32(bin_data, var_addr); append_u32(bin_data, 0);
+                        size_t jne_load_str = bin_data.size();
+                        append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+                        // Number: push dword [var_addr + 4]
+                        append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, var_addr + 4);
+                        size_t jmp_load_done = bin_data.size();
+                        append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+                        // String: push (var_addr + 4)
+                        bin_data[jne_load_str + 1] = (uint8_t)(bin_data.size() - (jne_load_str + 2));
+                        append_u8(bin_data, 0x68); append_u32(bin_data, var_addr + 4);
+                        bin_data[jmp_load_done + 1] = (uint8_t)(bin_data.size() - (jmp_load_done + 2));
                         break;
                     }
                     case 0x04: { // OP_STORE_VAR
@@ -804,17 +1169,42 @@ namespace GrassBoot {
                     case 0x50: { // OP_CALL_BUILTIN
                         std::string fn = readString();
                         uint8_t argc = readU8();
-                        if (fn == "gin" || fn == "input") {
-                            append_u8(bin_data, 0xBF); append_u32(bin_data, 0x0008F000); // mov edi, 0x8F000
+                        if (fn == "gin" || fn == "input" || fn == "kbd_read_line") {
+                            append_u8(bin_data, 0xBF); append_u32(bin_data, 0x00092000); // mov edi, 0x00092000
                             append_u8(bin_data, 0xE8); // call read_line
                             append_u32(bin_data, addr_read_line - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-                            append_u8(bin_data, 0x68); append_u32(bin_data, 0x0008F000); // push 0x8F000
+                            append_u8(bin_data, 0x68); append_u32(bin_data, 0x00092000); // push 0x00092000
                         } else if (fn == "clear") {
-                            append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091000); append_u32(bin_data, 0);
+                            // Очистка экрана VGA и сброс курсора
+                            append_u8(bin_data, 0xFC);
                             append_u8(bin_data, 0xBF); append_u32(bin_data, 0x000B8000);
-                            append_u8(bin_data, 0xB9); append_u32(bin_data, 2000);
-                            append_u8(bin_data, 0x66); append_u8(bin_data, 0xB8); append_u16(bin_data, 0x0720);
-                            append_u8(bin_data, 0xF3); append_u8(bin_data, 0x66); append_u8(bin_data, 0xAB);
+                            append_u8(bin_data, 0xB9); append_u32(bin_data, 1000);
+                            append_u8(bin_data, 0xB8); append_u32(bin_data, 0x07200720);
+                            append_u8(bin_data, 0xF3); append_u8(bin_data, 0xAB);
+                            append_u8(bin_data, 0x31); append_u8(bin_data, 0xDB);
+                            append_u8(bin_data, 0x89); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091000);
+                            append_u8(bin_data, 0xE8); // call update_cursor
+                            append_u32(bin_data, addr_update_cursor - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+                        } else if (fn == "use_utf" || fn == "use_locale" || fn == "set_layout" || fn == "kbd_set_layout") {
+                            for (int i = 0; i < argc; ++i) {
+                                append_u8(bin_data, 0x58); // pop eax
+                            }
+                            // Если eax == 1: включить русскую раскладку (1), иначе английскую (0)
+                            append_u8(bin_data, 0x3D); append_u32(bin_data, 1);
+                            size_t jne_set_en = bin_data.size();
+                            append_u8(bin_data, 0x75); append_u8(bin_data, 0x0E);
+                            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100C); append_u8(bin_data, 1);
+                            size_t jmp_set_done = bin_data.size();
+                            append_u8(bin_data, 0xEB); append_u8(bin_data, 0x0A);
+                            bin_data[jne_set_en + 1] = 0x0E;
+                            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100C); append_u8(bin_data, 0);
+                            bin_data[jmp_set_done + 1] = 0x0A;
+                            // Push 1.0 (для OP_POP)
+                            append_u8(bin_data, 0x6A); append_u8(bin_data, 0x01);
+                        } else {
+                            for (int i = 0; i < argc; ++i) {
+                                append_u8(bin_data, 0x58); // pop eax
+                            }
                         }
                         break;
                     }
@@ -825,7 +1215,7 @@ namespace GrassBoot {
 
             bc_to_mc[(uint32_t)bytecode.size()] = bin_data.size();
 
-            // Исправление относительных адресов переходов
+            // Исправление адресов переходов
             for (const auto& bf : branch_fixups) {
                 auto it = bc_to_mc.find(bf.target_bc);
                 if (it != bc_to_mc.end()) {
@@ -848,12 +1238,11 @@ namespace GrassBoot {
                     uint32_t str_linear_addr = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
                     emitted_strings[sf.text] = str_linear_addr;
                     for (char c : sf.text) append_u8(bin_data, (uint8_t)c);
-                    append_u8(bin_data, 0); // null-терминатор
+                    append_u8(bin_data, 0); // null
                 }
                 write_u32_le(bin_data, sf.mc_pos, emitted_strings[sf.text]);
             }
         } else {
-            // Если байт-кода нет — только asm вставки и останов
             if (!asm_machine_code.empty()) {
                 for (uint8_t b : asm_machine_code) append_u8(bin_data, b);
             }
@@ -862,8 +1251,8 @@ namespace GrassBoot {
             append_u8(bin_data, 0xEB); append_u8(bin_data, 0xFD); // jmp -3
         }
 
-        // 1.7. Встраивание байт-кода программы для VM/JIT ядра
-        while (bin_data.size() % 16 != 0) append_u8(bin_data, 0x90); // nop
+        // 1.10. Встраивание байт-кода программы для VM/JIT ядра
+        while (bin_data.size() % 16 != 0) append_u8(bin_data, 0x90);
 
         const char KERNEL_MAGIC[8] = {'G','R','A','S','S','B','I','N'};
         for (int i = 0; i < 8; ++i) append_u8(bin_data, KERNEL_MAGIC[i]);
@@ -893,7 +1282,6 @@ namespace GrassBoot {
         return true;
     }
 
-    // ── 2. Сборка системного драйвера ядра (--sys) ──
     bool build_driver_sys(const std::string& output_sys,
                           const std::vector<uint8_t>& bytecode,
                           const std::string& driver_name,
@@ -975,7 +1363,7 @@ namespace GrassBoot {
                             const std::string& volume_id,
                             bool lang_ru) {
         const size_t SECTOR_SIZE = 2048;
-        size_t kernel_sectors = 4; // 8 КБ под ядро
+        size_t kernel_sectors = 16; // 8 КБ под ядро
         size_t total_sectors = 22 + kernel_sectors;
         std::vector<uint8_t> iso(total_sectors * SECTOR_SIZE, 0);
 
