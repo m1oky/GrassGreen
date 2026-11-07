@@ -1,10 +1,12 @@
 const vscode = require('vscode');
 
 /**
- * GrassGreen 4.1 Standard Library Reference & API Catalog
+ * GrassGreen 4.2 Standard Library Reference & API Catalog
  */
 const MODULES = [
-    { name: "!GrassGreen!", doc: "Базовое ядро языка GrassGreen 4.1, потоковый ввод-вывод (gout/gin), типы данных и операторы." },
+    { name: "!GrassGreen!", doc: "Базовое ядро языка GrassGreen 4.2, потоковый ввод-вывод (gout/gin), типы данных и операторы." },
+    { name: "!hardware!", doc: "Библиотека прямого низкоуровневого опроса оборудования ПК: RAM, CPU, Материнская плата, BIOS, PCI и аппаратная перезагрузка." },
+    { name: "!hw!", doc: "Короткий алиас библиотеки прямого низкоуровневого опроса оборудования (!hardware!)." },
     { name: "!time!", doc: "Модуль профилирования, таймеров и работы с системным временем." },
     { name: "!interface!", doc: "Графический Fluent GUI движок (Win32 / GDI+), окна, кнопки, поля ввода." },
     { name: "!FastMath!", doc: "Быстрая математика: тригонометрия, интерполяция lerp/clamp, расстояния." },
@@ -28,6 +30,24 @@ const MODULES = [
 ];
 
 const FUNCTIONS = [
+    // Hardware Inspection API (!hardware!)
+    { name: "hw_ram_total", signature: "int hw_ram_total()", doc: "Возвращает общий объем оперативной памяти (RAM) в мегабайтах (MB) из карты памяти BIOS/Multiboot/OS.", snippet: "hw_ram_total()" },
+    { name: "hw_ram_used", signature: "int hw_ram_used()", doc: "Возвращает объем занятой оперативной памяти в мегабайтах (MB).", snippet: "hw_ram_used()" },
+    { name: "hw_ram_free", signature: "int hw_ram_free()", doc: "Возвращает объем свободной оперативной памяти в мегабайтах (MB).", snippet: "hw_ram_free()" },
+    { name: "proc_mem", signature: "int proc_mem", doc: "Возвращает занятый объем оперативной памяти в мегабайтах (MB). Доступно как в OS bare-metal, так и в пользовательском режиме.", snippet: "proc_mem" },
+    { name: "hw_cpu_vendor", signature: "string hw_cpu_vendor()", doc: "Возвращает производителя процессора (CPUID 0: 'GenuineIntel', 'AuthenticAMD' и др.).", snippet: "hw_cpu_vendor()" },
+    { name: "hw_cpu_brand", signature: "string hw_cpu_brand()", doc: "Возвращает полное торговое наименование процессора (CPUID 0x80000002-4).", snippet: "hw_cpu_brand()" },
+    { name: "hw_cpu_cores", signature: "int hw_cpu_cores()", doc: "Возвращает количество логических ядер / потоков процессора.", snippet: "hw_cpu_cores()" },
+    { name: "hw_cpu_family", signature: "int hw_cpu_family()", doc: "Возвращает семейство (Family ID) микроархитектуры процессора.", snippet: "hw_cpu_family()" },
+    { name: "hw_cpu_freq", signature: "int hw_cpu_freq()", doc: "Возвращает тактовую частоту процессора в мегагерцах (MHz).", snippet: "hw_cpu_freq()" },
+    { name: "hw_rdtsc", signature: "u64 hw_rdtsc()", doc: "Считывает аппаратный 64-битный счетчик тактов процессора Time-Stamp Counter (RDTSC).", snippet: "hw_rdtsc()" },
+    { name: "hw_board_vendor", signature: "string hw_board_vendor()", doc: "Возвращает производителя материнской платы из таблиц SMBIOS DMI Type 2.", snippet: "hw_board_vendor()" },
+    { name: "hw_board_model", signature: "string hw_board_model()", doc: "Возвращает название модели материнской платы из таблиц SMBIOS DMI Type 2.", snippet: "hw_board_model()" },
+    { name: "hw_bios_vendor", signature: "string hw_bios_vendor()", doc: "Возвращает поставщика прошивки BIOS/UEFI из таблиц SMBIOS DMI Type 0.", snippet: "hw_bios_vendor()" },
+    { name: "hw_bios_date", signature: "string hw_bios_date()", doc: "Возвращает дату выпуска прошивки BIOS/UEFI из таблиц SMBIOS DMI Type 0.", snippet: "hw_bios_date()" },
+    { name: "hw_pci_count", signature: "int hw_pci_count()", doc: "Сканирует шину PCI (порты 0xCF8 / 0xCFC) и возвращает количество обнаруженных физических устройств.", snippet: "hw_pci_count()" },
+    { name: "hw_reboot", signature: "void hw_reboot()", doc: "Выполняет аппаратную перезагрузку компьютера через контроллер 8042 / порт 0xCF9.", snippet: "hw_reboot();" },
+
     // Audio Engine
     { name: "audio_play", signature: "bool audio_play(string path)", doc: "Воспроизводит аудиофайл WAV.", snippet: "audio_play(${1:\"path/to/file.wav\"})" },
     { name: "audio_stop", signature: "void audio_stop()", doc: "Останавливает воспроизведение всех текущих звуков.", snippet: "audio_stop()" },
@@ -219,6 +239,11 @@ function getRunCommand(filePath) {
     return `$cmd = if (Get-Command grassc -ErrorAction SilentlyContinue) { "grassc" } elseif (Test-Path "C:\\GrassGreen\\bin\\grassc.exe") { "C:\\GrassGreen\\bin\\grassc.exe" } else { "grassc" }; & $cmd "${filePath}"`;
 }
 
+function getKernelBuildCommand(filePath) {
+    const outBin = filePath.replace(/\.[^.]+$/, '') + '.bin';
+    return `$cmd = if (Get-Command grg -ErrorAction SilentlyContinue) { "grg" } elseif (Get-Command grassc -ErrorAction SilentlyContinue) { "grassc" } elseif (Test-Path "C:\\GrassGreen\\bin\\grg.exe") { "C:\\GrassGreen\\bin\\grg.exe" } else { "grg" }; & $cmd --kernel --multiboot "${filePath}" -o "${outBin}"`;
+}
+
 function getOrCreateTerminal(name) {
     const existing = vscode.window.terminals.find(t => t.name === name);
     if (existing) return existing;
@@ -226,7 +251,7 @@ function getOrCreateTerminal(name) {
 }
 
 /**
- * Activates the GrassGreen 4.1 extension
+ * Activates the GrassGreen 4.2 extension
  * @param {vscode.ExtensionContext} context
  */
 function activate(context) {
@@ -307,7 +332,7 @@ function activate(context) {
             if (mod) {
                 const md = new vscode.MarkdownString();
                 md.appendCodeblock(mod.name, 'grassgreen');
-                md.appendMarkdown(`**Модуль GrassGreen 4.1**\n\n${mod.doc}`);
+                md.appendMarkdown(`**Модуль GrassGreen 4.2**\n\n${mod.doc}`);
                 return new vscode.Hover(md);
             }
 
@@ -400,6 +425,21 @@ function activate(context) {
     });
 
     // 5. Run Command (F5)
+        // 5.1 Build Kernel Multiboot Command
+    const buildKernelCommand = vscode.commands.registerCommand('grassgreen.buildKernel', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor || editor.document.languageId !== 'grassgreen') {
+            vscode.window.showErrorMessage('Откройте файл ядра GrassGreen (.grass) для сборки.');
+            return;
+        }
+        await editor.document.save();
+        const filePath = editor.document.fileName;
+        const terminal = getOrCreateTerminal('GrassGreen Kernel Build');
+        terminal.show();
+        terminal.sendText(getKernelBuildCommand(filePath));
+        vscode.window.setStatusBarMessage('$(server) GrassGreen: Сборка Multiboot OS ядра (.bin)...', 4000);
+    });
+
     const runCommand = vscode.commands.registerCommand('grassgreen.runFile', async () => {
         const editor = vscode.window.activeTextEditor;
         if (!editor || editor.document.languageId !== 'grassgreen') {
@@ -474,6 +514,7 @@ function activate(context) {
         hoverProvider,
         symbolProvider,
         buildCommand,
+        buildKernelCommand,
         runCommand,
         taskProvider,
         buildStatusBarItem,

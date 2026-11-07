@@ -58,7 +58,7 @@
       "patterns": [
         {
           "name": "keyword.control.directive.grassgreen",
-          "match": "!(GrassGreen|2DGraphics|tg|fsys|json|math|FastMath|CoreMath|memory|GrassNet|proc|sys|interface|time|mmio|io|hw|thread|async|rand|audio|GrassWeb|database|asm|GrassASM|assembler|keyboard|kbd|ps2|PS2Keyboard|[a-zA-Z0-9_]+)!"
+          "match": "!(GrassGreen|hardware|hw|sysinfo|device|2DGraphics|tg|fsys|json|math|FastMath|CoreMath|memory|GrassNet|proc|sys|interface|time|mmio|io|hw|thread|async|rand|audio|GrassWeb|database|asm|GrassASM|assembler|keyboard|kbd|ps2|PS2Keyboard|[a-zA-Z0-9_]+)!"
         }
       ]
     },
@@ -159,6 +159,10 @@
     },
     "builtins": {
       "patterns": [
+        {
+          "name": "support.function.hardware.grassgreen",
+          "match": "\\b(hw_ram_total|hw_ram_used|hw_ram_free|proc_mem|hw_cpu_vendor|hw_cpu_brand|hw_cpu_cores|hw_cpu_family|hw_cpu_freq|hw_rdtsc|hw_board_vendor|hw_board_model|hw_bios_vendor|hw_bios_date|hw_pci_count|hw_reboot)\\b"
+        },
         {
           "name": "support.function.keyboard.grassgreen",
           "match": "\\b(kbd_has_key|kbd_available|kbd_read_scancode|kbd_get_scancode|kbd_scancode_to_char|kbd_scancode_to_ascii|kbd_getc|kbd_poll|kbd_read_line|kbd_is_shift|kbd_is_caps|kbd_is_ctrl|kbd_is_alt|kbd_is_key_pressed|kbd_scancode_name|kbd_leds|kbd_reset|kbd_self_test|kbd_wait_ack)\\b"

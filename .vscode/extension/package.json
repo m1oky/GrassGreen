@@ -1,7 +1,7 @@
 {
   "name": "grassgreen",
   "displayName": "GrassGreen (G&G) Language Support",
-  "description": "Официальная поддержка системного языка программирования GrassGreen 4.2: синтаксис, TextMate подсветка gout/gin, векторный GUI VD+, аудио-движок, встроенный ассемблер ядра !asm!, контроллер клавиатуры !keyboard!, флаги Multiboot/Kernel/ISO, IntelliSense автодополнение, компиляция по Ctrl+Shift+B, иконки файлов и 30 сниппетов.",
+  "description": "Официальная поддержка системного языка программирования GrassGreen 4.2: синтаксис, TextMate подсветка gout/gin, диагностика железа !hardware!, векторный GUI VD+, аудио-движок, ассемблер ядра !asm!, контроллер клавиатуры !keyboard!, флаги Multiboot/Kernel/ISO, IntelliSense, сборка по Ctrl+Shift+B, иконки файлов и сниппеты.",
   "version": "4.2.0",
   "publisher": "m1oky",
   "repository": {
@@ -96,6 +96,12 @@
         "title": "GrassGreen: Скомпилировать и запустить [F5]",
         "category": "GrassGreen",
         "icon": "$(play)"
+      },
+      {
+        "command": "grassgreen.buildKernel",
+        "title": "GrassGreen: Собрать Multiboot OS ядро (.bin) [--kernel --multiboot]",
+        "category": "GrassGreen",
+        "icon": "$(server)"
       }
     ],
     "keybindings": [
@@ -121,6 +127,11 @@
           "command": "grassgreen.runFile",
           "when": "editorLangId == grassgreen",
           "group": "navigation@2"
+        },
+        {
+          "command": "grassgreen.buildKernel",
+          "when": "editorLangId == grassgreen",
+          "group": "navigation@3"
         }
       ],
       "editor/context": [

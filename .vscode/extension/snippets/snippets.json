@@ -348,5 +348,56 @@
       "}"
     ],
     "description": "Шаблон полного ядра операционной системы для компиляции через --kernel / --iso (!asm!, !keyboard!)"
+  },
+  "Hardware System Inspection": {
+    "prefix": "hardware",
+    "body": [
+      "!GrassGreen!",
+      "!hardware!",
+      "",
+      "int main() {",
+      "\tgout << \"CPU Vendor: \" << hw_cpu_vendor() << endl;",
+      "\tgout << \"CPU Brand:  \" << hw_cpu_brand() << endl;",
+      "\tgout << \"CPU Cores:  \" << hw_cpu_cores() << endl;",
+      "\tgout << \"RAM Total:  \" << hw_ram_total() << \" MB\" << endl;",
+      "\tgout << \"RAM Used:   \" << hw_ram_used() << \" MB\" << endl;",
+      "\tgout << \"RAM Free:   \" << hw_ram_free() << \" MB\" << endl;",
+      "\tgout << \"Motherboard:\" << hw_board_vendor() << \" \" << hw_board_model() << endl;",
+      "\tgout << \"BIOS Vendor:\" << hw_bios_vendor() << \" (\" << hw_bios_date() << \")\" << endl;",
+      "\tgout << \"PCI Devices:\" << hw_pci_count() << endl;",
+      "\treturn 0;",
+      "}"
+    ],
+    "description": "Полная диагностика оборудования ПК через !hardware! (CPU, RAM, Motherboard, BIOS, PCI)"
+  },
+  "Multiboot Kernel Main": {
+    "prefix": "kernel_multiboot",
+    "body": [
+      "!GrassGreen!",
+      "!hardware!",
+      "",
+      "int main() {",
+      "\ttake user;",
+      "\ttake cmd;",
+      "\tuse utf - 65001;",
+      "",
+      "\tgout << \"Welcome to GrassGreen Sovereign OS!\" << endl;",
+      "\twhile (true) {",
+      "\t\tgout << \"/ \";",
+      "\t\tgin >> cmd;",
+      "\t\tif (cmd == \"help\") {",
+      "\t\t\tgout << \"Commands: help, disp, reboot\" << endl;",
+      "\t\t}",
+      "\t\tif (cmd == \"disp\") {",
+      "\t\t\tgout << \"RAM Used: \" << proc_mem << \" MB\" << endl;",
+      "\t\t}",
+      "\t\tif (cmd == \"reboot\") {",
+      "\t\t\thw_reboot();",
+      "\t\t}",
+      "\t}",
+      "\treturn 0;",
+      "}"
+    ],
+    "description": "Шаблон bare-metal ядра операционной системы Multiboot с интерактивным CLI"
   }
 }
