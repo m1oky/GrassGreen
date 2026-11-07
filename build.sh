@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # ==============================================================================
-#  GrassGreen 4.0 — Linux Fast Build Script
+#  GrassGreen 4.2 — Linux Fast Build Script
 # ==============================================================================
 
 set -e
 
-echo "[GrassCompiler] Building GrassGreen v4.1 on Linux..."
+echo "[GrassCompiler] Building GrassGreen v4.2 on Linux..."
 mkdir -p bin
 
 g++ -std=c++20 -O3 -s \
@@ -13,6 +13,8 @@ g++ -std=c++20 -O3 -s \
   src/GrassHAL.cpp \
   src/GrassMMIO.cpp \
   src/GrassASM.cpp \
+  src/GrassKeyboard.cpp \
+  src/GrassBoot.cpp \
   src/GrassThread.cpp \
   src/GrassJIT.cpp \
   src/GrassImport.cpp \

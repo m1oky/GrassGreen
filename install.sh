@@ -163,15 +163,17 @@ cd "$WORK_DIR"
 mkdir -p bin
 
 # ------------------------------------------------------------------------------
-# 4. Компиляция компилятора GrassGreen v4.0
+# 4. Компиляция компилятора GrassGreen v4.2
 # ------------------------------------------------------------------------------
-echo -e "${CYAN}[*] Compiling GrassGreen v4.0 (Single Compilation Unit / C++20 -O3)...${NC}"
+echo -e "${CYAN}[*] Compiling GrassGreen v4.2 (Single Compilation Unit / C++20 -O3)...${NC}"
 
 g++ -std=c++20 -O3 -s \
   src/grassc.cpp \
   src/GrassHAL.cpp \
   src/GrassMMIO.cpp \
   src/GrassASM.cpp \
+  src/GrassKeyboard.cpp \
+  src/GrassBoot.cpp \
   src/GrassThread.cpp \
   src/GrassJIT.cpp \
   src/GrassImport.cpp \
@@ -266,7 +268,7 @@ mkdir -p "$TEST_DIR"
 cat << 'EOF' > "$TEST_DIR/verify.grass"
 !GrassGreen!
 int main() {
-    gout << "GrassGreen v4.0 is running perfectly on Linux!" << endl;
+    gout << "GrassGreen v4.2 is running perfectly on Linux!" << endl;
     return 0;
 }
 EOF

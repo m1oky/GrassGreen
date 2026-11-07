@@ -298,5 +298,55 @@
       "}"
     ],
     "description": "Шаблон инициализации ядра операционной системы на голом железе (!asm!)"
+  },
+  "Keyboard Read Line": {
+    "prefix": [
+      "kbd_line",
+      "read_line",
+      "readline"
+    ],
+    "body": [
+      "string ${1:input} = kbd_read_line();"
+    ],
+    "description": "Построчный ввод с клавиатуры PS/2 с поддержкой Backspace (!keyboard!)"
+  },
+  "Keyboard Poll Loop": {
+    "prefix": [
+      "kbd_loop",
+      "poll_key"
+    ],
+    "body": [
+      "while (true) {",
+      "\tif (kbd_has_key()) {",
+      "\t\ttake sc = kbd_get_scancode();",
+      "\t\ttake ch = kbd_scancode_to_char(sc);",
+      "\t\t${1:// handle key}",
+      "\t}",
+      "}"
+    ],
+    "description": "Цикл опроса клавиатуры контроллера PS/2 (!keyboard!)"
+  },
+  "Multiboot Kernel Complete": {
+    "prefix": [
+      "kernel_os",
+      "os_main"
+    ],
+    "body": [
+      "!GrassGreen!",
+      "!asm!",
+      "!keyboard!",
+      "",
+      "int main() {",
+      "\tcli();",
+      "\tgout << \"[GrassOS v4.2.0]: Kernel Started on Bare-Metal!\" << endl;",
+      "\tgout << \"Type a command: \";",
+      "\tstring cmd = kbd_read_line();",
+      "\tgout << \"Received: \" << cmd << endl;",
+      "\tsti();",
+      "\thlt();",
+      "\treturn 0;",
+      "}"
+    ],
+    "description": "Шаблон полного ядра операционной системы для компиляции через --kernel / --iso (!asm!, !keyboard!)"
   }
 }

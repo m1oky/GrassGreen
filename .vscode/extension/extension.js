@@ -20,6 +20,7 @@ const MODULES = [
     { name: "!fsys!", doc: "Файловая система: чтение, запись, проверка путей и списки файлов." },
     { name: "!tg!", doc: "Интеграция с Telegram Bot API." },
     { name: "!2DGraphics!", doc: "Аппаратная 2D-графика: примитивы, коллизии, игровой цикл." },
+    { name: "!keyboard!", doc: "Библиотека контроллера клавиатуры PS/2: опрос портов 0x60/0x64, чтение скан-кодов, определение модификаторов (Shift, Caps, Ctrl, Alt), ввод строк с Backspace." },
     { name: "!asm!", doc: "Встроенный ассемблер ядра: низкоуровневые вставки x86_64, системные регистры (CR0-CR4), аппаратные порты и прерывания (cli, sti, in, out, hlt)." },
     { name: "!audio!", doc: "Нативный аудио-движок: синтез волн (синус, меандр, пила, треугольник, шум), генерация тонов, воспроизведение WAV и звуковые эффекты." },
     { name: "!mmio!", doc: "Прямой доступ к памяти (MMIO), аппаратные порты (in/out) и барьеры." },
@@ -61,6 +62,25 @@ const FUNCTIONS = [
     { name: "mutex_lock", signature: "void mutex_lock(take mutex)", doc: "Захватывает мьютекс `mutex`. Если он занят, блокирует поток до освобождения.", snippet: "mutex_lock(${1:mutex})" },
     { name: "mutex_unlock", signature: "void mutex_unlock(take mutex)", doc: "Освобождает ранее захваченный мьютекс `mutex`.", snippet: "mutex_unlock(${1:mutex})" },
     { name: "mutex_destroy", signature: "void mutex_destroy(take mutex)", doc: "Уничтожает системный мьютекс `mutex` и освобождает связанные дескрипторы.", snippet: "mutex_destroy(${1:mutex})" },
+
+    // Keyboard Controller Builtins (!keyboard!)
+    { name: "kbd_has_key", signature: "bool kbd_has_key()", doc: "Проверка наличия данных в буфере контроллера клавиатуры (порт 0x64 бит 0). Не блокирует выполнение.", snippet: "kbd_has_key()" },
+    { name: "kbd_available", signature: "bool kbd_available()", doc: "Алиас kbd_has_key(): проверка готовности нажатой клавиши.", snippet: "kbd_available()" },
+    { name: "kbd_read_scancode", signature: "u8 kbd_read_scancode()", doc: "Считывание сырого 8-битного скан-кода PS/2 Set 1 из порта 0x60.", snippet: "kbd_read_scancode()" },
+    { name: "kbd_get_scancode", signature: "u8 kbd_get_scancode()", doc: "Блокирующее ожидание и чтение скан-кода нажатия (Make-кода).", snippet: "kbd_get_scancode()" },
+    { name: "kbd_scancode_to_char", signature: "string kbd_scancode_to_char(take scancode)", doc: "Преобразование скан-кода PS/2 в символ ASCII с учетом Shift и Caps Lock.", snippet: "kbd_scancode_to_char(${1:scancode})" },
+    { name: "kbd_scancode_name", signature: "string kbd_scancode_name(take scancode)", doc: "Получение читаемого имени клавиши (Enter, Backspace, Space, Shift и др.).", snippet: "kbd_scancode_name(${1:scancode})" },
+    { name: "kbd_getc", signature: "string kbd_getc()", doc: "Блокирующее чтение одного символа с клавиатуры.", snippet: "kbd_getc()" },
+    { name: "kbd_poll", signature: "string kbd_poll()", doc: "Неблокирующий опрос: возвращает символ клавиши или пустую строку \"\", если клавиша не нажата.", snippet: "kbd_poll()" },
+    { name: "kbd_read_line", signature: "string kbd_read_line()", doc: "Построчный ввод строки до Enter с поддержкой эха и стирания клавишей Backspace.", snippet: "kbd_read_line()" },
+    { name: "kbd_is_shift", signature: "bool kbd_is_shift()", doc: "Проверка зажатия клавиши Shift (Left/Right).", snippet: "kbd_is_shift()" },
+    { name: "kbd_is_caps", signature: "bool kbd_is_caps()", doc: "Проверка активности режима Caps Lock.", snippet: "kbd_is_caps()" },
+    { name: "kbd_is_ctrl", signature: "bool kbd_is_ctrl()", doc: "Проверка зажатия клавиши Control.", snippet: "kbd_is_ctrl()" },
+    { name: "kbd_is_alt", signature: "bool kbd_is_alt()", doc: "Проверка зажатия клавиши Alt.", snippet: "kbd_is_alt()" },
+    { name: "kbd_is_key_pressed", signature: "bool kbd_is_key_pressed(take scancode)", doc: "Проверка удержания конкретной клавиши по её скан-коду.", snippet: "kbd_is_key_pressed(${1:scancode})" },
+    { name: "kbd_leds", signature: "void kbd_leds(bool caps, bool num, bool scroll)", doc: "Установка индикаторов светодиодов клавиатуры через контроллер (команда 0xED).", snippet: "kbd_leds(${1:caps}, ${2:num}, ${3:scroll});" },
+    { name: "kbd_reset", signature: "void kbd_reset()", doc: "Программный сброс контроллера клавиатуры 8042 (команда 0xFF).", snippet: "kbd_reset();" },
+    { name: "kbd_self_test", signature: "bool kbd_self_test()", doc: "Запуск самодиагностики контроллера 8042 (команда 0xAA). Возвращает 1 при успешном тесте.", snippet: "kbd_self_test()" },
 
     // ASM & Kernel Builtins (!asm!)
     { name: "cli", signature: "void cli()", doc: "Сброс флага прерываний (CLI). Запрещает аппаратные прерывания.", snippet: "cli();" },

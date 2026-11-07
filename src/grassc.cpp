@@ -23,6 +23,8 @@
 #include "GrassSyntax.h"
 #include "FastMath.h"
 #include "GrassASM.h"
+#include "GrassKeyboard.h"
+#include "GrassBoot.h"
 #include "CoreMath.h"
 #include "GrassWeb.h"
 #include "GrassMemory.h"
@@ -1613,6 +1615,60 @@ public:
                     else if (fn == "asm_machine_hex") {
                         push(GrassValue::Str(GrassASM::get_last_machine_hex()));
                     }
+                    // ── Библиотека контроллера клавиатуры (!keyboard!) ──
+                    else if (fn == "kbd_has_key" || fn == "kbd_available") {
+                        push(GrassValue::Num(GrassKeyboard::has_key() ? 1.0 : 0.0));
+                    }
+                    else if (fn == "kbd_read_scancode") {
+                        push(GrassValue::Num((double)GrassKeyboard::read_scancode()));
+                    }
+                    else if (fn == "kbd_get_scancode") {
+                        push(GrassValue::Num((double)GrassKeyboard::get_scancode()));
+                    }
+                    else if ((fn == "kbd_scancode_to_char" || fn == "kbd_scancode_to_ascii") && argc >= 1) {
+                        push(GrassValue::Str(GrassKeyboard::scancode_to_char((uint8_t)args[0].toNumber())));
+                    }
+                    else if (fn == "kbd_scancode_name" && argc >= 1) {
+                        push(GrassValue::Str(GrassKeyboard::scancode_name((uint8_t)args[0].toNumber())));
+                    }
+                    else if (fn == "kbd_getc") {
+                        push(GrassValue::Str(GrassKeyboard::getc()));
+                    }
+                    else if (fn == "kbd_poll") {
+                        push(GrassValue::Str(GrassKeyboard::poll()));
+                    }
+                    else if (fn == "kbd_read_line") {
+                        push(GrassValue::Str(GrassKeyboard::read_line()));
+                    }
+                    else if (fn == "kbd_is_shift") {
+                        push(GrassValue::Num(GrassKeyboard::is_shift() ? 1.0 : 0.0));
+                    }
+                    else if (fn == "kbd_is_caps") {
+                        push(GrassValue::Num(GrassKeyboard::is_caps() ? 1.0 : 0.0));
+                    }
+                    else if (fn == "kbd_is_ctrl") {
+                        push(GrassValue::Num(GrassKeyboard::is_ctrl() ? 1.0 : 0.0));
+                    }
+                    else if (fn == "kbd_is_alt") {
+                        push(GrassValue::Num(GrassKeyboard::is_alt() ? 1.0 : 0.0));
+                    }
+                    else if (fn == "kbd_is_key_pressed" && argc >= 1) {
+                        push(GrassValue::Num(GrassKeyboard::is_key_pressed((uint8_t)args[0].toNumber()) ? 1.0 : 0.0));
+                    }
+                    else if (fn == "kbd_leds" && argc >= 3) {
+                        GrassKeyboard::set_leds(args[0].toNumber() != 0, args[1].toNumber() != 0, args[2].toNumber() != 0);
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "kbd_reset") {
+                        GrassKeyboard::reset();
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "kbd_self_test") {
+                        push(GrassValue::Num(GrassKeyboard::self_test() ? 1.0 : 0.0));
+                    }
+                    else if (fn == "kbd_wait_ack") {
+                        push(GrassValue::Num(GrassKeyboard::wait_ack() ? 1.0 : 0.0));
+                    }
                     else if (vars.count(fn + "()")) push(vars[fn + "()"]);
                     else if (vars.count(fn)) push(vars[fn]);
                     else if (shared_env && shared_env->vars.count(fn)) push(shared_env->vars[fn]);
@@ -2350,6 +2406,10 @@ struct CompilerOptions {
     string output_file = "";
     bool emit_bytecode_only = false; // -c (.grassc)
     bool emit_exe = false;           // -emit-exe (.exe)
+    bool emit_multiboot = false;     // --multiboot
+    bool emit_kernel = false;        // --kernel (.bin)
+    bool emit_sys = false;           // --sys (.sys)
+    bool emit_iso = false;           // --iso (.iso)
     bool run_after_build = true;     // ./!, --run, -r, или по умолчанию для скриптов
     bool explicit_run = false;
     int opt_level = 2;               // -O0, -O1, -O2, -O3 (default: 2)
@@ -2366,11 +2426,11 @@ struct CompilerOptions {
 
 void PrintVersion(bool lang_ru) {
     if (lang_ru) {
-        cout << "GrassGreen (G&G) v4.0.0 (x86_64-win32)\n"
+        cout << "GrassGreen (G&G) v4.2.0 (x86_64-win32)\n"
              << "Официальный компилятор и ядро выполнения (grg / grassc)\n"
              << "Сайт: grassgreen.info | Репозиторий: github.com/m1oky/GrassGreen\n";
     } else {
-        cout << "GrassGreen (G&G) v4.0.0 (x86_64-win32)\n"
+        cout << "GrassGreen (G&G) v4.2.0 (x86_64-win32)\n"
              << "Official Compiler & Freestanding Execution Core (grg / grassc)\n"
              << "Domain: grassgreen.info | Repository: github.com/m1oky/GrassGreen\n";
     }
@@ -2378,7 +2438,7 @@ void PrintVersion(bool lang_ru) {
 
 void PrintHelp(bool lang_ru) {
     if (lang_ru) {
-        cout << "GrassGreen (G&G) v4.0.0 Компилятор и Рантайм (grg / grassc)\n\n"
+        cout << "GrassGreen (G&G) v4.2.0 Компилятор и Рантайм (grg / grassc)\n\n"
              << "Использование:\n"
              << "  grg [опции] <файл.grass>\n"
              << "  grassc [опции] <файл.grass>\n\n"
@@ -2391,6 +2451,11 @@ void PrintHelp(bool lang_ru) {
              << "  -O2, -O3         Оптимизация байт-кода (по умолчанию: -O2)\n"
              << "  --jit            Включить нативный JIT-компилятор x86_64 для горячих циклов\n"
              << "  --freestanding   Автономный режим ядра (без libc/C++ рантайма)\n\n"
+             << "Низкоуровневая разработка и ОС (G&G v4.2.0 Bare-Metal):\n"
+             << "  --multiboot      Генерация заголовка Multiboot 1/2 спецификации (GRUB / QEMU)\n"
+             << "  --kernel         Выделенный режим компиляции в чистый бинарный файл ядра (.bin)\n"
+             << "  --sys            Режим компиляции драйверов ядра в системный модуль (.sys)\n"
+             << "  --iso            Создание готового загрузочного .iso образа (El Torito No-Emulation)\n\n"
              << "Диагностика и анализ:\n"
              << "  --dump-ast       Распечатать дерево токенов (AST) и C-ABI структуры\n"
              << "  -S               Распечатать читаемый дизассемблер байт-кода\n"
@@ -2402,7 +2467,7 @@ void PrintHelp(bool lang_ru) {
              << "  -h, --help       Показать эту справку\n"
              << "  --install, -i    Установить инструментарий G&G и расширение VS Code\n";
     } else {
-        cout << "GrassGreen (G&G) v4.0.0 Compiler & Runner (grg / grassc)\n\n"
+        cout << "GrassGreen (G&G) v4.2.0 Compiler & Runner (grg / grassc)\n\n"
              << "Usage:\n"
              << "  grg [options] <source.grass>\n"
              << "  grassc [options] <source.grass>\n\n"
@@ -2415,6 +2480,11 @@ void PrintHelp(bool lang_ru) {
              << "  -O2, -O3         Enable bytecode optimizations (default: -O2)\n"
              << "  --jit            Enable native x86_64 JIT (Just-In-Time) compiler for loops\n"
              << "  --freestanding   Freestanding kernel build (independent of libc/C++)\n\n"
+             << "Bare-Metal & OS Development (G&G v4.2.0):\n"
+             << "  --multiboot      Generate Multiboot 1/2 header specification for GRUB / QEMU\n"
+             << "  --kernel         Dedicated build mode to raw binary OS kernel (.bin)\n"
+             << "  --sys            Device driver compilation to system kernel module (.sys)\n"
+             << "  --iso            Create standalone bootable ISO CD image (El Torito No-Emulation)\n\n"
              << "Diagnostics & Inspection:\n"
              << "  --dump-ast       Dump syntax tree (AST) and C-ABI struct layouts\n"
              << "  -S               Print disassembled human-readable bytecode\n"
@@ -2430,11 +2500,11 @@ void PrintHelp(bool lang_ru) {
 
 void DisassembleBytecode(const vector<uint8_t>& code, bool lang_ru) {
     if (lang_ru) {
-        cout << "\n=== ДИЗАССЕМБЛЕР БАЙТ-КОДА GRASSGREEN (G&G v4.0.0) ===\n";
+        cout << "\n=== ДИЗАССЕМБЛЕР БАЙТ-КОДА GRASSGREEN (G&G v4.2.0) ===\n";
         cout << "Смещение  Опкод            Аргументы\n";
         cout << "--------------------------------------------------------\n";
     } else {
-        cout << "\n=== GRASSGREEN (G&G v4.0.0) BYTECODE DISASSEMBLY ===\n";
+        cout << "\n=== GRASSGREEN (G&G v4.2.0) BYTECODE DISASSEMBLY ===\n";
         cout << "Offset    OpCode           Arguments\n";
         cout << "--------------------------------------------------------\n";
     }
@@ -2628,7 +2698,7 @@ bool ProcessCompilation(CompilerOptions& opt) {
         if (opt.dump_disasm) {
             DisassembleBytecode(bc_data, opt.lang_ru);
         }
-        if (opt.run_after_build) {
+        if (opt.run_after_build && !opt.emit_iso && !opt.emit_kernel && !opt.emit_sys && (!opt.emit_multiboot || opt.explicit_run)) {
             if (opt.lang_ru) cout << "[GrassVM]: Исполнение байт-кода...\n\n";
             else cout << "[GrassVM]: Executing bytecode...\n\n";
             g_vm_arena.reset();
@@ -2749,7 +2819,27 @@ bool ProcessCompilation(CompilerOptions& opt) {
     size_t last_dot = base_name.rfind('.');
     if (last_dot != string::npos) base_name = base_name.substr(0, last_dot);
 
-    if (opt.emit_bytecode_only) {
+    // Извлечение машинного кода x86_64 из ассемблерных вставок asm { ... }
+    vector<uint8_t> asm_bytes;
+    string asm_hex = GrassASM::get_last_machine_hex();
+    if (!asm_hex.empty()) {
+        stringstream ss(asm_hex);
+        string b_str;
+        while (ss >> b_str) {
+            try { asm_bytes.push_back((uint8_t)stoul(b_str, nullptr, 16)); } catch (...) {}
+        }
+    }
+
+    if (opt.emit_iso) {
+        string out_file = opt.output_file.empty() ? (base_name + ".iso") : opt.output_file;
+        GrassBoot::build_bootable_iso(out_file, compiler.code, asm_bytes, "GRASSGREEN_OS", opt.lang_ru);
+    } else if (opt.emit_sys) {
+        string out_file = opt.output_file.empty() ? (base_name + ".sys") : opt.output_file;
+        GrassBoot::build_driver_sys(out_file, compiler.code, base_name, opt.lang_ru);
+    } else if (opt.emit_kernel || opt.emit_multiboot) {
+        string out_file = opt.output_file.empty() ? (base_name + ".bin") : opt.output_file;
+        GrassBoot::build_kernel_bin(out_file, compiler.code, asm_bytes, true, opt.lang_ru);
+    } else if (opt.emit_bytecode_only) {
         // -c: Чистый байт-код .grassc
         string out_file = opt.output_file.empty() ? (base_name + ".grassc") : opt.output_file;
         ofstream out_bc(out_file, ios::binary);
@@ -2859,6 +2949,9 @@ int main(int argc, char* argv[]) {
     SetConsoleCP(CP_UTF8);
 #endif
 
+    GrassASM::initialize();
+    GrassKeyboard::initialize();
+
     if (CheckAndRunEmbeddedBytecode()) {
 #if defined(_WIN32)
         if (hIn != INVALID_HANDLE_VALUE) SetConsoleMode(hIn, origInMode);
@@ -2897,6 +2990,22 @@ int main(int argc, char* argv[]) {
                 opt.dump_ast = true;
             } else if (arg == "--time") {
                 opt.print_timing = true;
+            } else if (arg == "--multiboot") {
+                opt.emit_multiboot = true;
+                opt.freestanding = true;
+                opt.run_after_build = false;
+            } else if (arg == "--kernel") {
+                opt.emit_kernel = true;
+                opt.freestanding = true;
+                opt.run_after_build = false;
+            } else if (arg == "--sys") {
+                opt.emit_sys = true;
+                opt.freestanding = true;
+                opt.run_after_build = false;
+            } else if (arg == "--iso") {
+                opt.emit_iso = true;
+                opt.freestanding = true;
+                opt.run_after_build = false;
             } else if (arg == "--freestanding") {
                 opt.freestanding = true;
             } else if (arg == "--jit") {
@@ -2947,7 +3056,7 @@ int main(int argc, char* argv[]) {
     }
 
     cout << "========================================================\n";
-    cout << "  GrassGreen (G&G) Native Compiler & VM v4.0 (grg)\n";
+    cout << "  GrassGreen (G&G) Native Compiler & VM v4.2.0 (grg)\n";
     cout << "  Repository: github.com/m1oky/GrassGreen\n";
     cout << "  Type 'help' or '-h' for commands, 'exit' to quit.\n";
     cout << "========================================================\n";

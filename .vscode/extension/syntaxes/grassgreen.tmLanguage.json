@@ -58,7 +58,7 @@
       "patterns": [
         {
           "name": "keyword.control.directive.grassgreen",
-          "match": "!(GrassGreen|2DGraphics|tg|fsys|json|math|FastMath|CoreMath|memory|GrassNet|proc|sys|interface|time|mmio|io|hw|thread|async|rand|audio|GrassWeb|database|asm|GrassASM|assembler|[a-zA-Z0-9_]+)!"
+          "match": "!(GrassGreen|2DGraphics|tg|fsys|json|math|FastMath|CoreMath|memory|GrassNet|proc|sys|interface|time|mmio|io|hw|thread|async|rand|audio|GrassWeb|database|asm|GrassASM|assembler|keyboard|kbd|ps2|PS2Keyboard|[a-zA-Z0-9_]+)!"
         }
       ]
     },
@@ -159,6 +159,10 @@
     },
     "builtins": {
       "patterns": [
+        {
+          "name": "support.function.keyboard.grassgreen",
+          "match": "\\b(kbd_has_key|kbd_available|kbd_read_scancode|kbd_get_scancode|kbd_scancode_to_char|kbd_scancode_to_ascii|kbd_getc|kbd_poll|kbd_read_line|kbd_is_shift|kbd_is_caps|kbd_is_ctrl|kbd_is_alt|kbd_is_key_pressed|kbd_scancode_name|kbd_leds|kbd_reset|kbd_self_test|kbd_wait_ack)\\b"
+        },
         {
           "name": "support.function.asm.grassgreen",
           "match": "\\b(cli|sti|hlt|in|out|in8|in16|in32|out8|out16|out32|read_cr0|write_cr0|read_cr2|write_cr2|read_cr3|write_cr3|read_cr4|write_cr4|read_rflags|write_rflags|invlpg|rdtsc|pause|nop|cpuid_eax|cpuid_ebx|cpuid_ecx|cpuid_edx|asm_run|asm_bytes|asm_hex|asm_machine_hex|asm)\\b"

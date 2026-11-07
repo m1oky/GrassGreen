@@ -412,6 +412,18 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
              fn == "asm_run" || fn == "asm_bytes" || fn == "asm_hex" || fn == "asm_machine_hex") {
         requireLib("asm", "!asm!", fn + "()", line);
     }
+    // 19. Проверка библиотеки !keyboard!
+    else if (fn == "kbd_has_key" || fn == "kbd_available" ||
+             fn == "kbd_read_scancode" || fn == "kbd_get_scancode" ||
+             fn == "kbd_scancode_to_char" || fn == "kbd_scancode_to_ascii" ||
+             fn == "kbd_getc" || fn == "kbd_poll" || fn == "kbd_read_line" ||
+             fn == "kbd_is_shift" || fn == "kbd_is_caps" ||
+             fn == "kbd_is_ctrl" || fn == "kbd_is_alt" ||
+             fn == "kbd_is_key_pressed" || fn == "kbd_scancode_name" ||
+             fn == "kbd_leds" || fn == "kbd_reset" || fn == "kbd_self_test" ||
+             fn == "kbd_wait_ack") {
+        requireLib("keyboard", "!keyboard!", fn + "()", line);
+    }
 }
 
 bool BytecodeCompiler::isTypeOrFuncKeyword(const string& s) {
@@ -1057,6 +1069,8 @@ void BytecodeCompiler::parseStatement() {
             included_libs.insert("audio");
         } else if (lib == "!asm!" || lib == "!GrassASM!" || lib == "!assembler!") {
             included_libs.insert("asm");
+        } else if (lib == "!keyboard!" || lib == "!kbd!" || lib == "!ps2!" || lib == "!PS2Keyboard!") {
+            included_libs.insert("keyboard");
         } else if (lib == "!GrassWeb!" || lib == "!GREEN_WWW1!") {
             included_libs.insert("web");
             is_special_file = true;
