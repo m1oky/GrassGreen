@@ -1,5 +1,5 @@
 // =============================================================================
-//  GrassGreen 4.0 (G&G) — Sovereign Graphical Installer (setup.exe)
+//  GrassGreen 4.2.0 (G&G) — Sovereign Graphical Installer (setup.exe)
 //  Классический строгий Windows-стиль: белый основной фон, чёрный текст.
 // =============================================================================
 
@@ -232,9 +232,9 @@ void CreateDesktopConsoleShortcut(const std::wstring& targetBinDir, HWND hwndLog
         
         std::wstring content =
             L"@echo off\r\n"
-            L"title GrassGreen 4.0 (G&G) Interactive Environment\r\n"
+            L"title GrassGreen 4.2.0 (G&G) Interactive Environment\r\n"
             L"echo ========================================================\r\n"
-            L"echo   GrassGreen 4.0 (G&G) Console Environment\r\n"
+            L"echo   GrassGreen 4.2.0 (G&G) Console Environment\r\n"
             L"echo   Команда grg доступна для сборки и запуска скриптов!\r\n"
             L"echo ========================================================\r\n"
             L"echo.\r\n"
@@ -285,7 +285,7 @@ DWORD WINAPI InstallWorkerThread(LPVOID lpParam) {
     SendMessageW(g_hProgress, PBM_SETRANGE32, 0, 100);
     SendMessageW(g_hProgress, PBM_SETPOS, 5, 0);
 
-    AddLogMessage(g_hListLog, L"Начало установки GrassGreen 4.0...");
+    AddLogMessage(g_hListLog, L"Начало установки GrassGreen 4.2.0...");
     AddLogMessage(g_hListLog, L"Целевая папка: " + rootPath);
 
     // 1. Создание каталогов
@@ -361,6 +361,12 @@ DWORD WINAPI InstallWorkerThread(LPVOID lpParam) {
     writeBinaryFile(iconsDir + L"\\gdb.ico", G_PAYLOAD_GDB_ICO, G_PAYLOAD_GDB_ICO_SIZE);
     writeTextFile(iconsDir + L"\\logo.svg", G_PAYLOAD_LOGO_SVG);
     writeTextFile(iconsDir + L"\\gdb_logo.svg", G_PAYLOAD_GDB_LOGO_SVG);
+    if (G_PAYLOAD_VSIX_SIZE > 0) {
+        std::wstring vsixPath = binDir + L"\\grassgreen-4.2.0.vsix";
+        writeBinaryFile(vsixPath, G_PAYLOAD_VSIX, G_PAYLOAD_VSIX_SIZE);
+        AddLogMessage(g_hListLog, L"  -> Распаковано расширение VS Code grassgreen-4.2.0.vsix...");
+        _wsystem((L"code --install-extension \"" + vsixPath + L"\" --force >nul 2>&1").c_str());
+    }
     AddLogMessage(g_hListLog, L"[3/6] Распакованы иконки grass.ico, gdb.ico и логотипы logo.svg, gdb_logo.svg...");
     SendMessageW(g_hProgress, PBM_SETPOS, 60, 0);
     Sleep(60);
@@ -485,7 +491,7 @@ void PerformSilentInstall() {
 void BrowseForInstallFolder(HWND hwndParent) {
     BROWSEINFOW bi = { 0 };
     bi.hwndOwner = hwndParent;
-    bi.lpszTitle = L"Выберите папку для установки GrassGreen 4.0:";
+    bi.lpszTitle = L"Выберите папку для установки GrassGreen 4.2.0:";
     bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE | BIF_NONEWFOLDERBUTTON;
 
     PIDLIST_ABSOLUTE pidl = SHBrowseForFolderW(&bi);
@@ -564,7 +570,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             WS_CHILD | WS_VISIBLE | LBS_NOTIFY | WS_VSCROLL | LBS_NOINTEGRALHEIGHT,
             30, 256, 530, 174, hWnd, (HMENU)ID_LIST_LOG, NULL, NULL);
         SendMessageW(g_hListLog, WM_SETFONT, (WPARAM)g_hFontCode, TRUE);
-        AddLogMessage(g_hListLog, L"Готов к установке GrassGreen 4.0 (G&G).");
+        AddLogMessage(g_hListLog, L"Готов к установке GrassGreen 4.2.0 (G&G).");
         AddLogMessage(g_hListLog, L"Нажмите 'Установить' для распаковки файлов и регистрации в системе.");
 
         // 5. Кнопки внизу
@@ -613,7 +619,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         SetBkMode(hdc, TRANSPARENT);
         SetTextColor(hdc, COLOR_TEXT_BLACK);
         HFONT hOldFont = (HFONT)SelectObject(hdc, g_hFontTitle);
-        TextOutW(hdc, 30, 14, L"GrassGreen 4.0 (G&G) — Мастер Установки", 40);
+        TextOutW(hdc, 30, 14, L"GrassGreen 4.2.0 (G&G) — Мастер Установки", 40);
 
         // Текст подзаголовка (аккуратный серый)
         SetTextColor(hdc, COLOR_TEXT_MUTED);
@@ -663,7 +669,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             GetWindowTextW(g_hEditPath, installRoot, MAX_PATH);
             std::wstring binDir = std::wstring(installRoot) + L"\\bin";
             
-            std::wstring cmdArgs = L"/k \"set PATH=" + binDir + L";%PATH% && title GrassGreen 4.0 Console && grg -V\"";
+            std::wstring cmdArgs = L"/k \"set PATH=" + binDir + L";%PATH% && title GrassGreen 4.2.0 Console && grg -V\"";
             ShellExecuteW(NULL, L"open", L"cmd.exe", cmdArgs.c_str(), NULL, SW_SHOW);
             break;
         }
@@ -736,7 +742,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     HWND hWnd = CreateWindowW(
         L"GrassGreenSetupClass",
-        L"GrassGreen 4.0 (G&G) — Установка компилятора",
+        L"GrassGreen 4.2.0 (G&G) — Установка компилятора",
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
         xPos, yPos, winWidth, winHeight,
         NULL, NULL, hInstance, NULL

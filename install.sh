@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-#  GrassGreen 4.0 — Universal Linux Installer
+#  GrassGreen 4.2.0 — Universal Linux Installer
 #  Поддержка всех дистрибутивов Linux (Arch Linux, Ubuntu, Debian, Fedora и др.)
 # ==============================================================================
 
@@ -24,7 +24,7 @@ cat << "EOF"
   \____|_|  \__,_|___/___/            \_____|_|  \___|\___|_| |_|
 EOF
 echo -e "${NC}"
-echo -e "${BOLD}GrassGreen (G&G) Language — Universal Linux Installer v4.0${NC}"
+echo -e "${BOLD}GrassGreen (G&G) Language — Universal Linux Installer v4.2.0${NC}"
 echo -e "Target OS: Linux (optimized for Arch Linux & all major distros)\n"
 
 # ------------------------------------------------------------------------------
@@ -143,7 +143,7 @@ fi
 # Проверка поддержки C++20 компилятором
 GCC_VERSION=$(g++ -dumpversion | cut -d. -f1)
 if [ "$GCC_VERSION" -lt 10 ]; then
-    echo -e "${YELLOW}[WARNING] GCC version is $GCC_VERSION. GrassGreen 4.0 requires C++20 (GCC 10 or higher recommended).${NC}"
+    echo -e "${YELLOW}[WARNING] GCC version is $GCC_VERSION. GrassGreen 4.2.0 requires C++20 (GCC 10 or higher recommended).${NC}"
 fi
 
 # ------------------------------------------------------------------------------
@@ -257,6 +257,11 @@ fi
 # ------------------------------------------------------------------------------
 echo -e "${CYAN}[*] Setting up VS Code / VSCodium GrassGreen extensions...${NC}"
 "$INSTALL_DIR/grassc" --install >/dev/null 2>&1 || true
+if command -v code >/dev/null 2>&1 && [ -f "$REPO_ROOT/bin/grassgreen-4.2.0.vsix" ]; then
+    code --install-extension "$REPO_ROOT/bin/grassgreen-4.2.0.vsix" --force >/dev/null 2>&1 || true
+elif command -v codium >/dev/null 2>&1 && [ -f "$REPO_ROOT/bin/grassgreen-4.2.0.vsix" ]; then
+    codium --install-extension "$REPO_ROOT/bin/grassgreen-4.2.0.vsix" --force >/dev/null 2>&1 || true
+fi
 
 # ------------------------------------------------------------------------------
 # 8. Верификация установки
@@ -284,7 +289,7 @@ rm -rf "$TEST_DIR"
 # 9. Завершение и инструкция
 # ------------------------------------------------------------------------------
 echo -e "\n${BRIGHT_GREEN}================================================================${NC}"
-echo -e "${BRIGHT_GREEN}  GrassGreen 4.0 successfully installed on your Linux system!${NC}"
+echo -e "${BRIGHT_GREEN}  GrassGreen 4.2.0 successfully installed on your Linux system!${NC}"
 echo -e "${BRIGHT_GREEN}================================================================${NC}\n"
 echo -e "You can now run GrassGreen from any directory using:"
 echo -e "  ${BOLD}grassc script.grass${NC}              # Compile & run script"

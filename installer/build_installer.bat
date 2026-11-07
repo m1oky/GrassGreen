@@ -1,6 +1,6 @@
 @echo off
 setlocal
-echo [GrassInstaller] Building GrassGreen v4.0 Sovereign Setup...
+echo [GrassInstaller] Building GrassGreen v4.2.0 Sovereign Setup...
 
 if not exist "bin" mkdir bin
 
