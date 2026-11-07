@@ -58,7 +58,7 @@
       "patterns": [
         {
           "name": "keyword.control.directive.grassgreen",
-          "match": "!(GrassGreen|2DGraphics|tg|fsys|json|math|FastMath|CoreMath|memory|GrassNet|proc|sys|interface|time|mmio|io|hw|thread|async|rand|audio|GrassWeb|database|[a-zA-Z0-9_]+)!"
+          "match": "!(GrassGreen|2DGraphics|tg|fsys|json|math|FastMath|CoreMath|memory|GrassNet|proc|sys|interface|time|mmio|io|hw|thread|async|rand|audio|GrassWeb|database|asm|GrassASM|assembler|[a-zA-Z0-9_]+)!"
         }
       ]
     },
@@ -159,6 +159,10 @@
     },
     "builtins": {
       "patterns": [
+        {
+          "name": "support.function.asm.grassgreen",
+          "match": "\\b(cli|sti|hlt|in|out|in8|in16|in32|out8|out16|out32|read_cr0|write_cr0|read_cr2|write_cr2|read_cr3|write_cr3|read_cr4|write_cr4|read_rflags|write_rflags|invlpg|rdtsc|pause|nop|cpuid_eax|cpuid_ebx|cpuid_ecx|cpuid_edx|asm_run|asm_bytes|asm_hex|asm_machine_hex|asm)\\b"
+        },
         {
           "name": "support.function.thread.grassgreen",
           "match": "\\b(thread_join|thread_detach|thread_id|thread_sleep|mutex_create|mutex_lock|mutex_unlock|mutex_destroy)\\b"

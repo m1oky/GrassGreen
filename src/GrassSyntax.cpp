@@ -138,6 +138,29 @@ vector<GrassToken> Lexer::tokenize() {
             continue;
         }
 
+        // 0x... (шестнадцатеричные числа)
+        if (c == '0' && pos + 1 < src.size() && (src[pos + 1] == 'x' || src[pos + 1] == 'X')) {
+            size_t start = pos;
+            pos += 2;
+            while (pos < src.size() && isxdigit((unsigned char)src[pos])) pos++;
+            string hex_str = src.substr(start, pos - start);
+            double val = 0.0;
+            try { val = (double)std::stoull(hex_str, nullptr, 16); } catch (...) {}
+            tokens.push_back(GrassToken(TOK_NUMBER, hex_str, val, line));
+            continue;
+        }
+        // 0b... (двоичные числа)
+        if (c == '0' && pos + 1 < src.size() && (src[pos + 1] == 'b' || src[pos + 1] == 'B')) {
+            size_t start = pos;
+            pos += 2;
+            while (pos < src.size() && (src[pos] == '0' || src[pos] == '1')) pos++;
+            string bin_str = src.substr(start, pos - start);
+            double val = 0.0;
+            try { val = (double)std::stoull(bin_str.substr(2), nullptr, 2); } catch (...) {}
+            tokens.push_back(GrassToken(TOK_NUMBER, bin_str, val, line));
+            continue;
+        }
+
         // Числа и IPv4 адреса (например 127.0.0.1)
         if (isdigit((unsigned char)c)) {
             size_t start = pos;
@@ -373,6 +396,21 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
              fn == "sound_play" || fn == "sound_stop" || fn == "sound_pause" ||
              fn == "sound_resume" || fn == "sound_volume" || fn == "sound_is_playing") {
         requireLib("audio", "!audio!", fn + "()", line);
+    }
+    // 18. Проверка библиотеки !asm!
+    else if (fn == "cli" || fn == "sti" || fn == "hlt" ||
+             fn == "in" || fn == "out" ||
+             fn == "in8" || fn == "in16" || fn == "in32" ||
+             fn == "out8" || fn == "out16" || fn == "out32" ||
+             fn == "read_cr0" || fn == "write_cr0" ||
+             fn == "read_cr2" || fn == "write_cr2" ||
+             fn == "read_cr3" || fn == "write_cr3" ||
+             fn == "read_cr4" || fn == "write_cr4" ||
+             fn == "read_rflags" || fn == "write_rflags" ||
+             fn == "invlpg" || fn == "rdtsc" || fn == "pause" || fn == "nop" ||
+             fn == "cpuid_eax" || fn == "cpuid_ebx" || fn == "cpuid_ecx" || fn == "cpuid_edx" ||
+             fn == "asm_run" || fn == "asm_bytes" || fn == "asm_hex" || fn == "asm_machine_hex") {
+        requireLib("asm", "!asm!", fn + "()", line);
     }
 }
 
@@ -1017,6 +1055,8 @@ void BytecodeCompiler::parseStatement() {
             emitByte(OP_LOAD_DB);
         } else if (lib == "!audio!" || lib == "!sound!" || lib == "!GrassAudio!") {
             included_libs.insert("audio");
+        } else if (lib == "!asm!" || lib == "!GrassASM!" || lib == "!assembler!") {
+            included_libs.insert("asm");
         } else if (lib == "!GrassWeb!" || lib == "!GREEN_WWW1!") {
             included_libs.insert("web");
             is_special_file = true;
@@ -1126,6 +1166,52 @@ void BytecodeCompiler::parseStatement() {
         }
         match(TOK_SEMI);
         emitByte(OP_RET);
+        return;
+    }
+
+    // Встроенный ассемблер ядра: asm { ... } или asm("...")
+    if (matchIdent("asm") || matchIdent("__asm__")) {
+        int asm_line = peek(-1).line;
+        requireLib("asm", "!asm!", "asm", asm_line);
+        string asm_body;
+        if (match(TOK_LBRACE)) {
+            int depth = 1;
+            int last_line = peek().line;
+            while (peek().kind != TOK_EOF) {
+                if (peek().kind == TOK_LBRACE) depth++;
+                else if (peek().kind == TOK_RBRACE) {
+                    depth--;
+                    if (depth == 0) { advance(); break; }
+                }
+                if (peek().line > last_line) {
+                    asm_body += "\n";
+                    last_line = peek().line;
+                } else if (!asm_body.empty() && asm_body.back() != '\n') {
+                    asm_body += " ";
+                }
+                asm_body += advance().text;
+            }
+            match(TOK_SEMI);
+        } else if (match(TOK_LPAREN)) {
+            if (peek().kind == TOK_STRING) {
+                asm_body = advance().text;
+                match(TOK_RPAREN);
+                match(TOK_SEMI);
+            } else {
+                parseExpression();
+                match(TOK_RPAREN);
+                match(TOK_SEMI);
+                emitByte(OP_CALL_BUILTIN); emitString("asm_run"); emitByte(1);
+                emitByte(OP_POP);
+                return;
+            }
+        } else {
+            reportError(peek().line, "Ожидалось '{' или '(' после ключевого слова asm");
+            return;
+        }
+        emitByte(OP_CONST_STR); emitString(asm_body);
+        emitByte(OP_CALL_BUILTIN); emitString("asm_run"); emitByte(1);
+        emitByte(OP_POP);
         return;
     }
 

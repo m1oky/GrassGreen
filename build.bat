@@ -1,12 +1,13 @@
 @echo off
 setlocal
-echo [GrassCompiler] Building GrassGreen v4.0...
+echo [GrassCompiler] Building GrassGreen v4.1...
 if not exist "bin" mkdir bin
 
 g++ -std=c++20 -O3 -s ^
   src/grassc.cpp ^
   src/GrassHAL.cpp ^
   src/GrassMMIO.cpp ^
+  src/GrassASM.cpp ^
   src/GrassThread.cpp ^
   src/GrassJIT.cpp ^
   src/GrassImport.cpp ^

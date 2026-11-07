@@ -5,13 +5,14 @@
 
 set -e
 
-echo "[GrassCompiler] Building GrassGreen v4.0 on Linux..."
+echo "[GrassCompiler] Building GrassGreen v4.1 on Linux..."
 mkdir -p bin
 
 g++ -std=c++20 -O3 -s \
   src/grassc.cpp \
   src/GrassHAL.cpp \
   src/GrassMMIO.cpp \
+  src/GrassASM.cpp \
   src/GrassThread.cpp \
   src/GrassJIT.cpp \
   src/GrassImport.cpp \

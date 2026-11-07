@@ -22,6 +22,7 @@
 
 #include "GrassSyntax.h"
 #include "FastMath.h"
+#include "GrassASM.h"
 #include "CoreMath.h"
 #include "GrassWeb.h"
 #include "GrassMemory.h"
@@ -1503,6 +1504,114 @@ public:
                     else if (fn == "write_barrier") {
                         GrassMMIO::write_barrier();
                         push(GrassValue::Num(1.0));
+                    }
+                    // ── БИБЛИОТЕКА !asm! ──
+                    else if (fn == "cli") {
+                        GrassASM::cli();
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "sti") {
+                        GrassASM::sti();
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "hlt") {
+                        GrassASM::hlt();
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if ((fn == "in" || fn == "in8") && argc >= 1) {
+                        push(GrassValue::Num((double)GrassASM::in8((uint16_t)args[0].toNumber())));
+                    }
+                    else if (fn == "in16" && argc >= 1) {
+                        push(GrassValue::Num((double)GrassASM::in16((uint16_t)args[0].toNumber())));
+                    }
+                    else if (fn == "in32" && argc >= 1) {
+                        push(GrassValue::Num((double)GrassASM::in32((uint16_t)args[0].toNumber())));
+                    }
+                    else if ((fn == "out" || fn == "out8") && argc >= 2) {
+                        GrassASM::out8((uint16_t)args[0].toNumber(), (uint8_t)args[1].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "out16" && argc >= 2) {
+                        GrassASM::out16((uint16_t)args[0].toNumber(), (uint16_t)args[1].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "out32" && argc >= 2) {
+                        GrassASM::out32((uint16_t)args[0].toNumber(), (uint32_t)args[1].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "read_cr0") {
+                        push(GrassValue::Num((double)GrassASM::read_cr0()));
+                    }
+                    else if (fn == "write_cr0" && argc >= 1) {
+                        GrassASM::write_cr0((uint64_t)args[0].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "read_cr2") {
+                        push(GrassValue::Num((double)GrassASM::read_cr2()));
+                    }
+                    else if (fn == "write_cr2" && argc >= 1) {
+                        GrassASM::write_cr2((uint64_t)args[0].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "read_cr3") {
+                        push(GrassValue::Num((double)GrassASM::read_cr3()));
+                    }
+                    else if (fn == "write_cr3" && argc >= 1) {
+                        GrassASM::write_cr3((uint64_t)args[0].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "read_cr4") {
+                        push(GrassValue::Num((double)GrassASM::read_cr4()));
+                    }
+                    else if (fn == "write_cr4" && argc >= 1) {
+                        GrassASM::write_cr4((uint64_t)args[0].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "read_rflags") {
+                        push(GrassValue::Num((double)GrassASM::read_rflags()));
+                    }
+                    else if (fn == "write_rflags" && argc >= 1) {
+                        GrassASM::write_rflags((uint64_t)args[0].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "invlpg" && argc >= 1) {
+                        GrassASM::invlpg((uint64_t)args[0].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "rdtsc") {
+                        push(GrassValue::Num((double)GrassASM::rdtsc()));
+                    }
+                    else if (fn == "pause") {
+                        GrassASM::pause();
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "nop") {
+                        GrassASM::nop();
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "cpuid_eax" && argc >= 1) {
+                        push(GrassValue::Num((double)GrassASM::cpuid_eax((uint32_t)args[0].toNumber())));
+                    }
+                    else if (fn == "cpuid_ebx" && argc >= 1) {
+                        push(GrassValue::Num((double)GrassASM::cpuid_ebx((uint32_t)args[0].toNumber())));
+                    }
+                    else if (fn == "cpuid_ecx" && argc >= 1) {
+                        push(GrassValue::Num((double)GrassASM::cpuid_ecx((uint32_t)args[0].toNumber())));
+                    }
+                    else if (fn == "cpuid_edx" && argc >= 1) {
+                        push(GrassValue::Num((double)GrassASM::cpuid_edx((uint32_t)args[0].toNumber())));
+                    }
+                    else if (fn == "asm_run" && argc >= 1) {
+                        push(GrassASM::run(args[0].toString()));
+                    }
+                    else if (fn == "asm_bytes" && argc >= 1) {
+                        push(GrassASM::run_hex(args[0].toString()));
+                    }
+                    else if (fn == "asm_hex" && argc >= 1) {
+                        push(GrassASM::run_hex(args[0].toString()));
+                    }
+                    else if (fn == "asm_machine_hex") {
+                        push(GrassValue::Str(GrassASM::get_last_machine_hex()));
                     }
                     else if (vars.count(fn + "()")) push(vars[fn + "()"]);
                     else if (vars.count(fn)) push(vars[fn]);

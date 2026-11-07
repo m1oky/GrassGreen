@@ -171,6 +171,7 @@ g++ -std=c++20 -O3 -s \
   src/grassc.cpp \
   src/GrassHAL.cpp \
   src/GrassMMIO.cpp \
+  src/GrassASM.cpp \
   src/GrassThread.cpp \
   src/GrassJIT.cpp \
   src/GrassImport.cpp \

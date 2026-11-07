@@ -264,5 +264,39 @@
       "particles(${1:35}, \"${2:#22c55e}\");"
     ],
     "description": "Анимированные светящиеся частицы на фоне окна"
+  },
+  "Inline Assembly Block": {
+    "prefix": [
+      "asm",
+      "inline_asm"
+    ],
+    "body": [
+      "asm {",
+      "\t${1:cli}",
+      "\t${2:sti}",
+      "}"
+    ],
+    "description": "Встроенный ассемблер ядра x86_64 (!asm!)"
+  },
+  "Kernel Bare-Metal Entry": {
+    "prefix": [
+      "kernel",
+      "baremetal"
+    ],
+    "body": [
+      "!GrassGreen!",
+      "!asm!",
+      "",
+      "int main() {",
+      "\tcli();",
+      "\tasm {",
+      "\t\t${1:xor eax, eax}",
+      "\t}",
+      "\tsti();",
+      "\thlt();",
+      "\treturn 0;",
+      "}"
+    ],
+    "description": "Шаблон инициализации ядра операционной системы на голом железе (!asm!)"
   }
 }
