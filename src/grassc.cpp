@@ -24,6 +24,7 @@
 #include "FastMath.h"
 #include "GrassASM.h"
 #include "GrassKeyboard.h"
+#include "GrassHardware.h"
 #include "GrassBoot.h"
 #include "CoreMath.h"
 #include "GrassWeb.h"
@@ -754,6 +755,51 @@ public:
                         } else {
                             push(GrassValue::Str(val_str));
                         }
+                    }
+                                        else if (fn == "hw_ram_total" || fn == "ram_total") {
+                        push(GrassValue::Num((double)GrassHardware::ram_total_mb()));
+                    }
+                    else if (fn == "hw_ram_used" || fn == "ram_used" || fn == "proc_mem") {
+                        push(GrassValue::Num((double)GrassHardware::ram_used_mb()));
+                    }
+                    else if (fn == "hw_ram_free" || fn == "ram_free") {
+                        push(GrassValue::Num((double)GrassHardware::ram_free_mb()));
+                    }
+                    else if (fn == "hw_cpu_vendor" || fn == "cpu_vendor") {
+                        push(GrassValue::Str(GrassHardware::cpu_vendor()));
+                    }
+                    else if (fn == "hw_cpu_brand" || fn == "cpu_brand" || fn == "cpu_model") {
+                        push(GrassValue::Str(GrassHardware::cpu_brand()));
+                    }
+                    else if (fn == "hw_cpu_cores" || fn == "cpu_cores") {
+                        push(GrassValue::Num((double)GrassHardware::cpu_cores()));
+                    }
+                    else if (fn == "hw_cpu_family" || fn == "cpu_family") {
+                        push(GrassValue::Num((double)GrassHardware::cpu_family()));
+                    }
+                    else if (fn == "hw_cpu_freq" || fn == "cpu_freq") {
+                        push(GrassValue::Num((double)GrassHardware::cpu_freq_mhz()));
+                    }
+                    else if (fn == "hw_board_vendor" || fn == "board_vendor") {
+                        push(GrassValue::Str(GrassHardware::board_vendor()));
+                    }
+                    else if (fn == "hw_board_model" || fn == "board_model") {
+                        push(GrassValue::Str(GrassHardware::board_model()));
+                    }
+                    else if (fn == "hw_bios_vendor" || fn == "bios_vendor") {
+                        push(GrassValue::Str(GrassHardware::bios_vendor()));
+                    }
+                    else if (fn == "hw_bios_date" || fn == "bios_date") {
+                        push(GrassValue::Str(GrassHardware::bios_date()));
+                    }
+                    else if (fn == "hw_pci_count" || fn == "pci_count") {
+                        push(GrassValue::Num((double)GrassHardware::pci_count()));
+                    }
+                    else if (fn == "hw_rdtsc" || fn == "rdtsc") {
+                        push(GrassValue::Num((double)GrassHardware::rdtsc()));
+                    }
+                    else if (fn == "hw_reboot") {
+                        GrassHardware::reboot();
                     }
                     else if (fn == "use_utf" || fn == "use_locale" || fn == "set_layout" || fn == "kbd_set_layout") {
                         if (argc >= 1) {

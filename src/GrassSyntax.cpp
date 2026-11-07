@@ -425,6 +425,24 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
              fn == "kbd_wait_ack" || fn == "kbd_set_layout" || fn == "kbd_get_layout") {
         requireLib("keyboard", "!keyboard!", fn + "()", line);
     }
+    // 20. Проверка библиотеки !hardware!
+    else if (fn == "hw_cpu_vendor" || fn == "cpu_vendor" ||
+             fn == "hw_cpu_brand" || fn == "cpu_brand" || fn == "cpu_model" ||
+             fn == "hw_cpu_cores" || fn == "cpu_cores" ||
+             fn == "hw_cpu_family" || fn == "cpu_family" ||
+             fn == "hw_cpu_freq" || fn == "cpu_freq" ||
+             fn == "hw_ram_total" || fn == "ram_total" ||
+             fn == "hw_ram_used" || fn == "ram_used" || fn == "proc_mem" ||
+             fn == "hw_ram_free" || fn == "ram_free" ||
+             fn == "hw_board_vendor" || fn == "board_vendor" ||
+             fn == "hw_board_model" || fn == "board_model" ||
+             fn == "hw_bios_vendor" || fn == "bios_vendor" ||
+             fn == "hw_bios_date" || fn == "bios_date" ||
+             fn == "hw_pci_count" || fn == "pci_count" ||
+             fn == "hw_rdtsc" || fn == "rdtsc" ||
+             fn == "hw_reboot") {
+        requireLib("hardware", "!hardware!", fn + "()", line);
+    }
 }
 
 bool BytecodeCompiler::isTypeOrFuncKeyword(const string& s) {
@@ -1060,7 +1078,9 @@ void BytecodeCompiler::parseStatement() {
             included_libs.insert("random");
         } else if (lib == "!thread!") {
             included_libs.insert("thread");
-        } else if (lib == "!mmio!" || lib == "!io!" || lib == "!hw!") {
+        } else if (lib == "!hardware!" || lib == "!hw!" || lib == "!sysinfo!" || lib == "!device!") {
+            included_libs.insert("hardware");
+        } else if (lib == "!mmio!" || lib == "!io!") {
             included_libs.insert("mmio");
         } else if (lib == "!database!" || lib == "!gdb!") {
             included_libs.insert("db");

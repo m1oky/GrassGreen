@@ -31,6 +31,7 @@ g++ -std=c++20 -O3 -s ^
   src/GrassAudio.cpp ^
   src/GrassTg.cpp ^
   src/Grass2DGraphics.cpp ^
+  src/GrassHardware.cpp ^
   -o bin/grassc.exe ^
   -lgdiplus -lgdi32 -lcomctl32 -lwinmm -lws2_32 -lwininet -lurlmon -lpsapi
 

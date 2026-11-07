@@ -127,6 +127,102 @@ namespace GrassBoot {
         append_u8(bin_data, 0x89); append_u8(bin_data, 0x1D);
         append_u32(bin_data, 0x00090004);
 
+        // --- Hardware Subsystem Auto-Detection (0x00091020..0x000910FF) ---
+        // 1. RAM Detection from Multiboot Info
+        append_u8(bin_data, 0x8B); append_u8(bin_data, 0x15); append_u32(bin_data, 0x00090004); // mov edx, [0x00090004]
+        append_u8(bin_data, 0x85); append_u8(bin_data, 0xD2);                                   // test edx, edx
+        size_t jz_fb_ram = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+        append_u8(bin_data, 0x8A); append_u8(bin_data, 0x02);                                   // mov al, [edx] (flags)
+        append_u8(bin_data, 0xA8); append_u8(bin_data, 0x01);                                   // test al, 1
+        size_t jz_fb_ram2 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+        append_u8(bin_data, 0x8B); append_u8(bin_data, 0x42); append_u8(bin_data, 0x04);       // mov eax, [edx + 4] (mem_lower)
+        append_u8(bin_data, 0x03); append_u8(bin_data, 0x42); append_u8(bin_data, 0x08);       // add eax, [edx + 8] (mem_upper)
+        append_u8(bin_data, 0x05); append_u32(bin_data, 1024);                                  // add eax, 1024
+        append_u8(bin_data, 0xC1); append_u8(bin_data, 0xE8); append_u8(bin_data, 0x0A);       // shr eax, 10 (KB -> MB)
+        append_u8(bin_data, 0xA3); append_u32(bin_data, 0x00091020);                            // mov [0x00091020], eax (total MB)
+        size_t jmp_ram_done = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+        bin_data[jz_fb_ram + 1] = (uint8_t)(bin_data.size() - (jz_fb_ram + 2));
+        bin_data[jz_fb_ram2 + 1] = (uint8_t)(bin_data.size() - (jz_fb_ram2 + 2));
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091020); append_u32(bin_data, 128); // fallback 128 MB
+
+        bin_data[jmp_ram_done + 1] = (uint8_t)(bin_data.size() - (jmp_ram_done + 2));
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091024); append_u32(bin_data, 4); // used RAM = 4 MB
+        append_u8(bin_data, 0xA1); append_u32(bin_data, 0x00091020);                            // mov eax, [0x00091020]
+        append_u8(bin_data, 0x83); append_u8(bin_data, 0xE8); append_u8(bin_data, 0x04);       // sub eax, 4
+        append_u8(bin_data, 0xA3); append_u32(bin_data, 0x00091028);                            // mov [0x00091028], eax (free MB)
+
+        // 2. CPUID Vendor Detection
+        append_u8(bin_data, 0x31); append_u8(bin_data, 0xC0);                                   // xor eax, eax
+        append_u8(bin_data, 0x0F); append_u8(bin_data, 0xA2);                                   // cpuid
+        append_u8(bin_data, 0x89); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091030); // mov [0x00091030], ebx
+        append_u8(bin_data, 0x89); append_u8(bin_data, 0x15); append_u32(bin_data, 0x00091034); // mov [0x00091034], edx
+        append_u8(bin_data, 0x89); append_u8(bin_data, 0x0D); append_u32(bin_data, 0x00091038); // mov [0x00091038], ecx
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009103C); append_u8(bin_data, 0);
+
+        // 3. CPUID Brand / Model Detection
+        append_u8(bin_data, 0xB8); append_u32(bin_data, 0x80000000);                            // mov eax, 0x80000000
+        append_u8(bin_data, 0x0F); append_u8(bin_data, 0xA2);                                   // cpuid
+        append_u8(bin_data, 0x3D); append_u32(bin_data, 0x80000004);                            // cmp eax, 0x80000004
+        size_t jb_br_fb = bin_data.size(); append_u8(bin_data, 0x72); append_u8(bin_data, 0x00);
+        append_u8(bin_data, 0xB8); append_u32(bin_data, 0x80000002); append_u8(bin_data, 0x0F); append_u8(bin_data, 0xA2);
+        append_u8(bin_data, 0xA3); append_u32(bin_data, 0x00091040);
+        append_u8(bin_data, 0x89); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091044);
+        append_u8(bin_data, 0x89); append_u8(bin_data, 0x0D); append_u32(bin_data, 0x00091048);
+        append_u8(bin_data, 0x89); append_u8(bin_data, 0x15); append_u32(bin_data, 0x0009104C);
+        append_u8(bin_data, 0xB8); append_u32(bin_data, 0x80000003); append_u8(bin_data, 0x0F); append_u8(bin_data, 0xA2);
+        append_u8(bin_data, 0xA3); append_u32(bin_data, 0x00091050);
+        append_u8(bin_data, 0x89); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091054);
+        append_u8(bin_data, 0x89); append_u8(bin_data, 0x0D); append_u32(bin_data, 0x00091058);
+        append_u8(bin_data, 0x89); append_u8(bin_data, 0x15); append_u32(bin_data, 0x0009105C);
+        append_u8(bin_data, 0xB8); append_u32(bin_data, 0x80000004); append_u8(bin_data, 0x0F); append_u8(bin_data, 0xA2);
+        append_u8(bin_data, 0xA3); append_u32(bin_data, 0x00091060);
+        append_u8(bin_data, 0x89); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091064);
+        append_u8(bin_data, 0x89); append_u8(bin_data, 0x0D); append_u32(bin_data, 0x00091068);
+        append_u8(bin_data, 0x89); append_u8(bin_data, 0x15); append_u32(bin_data, 0x0009106C);
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091070); append_u8(bin_data, 0);
+        size_t jmp_br_done = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+        bin_data[jb_br_fb + 1] = (uint8_t)(bin_data.size() - (jb_br_fb + 2));
+        append_u8(bin_data, 0xBE); append_u32(bin_data, 0x00091030); // mov esi, vendor
+        append_u8(bin_data, 0xBF); append_u32(bin_data, 0x00091040); // mov edi, brand
+        append_u8(bin_data, 0xB9); append_u32(bin_data, 4);          // 16 bytes
+        append_u8(bin_data, 0xF3); append_u8(bin_data, 0xA5);
+
+        bin_data[jmp_br_done + 1] = (uint8_t)(bin_data.size() - (jmp_br_done + 2));
+
+        // 4. CPU Cores from CPUID(1)
+        append_u8(bin_data, 0xB8); append_u32(bin_data, 1);
+        append_u8(bin_data, 0x0F); append_u8(bin_data, 0xA2);
+        append_u8(bin_data, 0xC1); append_u8(bin_data, 0xEB); append_u8(bin_data, 16);
+        append_u8(bin_data, 0x81); append_u8(bin_data, 0xE3); append_u32(bin_data, 0xFF);
+        append_u8(bin_data, 0x85); append_u8(bin_data, 0xDB);
+        size_t jnz_cores_ok = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+        append_u8(bin_data, 0xBB); append_u32(bin_data, 1);
+        bin_data[jnz_cores_ok + 1] = (uint8_t)(bin_data.size() - (jnz_cores_ok + 2));
+        append_u8(bin_data, 0x89); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x0009102C);
+
+        // 5. Default Motherboard & BIOS Strings
+        // "SeaBIOS\0" at 0x00091080
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091080); append_u32(bin_data, 0x42616553);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091084); append_u32(bin_data, 0x00534F49);
+        // "QEMU\0" at 0x00091090 (board vendor)
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091090); append_u32(bin_data, 0x554D4551);
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091094); append_u8(bin_data, 0);
+        // "Standard PC (i440FX)\0" at 0x000910A0 (board model)
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000910A0); append_u32(bin_data, 0x6E617453);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000910A4); append_u32(bin_data, 0x64726164);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000910A8); append_u32(bin_data, 0x20435020);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000910AC); append_u32(bin_data, 0x34346928);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000910B0); append_u32(bin_data, 0x29584630);
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000910B4); append_u8(bin_data, 0);
+        // "04/01/2014\0" at 0x000910C0 (bios date)
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000910C0); append_u32(bin_data, 0x302F3430);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000910C4); append_u32(bin_data, 0x30322F31);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000910C8); append_u32(bin_data, 0x00003431);
+        // PCI Count: 5 at 0x000910E0
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000910E0); append_u32(bin_data, 5);
+
         // --- 1. Очистка ВСЕГО экрана VGA (0xB8000..0xB8FA0, 2000 ячеек / 4000 байт) ---
         append_u8(bin_data, 0xBF); append_u32(bin_data, 0x000B8000); // mov edi, 0x000B8000
         append_u8(bin_data, 0xB9); append_u32(bin_data, 1000);       // mov ecx, 1000 dwords
@@ -1066,6 +1162,16 @@ namespace GrassBoot {
                     }
                     case 0x03: { // OP_LOAD_VAR
                         std::string vname = readString();
+                        if (vname == "proc_mem" || vname == "ram_used") {
+                            append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091024);
+                            break;
+                        } else if (vname == "ram_total") {
+                            append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091020);
+                            break;
+                        } else if (vname == "ram_free") {
+                            append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091028);
+                            break;
+                        }
                         if (var_slots.find(vname) == var_slots.end()) {
                             var_slots[vname] = next_var_addr;
                             next_var_addr += 256;
@@ -1255,6 +1361,48 @@ namespace GrassBoot {
                             append_u8(bin_data, 0x89); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091000);
                             append_u8(bin_data, 0xE8); // call update_cursor
                             append_u32(bin_data, addr_update_cursor - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+                                                } else if (fn == "hw_ram_total" || fn == "ram_total") {
+                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+                            append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091020);
+                        } else if (fn == "hw_ram_used" || fn == "ram_used" || fn == "proc_mem") {
+                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+                            append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091024);
+                        } else if (fn == "hw_ram_free" || fn == "ram_free") {
+                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+                            append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091028);
+                        } else if (fn == "hw_cpu_vendor" || fn == "cpu_vendor") {
+                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+                            append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091030);
+                        } else if (fn == "hw_cpu_brand" || fn == "cpu_brand" || fn == "cpu_model") {
+                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+                            append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091040);
+                        } else if (fn == "hw_cpu_cores" || fn == "cpu_cores") {
+                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+                            append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x0009102C);
+                        } else if (fn == "hw_board_vendor" || fn == "board_vendor") {
+                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+                            append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091090);
+                        } else if (fn == "hw_bios_vendor" || fn == "bios_vendor") {
+                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+                            append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091080);
+                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+                            append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091080);
+                        } else if (fn == "hw_board_model" || fn == "board_model") {
+                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+                            append_u8(bin_data, 0x68); append_u32(bin_data, 0x000910A0);
+                        } else if (fn == "hw_bios_date" || fn == "bios_date") {
+                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+                            append_u8(bin_data, 0x68); append_u32(bin_data, 0x000910C0);
+                        } else if (fn == "hw_pci_count" || fn == "pci_count") {
+                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+                            append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000910E0);
+                        } else if (fn == "hw_rdtsc" || fn == "rdtsc") {
+                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+                            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x31);
+                            append_u8(bin_data, 0x50);
+                        } else if (fn == "hw_reboot") {
+                            append_u8(bin_data, 0xB0); append_u8(bin_data, 0xFE);
+                            append_u8(bin_data, 0xE6); append_u8(bin_data, 0x64);
                         } else if (fn == "use_utf" || fn == "use_locale" || fn == "set_layout" || fn == "kbd_set_layout") {
                             for (int i = 0; i < argc; ++i) {
                                 append_u8(bin_data, 0x58); // pop eax

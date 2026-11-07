@@ -195,6 +195,7 @@ g++ -std=c++20 -O3 -s \
   src/GrassAudio.cpp \
   src/GrassTg.cpp \
   src/Grass2DGraphics.cpp \
+  src/GrassHardware.cpp \
   -o bin/grassc \
   -pthread
 
