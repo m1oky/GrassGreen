@@ -1,4 +1,5 @@
 #include "GrassSyntax.h"
+#include "GrassKeyboard.h"
 #include <iostream>
 #include <cstring>
 #include <cctype>
@@ -421,7 +422,7 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
              fn == "kbd_is_ctrl" || fn == "kbd_is_alt" ||
              fn == "kbd_is_key_pressed" || fn == "kbd_scancode_name" ||
              fn == "kbd_leds" || fn == "kbd_reset" || fn == "kbd_self_test" ||
-             fn == "kbd_wait_ack") {
+             fn == "kbd_wait_ack" || fn == "kbd_set_layout" || fn == "kbd_get_layout") {
         requireLib("keyboard", "!keyboard!", fn + "()", line);
     }
 }
@@ -1081,6 +1082,65 @@ void BytecodeCompiler::parseStatement() {
             reportError(peek(-1).line, "Неизвестная библиотека: " + lib);
         }
         return;
+    }
+
+    // 0.1 ДИРЕКТИВА / ИНСТРУКЦИЯ: use utf - <id>; (или use utf - "ru"; use utf-8;)
+    if (peek().kind == TOK_IDENT && peek().text == "use") {
+        if (peek(1).kind == TOK_IDENT && (peek(1).text == "utf" || peek(1).text == "UTF" || peek(1).text.rfind("utf-", 0) == 0 || peek(1).text.rfind("UTF-", 0) == 0)) {
+            advance(); // consume 'use'
+            string utf_tok = advance().text;
+            string inline_suffix = "";
+            if (utf_tok.size() > 4 && (utf_tok[3] == '-' || utf_tok[3] == '_')) {
+                inline_suffix = utf_tok.substr(4);
+            }
+            if (!inline_suffix.empty()) {
+                match(TOK_SEMI);
+                emitByte(OP_CONST_STR);
+                emitString(inline_suffix);
+                emitByte(OP_CALL_BUILTIN);
+                emitString("use_utf");
+                emitByte(1);
+                emitByte(OP_POP);
+                GrassKeyboard::set_layout_by_name(inline_suffix);
+                return;
+            }
+            if (peek().kind == TOK_MINUS) {
+                advance(); // consume '-'
+            }
+            if (peek().kind == TOK_NUMBER) {
+                double num = advance().num_val;
+                match(TOK_SEMI);
+                emitByte(OP_CONST_NUM);
+                emitDouble(num);
+                emitByte(OP_CALL_BUILTIN);
+                emitString("use_utf");
+                emitByte(1);
+                emitByte(OP_POP);
+                GrassKeyboard::set_layout((int)num);
+                return;
+            } else if (peek().kind == TOK_IDENT || peek().kind == TOK_STRING) {
+                string lang = advance().text;
+                match(TOK_SEMI);
+                emitByte(OP_CONST_STR);
+                emitString(lang);
+                emitByte(OP_CALL_BUILTIN);
+                emitString("use_utf");
+                emitByte(1);
+                emitByte(OP_POP);
+                GrassKeyboard::set_layout_by_name(lang);
+                return;
+            } else {
+                match(TOK_SEMI);
+                emitByte(OP_CONST_NUM);
+                emitDouble(8.0);
+                emitByte(OP_CALL_BUILTIN);
+                emitString("use_utf");
+                emitByte(1);
+                emitByte(OP_POP);
+                GrassKeyboard::set_layout(8);
+                return;
+            }
+        }
     }
 
     // 1. ОБЪЯВЛЕНИЕ ФУНКЦИЙ (int main() {}, take my_func() {}, void my_func() {})

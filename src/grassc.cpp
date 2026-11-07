@@ -755,6 +755,24 @@ public:
                             push(GrassValue::Str(val_str));
                         }
                     }
+                    else if (fn == "use_utf" || fn == "use_locale" || fn == "set_layout" || fn == "kbd_set_layout") {
+                        if (argc >= 1) {
+                            GrassValue arg = args[0];
+                            if (arg.is_num()) {
+                                int id = (int)arg.toNumber();
+                                GrassKeyboard::set_layout(id);
+                            } else {
+                                string name = arg.toString();
+                                GrassKeyboard::set_layout_by_name(name);
+                            }
+                        } else {
+                            GrassKeyboard::set_layout(8);
+                        }
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "get_layout" || fn == "kbd_get_layout") {
+                        push(GrassValue::Str(GrassKeyboard::get_layout_name()));
+                    }
                     else if ((fn == "len" || fn == "length" || fn == "size") && argc >= 1) {
                         if (args[0].is_array()) {
                             GrassArray* a = args[0].asArray();

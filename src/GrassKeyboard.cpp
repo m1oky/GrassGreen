@@ -1,6 +1,7 @@
 // =============================================================================
 //  GrassGreen 4.2.0 — Библиотека контроллера клавиатуры (!keyboard!)
 //  Реализация взаимодействия с контроллером PS/2 8042, порты 0x60 / 0x64
+//  Поддержка раскладок (UTF-8, RU ЙЦУКЕН, EN, CP1251, CP866) и функции use utf -
 // =============================================================================
 #include "GrassKeyboard.h"
 #include "GrassHAL.h"
@@ -8,6 +9,8 @@
 #include "GrassASM.h"
 #include <iostream>
 #include <vector>
+#include <string>
+#include <algorithm>
 #include <thread>
 #include <chrono>
 
@@ -29,6 +32,7 @@ namespace GrassKeyboard {
     static bool s_alt_state = false;
     static uint8_t s_last_scancode = 0;
     static bool s_key_map[256] = { false };
+    static int s_active_layout = 8; // 8 = UTF-8 по умолчанию
 
     // Таблица PS/2 Set 1 Scancode -> ASCII (Lower & Upper)
     static const char scancode_set1_lower[128] = {
@@ -51,6 +55,47 @@ namespace GrassKeyboard {
         0,   0,   0,   0,   0,   0,   0,   0
     };
 
+    // Русская раскладка ЙЦУКЕН (UTF-8) для PS/2 Set 1 скан-кодов
+    static const char* get_ru_char(uint8_t sc, bool upper) {
+        switch (sc) {
+            case 0x10: return upper ? "Й" : "й";
+            case 0x11: return upper ? "Ц" : "ц";
+            case 0x12: return upper ? "У" : "у";
+            case 0x13: return upper ? "К" : "к";
+            case 0x14: return upper ? "Е" : "е";
+            case 0x15: return upper ? "Н" : "н";
+            case 0x16: return upper ? "Г" : "г";
+            case 0x17: return upper ? "Ш" : "ш";
+            case 0x18: return upper ? "Щ" : "щ";
+            case 0x19: return upper ? "З" : "з";
+            case 0x1A: return upper ? "Х" : "х";
+            case 0x1B: return upper ? "Ъ" : "ъ";
+            case 0x1E: return upper ? "Ф" : "ф";
+            case 0x1F: return upper ? "Ы" : "ы";
+            case 0x20: return upper ? "В" : "в";
+            case 0x21: return upper ? "А" : "а";
+            case 0x22: return upper ? "П" : "п";
+            case 0x23: return upper ? "Р" : "р";
+            case 0x24: return upper ? "О" : "о";
+            case 0x25: return upper ? "Л" : "л";
+            case 0x26: return upper ? "Д" : "д";
+            case 0x27: return upper ? "Ж" : "ж";
+            case 0x28: return upper ? "Э" : "э";
+            case 0x29: return upper ? "Ё" : "ё";
+            case 0x2C: return upper ? "Я" : "я";
+            case 0x2D: return upper ? "Ч" : "ч";
+            case 0x2E: return upper ? "С" : "с";
+            case 0x2F: return upper ? "М" : "м";
+            case 0x30: return upper ? "И" : "и";
+            case 0x31: return upper ? "Т" : "т";
+            case 0x32: return upper ? "Ь" : "ь";
+            case 0x33: return upper ? "Б" : "б";
+            case 0x34: return upper ? "Ю" : "ю";
+            case 0x35: return upper ? "," : ".";
+            default: return nullptr;
+        }
+    }
+
     // ASCII -> PS/2 Set 1 Scancode для режима эмуляции в VM
     static uint8_t ascii_to_set1_scancode(int ch) {
         if (ch >= 'a' && ch <= 'z') ch = ch - 'a' + 'A';
@@ -68,24 +113,23 @@ namespace GrassKeyboard {
             case '0': case ')': return 0x0B;
             case '-': case '_': return 0x0C;
             case '=': case '+': return 0x0D;
-            case '\b': return 0x0E; // Backspace
-            case '\t': return 0x0F; // Tab
+            case '\b': return 0x0E;
+            case '\t': return 0x0F;
             case 'Q': return 0x10; case 'W': return 0x11; case 'E': return 0x12;
             case 'R': return 0x13; case 'T': return 0x14; case 'Y': return 0x15;
             case 'U': return 0x16; case 'I': return 0x17; case 'O': return 0x18;
-            case 'P': return 0x19; case '[': return 0x1A; case ']': return 0x1B;
-            case '\r': case '\n': return 0x1C; // Enter
+            case 'P': return 0x19; case '[': case '{': return 0x1A;
+            case ']': case '}': return 0x1B; case '\n': case '\r': return 0x1C;
             case 'A': return 0x1E; case 'S': return 0x1F; case 'D': return 0x20;
             case 'F': return 0x21; case 'G': return 0x22; case 'H': return 0x23;
             case 'J': return 0x24; case 'K': return 0x25; case 'L': return 0x26;
             case ';': case ':': return 0x27; case '\'': case '"': return 0x28;
             case '`': case '~': return 0x29;
-            case '\\': case '|': return 0x2B;
             case 'Z': return 0x2C; case 'X': return 0x2D; case 'C': return 0x2E;
             case 'V': return 0x2F; case 'B': return 0x30; case 'N': return 0x31;
             case 'M': return 0x32; case ',': case '<': return 0x33;
             case '.': case '>': return 0x34; case '/': case '?': return 0x35;
-            case ' ': return 0x39; // Space
+            case ' ': return 0x39;
             default: return 0;
         }
     }
@@ -172,7 +216,7 @@ namespace GrassKeyboard {
         }
     }
 
-    // ── 4. Преобразование скан-кода в ASCII-символ ──
+    // ── 4. Преобразование скан-кода в ASCII / UTF-8 символ ──
     char scancode_to_ascii(uint8_t scancode, bool shift, bool caps) {
         if (scancode >= 128) return 0;
         bool use_upper = (shift ^ caps);
@@ -181,6 +225,15 @@ namespace GrassKeyboard {
     }
 
     std::string scancode_to_char(uint8_t scancode) {
+        if (scancode >= 128) return "";
+        bool use_upper = (is_shift() ^ is_caps());
+
+        // Если активна русская раскладка (ID 2, 1251, 866, ru)
+        if (s_active_layout == 2 || s_active_layout == 1251 || s_active_layout == 866) {
+            const char* ru = get_ru_char(scancode, use_upper);
+            if (ru) return std::string(ru);
+        }
+
         char c = scancode_to_ascii(scancode, is_shift(), is_caps());
         if (c == 0) return "";
         return std::string(1, c);
@@ -347,6 +400,69 @@ namespace GrassKeyboard {
             std::this_thread::sleep_for(std::chrono::microseconds(100));
         }
         return false;
+    }
+
+    // ── 10. Управление кодировкой и раскладкой клавиатуры (use utf - ...) ──
+    void set_layout(int layout_id) {
+        s_active_layout = layout_id;
+#if defined(_WIN32)
+        if (layout_id == 8 || layout_id == 65001 || layout_id == 0) {
+            SetConsoleOutputCP(CP_UTF8);
+            SetConsoleCP(CP_UTF8);
+        } else if (layout_id == 2 || layout_id == 1251) {
+            SetConsoleOutputCP(1251);
+            SetConsoleCP(1251);
+        } else if (layout_id == 866) {
+            SetConsoleOutputCP(866);
+            SetConsoleCP(866);
+        } else if (layout_id == 1 || layout_id == 1252 || layout_id == 437) {
+            SetConsoleOutputCP(437);
+            SetConsoleCP(437);
+        }
+#endif
+    }
+
+    void set_layout_by_name(const std::string& raw) {
+        std::string s = raw;
+        std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+        if (s == "utf-8" || s == "utf8" || s == "utf_8" || s == "unicode" || s == "8" || s == "65001") {
+            set_layout(8);
+        } else if (s == "ru" || s == "rus" || s == "russian" || s == "cyrillic" || s == "2" || s == "1251") {
+            set_layout(2);
+        } else if (s == "866" || s == "dos" || s == "oem") {
+            set_layout(866);
+        } else if (s == "en" || s == "eng" || s == "english" || s == "us" || s == "1" || s == "1252" || s == "437") {
+            set_layout(1);
+        } else if (s == "de" || s == "ger" || s == "german" || s == "3") {
+            set_layout(3);
+        } else if (s == "fr" || s == "fra" || s == "french" || s == "4") {
+            set_layout(4);
+        } else if (s == "es" || s == "spa" || s == "spanish" || s == "5") {
+            set_layout(5);
+        } else {
+            char* end_ptr = nullptr;
+            long val = strtol(s.c_str(), &end_ptr, 10);
+            if (end_ptr != s.c_str() && *end_ptr == '\0') {
+                set_layout((int)val);
+            } else {
+                set_layout(8);
+            }
+        }
+    }
+
+    int get_layout() {
+        return s_active_layout;
+    }
+
+    std::string get_layout_name() {
+        switch (s_active_layout) {
+            case 2: case 1251: case 866: return "ru";
+            case 1: case 1252: case 437: return "en";
+            case 3: return "de";
+            case 4: return "fr";
+            case 5: return "es";
+            default: return "utf-8";
+        }
     }
 
 } // namespace GrassKeyboard

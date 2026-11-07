@@ -42,4 +42,10 @@ namespace GrassKeyboard {
     bool self_test();
     bool wait_ack();
 
+    // ── 6. Управление кодировкой и раскладкой клавиатуры (use utf - ...) ──
+    void set_layout(int layout_id);
+    void set_layout_by_name(const std::string& name);
+    int get_layout();
+    std::string get_layout_name();
+
 } // namespace GrassKeyboard
