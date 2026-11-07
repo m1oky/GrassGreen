@@ -74,7 +74,7 @@ int main() {
     gout << "Введите ваше имя: ";
 
     // Построчный ввод с поддержкой Backspace
-    string name = kbd_read_line();
+    take name = kbd_read_line();
     gout << "Привет, " << name << "!" << endl;
 
     gout << "Нажмите любую клавишу для выхода..." << endl;

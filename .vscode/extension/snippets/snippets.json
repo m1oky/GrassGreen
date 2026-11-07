@@ -306,7 +306,7 @@
       "readline"
     ],
     "body": [
-      "string ${1:input} = kbd_read_line();"
+      "take ${1:input} = kbd_read_line();"
     ],
     "description": "Построчный ввод с клавиатуры PS/2 с поддержкой Backspace (!keyboard!)"
   },
@@ -340,7 +340,7 @@
       "\tcli();",
       "\tgout << \"[GrassOS v4.2.0]: Kernel Started on Bare-Metal!\" << endl;",
       "\tgout << \"Type a command: \";",
-      "\tstring cmd = kbd_read_line();",
+      "\ttake cmd = kbd_read_line();",
       "\tgout << \"Received: \" << cmd << endl;",
       "\tsti();",
       "\thlt();",

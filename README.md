@@ -368,7 +368,7 @@ int main() {
     gout << "Type your name: ";
 
     // Построчный ввод с поддержкой Backspace прямо из контроллера
-    string name = kbd_read_line();
+    take name = kbd_read_line();
     gout << "Welcome to GrassOS, " << name << "!" << endl;
 
     sti();
