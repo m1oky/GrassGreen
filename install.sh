@@ -257,10 +257,10 @@ fi
 # ------------------------------------------------------------------------------
 echo -e "${CYAN}[*] Setting up VS Code / VSCodium GrassGreen extensions...${NC}"
 "$INSTALL_DIR/grassc" --install >/dev/null 2>&1 || true
-if command -v code >/dev/null 2>&1 && [ -f "$REPO_ROOT/bin/grassgreen-4.2.0.vsix" ]; then
-    code --install-extension "$REPO_ROOT/bin/grassgreen-4.2.0.vsix" --force >/dev/null 2>&1 || true
-elif command -v codium >/dev/null 2>&1 && [ -f "$REPO_ROOT/bin/grassgreen-4.2.0.vsix" ]; then
-    codium --install-extension "$REPO_ROOT/bin/grassgreen-4.2.0.vsix" --force >/dev/null 2>&1 || true
+if command -v code >/dev/null 2>&1 && [ -f "$WORK_DIR/bin/grassgreen-4.2.0.vsix" ]; then
+    code --install-extension "$WORK_DIR/bin/grassgreen-4.2.0.vsix" --force >/dev/null 2>&1 || true
+elif command -v codium >/dev/null 2>&1 && [ -f "$WORK_DIR/bin/grassgreen-4.2.0.vsix" ]; then
+    codium --install-extension "$WORK_DIR/bin/grassgreen-4.2.0.vsix" --force >/dev/null 2>&1 || true
 fi
 
 # ------------------------------------------------------------------------------
@@ -272,6 +272,7 @@ TEST_DIR="/tmp/grass_test_$$"
 mkdir -p "$TEST_DIR"
 cat << 'EOF' > "$TEST_DIR/verify.grass"
 !GrassGreen!
+use utf - 8;
 int main() {
     gout << "GrassGreen v4.2 is running perfectly on Linux!" << endl;
     return 0;
