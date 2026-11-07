@@ -918,6 +918,75 @@ namespace GrassBoot {
             append_u8(bin_data, 0x5E); // pop esi
             append_u8(bin_data, 0xC3); // ret
 
+            // 8.10. Helper: helper_strcmp (EAX = op1, EBX = op2) -> returns EAX = 1 (equal) or 0 (not equal)
+            uint32_t addr_strcmp = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x56); // push esi
+            append_u8(bin_data, 0x57); // push edi
+            append_u8(bin_data, 0x51); // push ecx
+            append_u8(bin_data, 0x52); // push edx
+
+            // cmp eax, ebx
+            append_u8(bin_data, 0x39); append_u8(bin_data, 0xD8);
+            size_t je_sc_equal = bin_data.size();
+            append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            // Check if both >= 0x00010000
+            append_u8(bin_data, 0x3D); append_u32(bin_data, 0x00010000); // cmp eax, 0x10000
+            size_t jb_sc_num = bin_data.size();
+            append_u8(bin_data, 0x72); append_u8(bin_data, 0x00);
+
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0xFB); append_u32(bin_data, 0x00010000); // cmp ebx, 0x10000
+            size_t jb_sc_num2 = bin_data.size();
+            append_u8(bin_data, 0x72); append_u8(bin_data, 0x00);
+
+            // String comparison loop
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xC6); // mov esi, eax
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xDF); // mov edi, ebx
+            size_t sc_loop = bin_data.size();
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x0E); // mov cl, [esi]
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x17); // mov dl, [edi]
+            append_u8(bin_data, 0x38); append_u8(bin_data, 0xD1); // cmp cl, dl
+            size_t jne_sc_diff = bin_data.size();
+            append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            append_u8(bin_data, 0x84); append_u8(bin_data, 0xC9); // test cl, cl
+            size_t jz_sc_eq = bin_data.size();
+            append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            append_u8(bin_data, 0x46); // inc esi
+            append_u8(bin_data, 0x47); // inc edi
+            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(sc_loop - (bin_data.size() + 1)));
+
+            // Number compare
+            size_t sc_num_pos = bin_data.size();
+            bin_data[jb_sc_num + 1] = (uint8_t)(sc_num_pos - (jb_sc_num + 2));
+            bin_data[jb_sc_num2 + 1] = (uint8_t)(sc_num_pos - (jb_sc_num2 + 2));
+            append_u8(bin_data, 0x39); append_u8(bin_data, 0xD8); // cmp eax, ebx
+            size_t je_sc_num_eq = bin_data.size();
+            append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            // Not equal
+            size_t sc_diff_pos = bin_data.size();
+            bin_data[jne_sc_diff + 1] = (uint8_t)(sc_diff_pos - (jne_sc_diff + 2));
+            append_u8(bin_data, 0x31); append_u8(bin_data, 0xC0); // xor eax, eax
+            size_t jmp_sc_done = bin_data.size();
+            append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // Equal
+            size_t sc_eq_pos = bin_data.size();
+            bin_data[je_sc_equal + 1] = (uint8_t)(sc_eq_pos - (je_sc_equal + 2));
+            bin_data[jz_sc_eq + 1] = (uint8_t)(sc_eq_pos - (jz_sc_eq + 2));
+            bin_data[je_sc_num_eq + 1] = (uint8_t)(sc_eq_pos - (je_sc_num_eq + 2));
+            append_u8(bin_data, 0xB8); append_u32(bin_data, 1); // mov eax, 1
+
+            // Done
+            bin_data[jmp_sc_done + 1] = (uint8_t)(bin_data.size() - (jmp_sc_done + 2));
+            append_u8(bin_data, 0x5A); // pop edx
+            append_u8(bin_data, 0x59); // pop ecx
+            append_u8(bin_data, 0x5F); // pop edi
+            append_u8(bin_data, 0x5E); // pop esi
+            append_u8(bin_data, 0xC3); // ret
+
             // Fixup jump over helpers
             uint32_t after_helpers_offset = (uint32_t)bin_data.size();
             uint32_t rel_helpers = after_helpers_offset - (uint32_t)(jmp_helpers_fixup + 4);
@@ -1055,18 +1124,19 @@ namespace GrassBoot {
                         append_u8(bin_data, 0x50);
                         break;
                     case 0x20: // OP_CMP_EQ
-                        append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
-                        append_u8(bin_data, 0x39); append_u8(bin_data, 0xD8);
-                        append_u8(bin_data, 0x0F); append_u8(bin_data, 0x94); append_u8(bin_data, 0xC0);
-                        append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB6); append_u8(bin_data, 0xC0);
-                        append_u8(bin_data, 0x50);
+                        append_u8(bin_data, 0x5B); // pop ebx
+                        append_u8(bin_data, 0x58); // pop eax
+                        append_u8(bin_data, 0xE8); // call helper_strcmp
+                        append_u32(bin_data, addr_strcmp - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+                        append_u8(bin_data, 0x50); // push eax
                         break;
                     case 0x21: // OP_CMP_NEQ
-                        append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
-                        append_u8(bin_data, 0x39); append_u8(bin_data, 0xD8);
-                        append_u8(bin_data, 0x0F); append_u8(bin_data, 0x95); append_u8(bin_data, 0xC0);
-                        append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB6); append_u8(bin_data, 0xC0);
-                        append_u8(bin_data, 0x50);
+                        append_u8(bin_data, 0x5B); // pop ebx
+                        append_u8(bin_data, 0x58); // pop eax
+                        append_u8(bin_data, 0xE8); // call helper_strcmp
+                        append_u32(bin_data, addr_strcmp - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+                        append_u8(bin_data, 0x83); append_u8(bin_data, 0xF0); append_u8(bin_data, 0x01); // xor eax, 1
+                        append_u8(bin_data, 0x50); // push eax
                         break;
                     case 0x22: // OP_CMP_LT
                         append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
