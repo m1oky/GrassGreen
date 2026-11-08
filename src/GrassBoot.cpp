@@ -309,13 +309,12 @@ namespace GrassBoot {
         append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091294); append_u32(bin_data, 0x68636F42);
         append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091298); append_u32(bin_data, 0x69442073);
         append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009129C); append_u32(bin_data, 0x616C7073);
-        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000912A0); append_u8(bin_data, 121);
-        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000912A1); append_u8(bin_data, 0);
-        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000912A0); append_u32(bin_data, 14);
-        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000912A4); append_u32(bin_data, 45);
-        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000912A8); append_u32(bin_data, 128);
-        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000912AC); append_u32(bin_data, 8);
-        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000912B0); append_u32(bin_data, 64);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000912A0); append_u32(bin_data, 0x00000079);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000912C0); append_u32(bin_data, 14);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000912C4); append_u32(bin_data, 45);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000912C8); append_u32(bin_data, 128);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000912CC); append_u32(bin_data, 8);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000912D0); append_u32(bin_data, 64);
 
 
         // --- 1. Очистка ВСЕГО экрана VGA (0xB8000..0xB8FA0, 2000 ячеек / 4000 байт) ---
@@ -1596,19 +1595,19 @@ namespace GrassBoot {
     append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091280);
 } else if (fn == "hw_gpu_usage") {
     for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
-    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000912A0);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000912C0);
 } else if (fn == "hw_gpu_temp") {
     for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
-    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000912A4);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000912C4);
 } else if (fn == "hw_gpu_vram_total") {
     for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
-    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000912A8);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000912C8);
 } else if (fn == "hw_gpu_vram_used") {
     for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
-    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000912AC);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000912CC);
 } else if (fn == "hw_gpu_vram_shared") {
     for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
-    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000912B0);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000912D0);
 } else if (fn == "hw_board_vendor" || fn == "board_vendor") {
     for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
     append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091090);
