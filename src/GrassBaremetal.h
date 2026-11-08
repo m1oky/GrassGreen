@@ -85,6 +85,11 @@ namespace GrassBaremetal {
     void clear();
     void not_clear_on();
     void not_clear_off();
+
+    // ── 8. High-Level Bare-Metal Command Executor & VD+ GUI Desktop ──
+    bool bm_exec(const std::string& cmd);
+    void vd_desktop();
+    std::string cat(const std::string& path);
 }
 
 #endif // GRASS_BAREMETAL_H

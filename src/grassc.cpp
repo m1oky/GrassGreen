@@ -1178,6 +1178,20 @@ public:
                         GrassBaremetal::vfs_specSign_show(args[0].toString());
                         push(GrassValue::Num(1.0));
                     }
+                    else if (fn == "bm_exec" && argc >= 1) {
+                        bool ok = GrassBaremetal::bm_exec(args[0].toString());
+                        push(GrassValue::Num(ok ? 1.0 : 0.0));
+                    }
+                    else if (fn == "cat" || fn == "read_file") {
+                        string p = (argc >= 1) ? args[0].toString() : "";
+                        string res = GrassBaremetal::cat(p);
+                        cout << res << "\n";
+                        push(GrassValue::Str(res));
+                    }
+                    else if (fn == "gui" || fn == "vd" || fn == "vd_desktop") {
+                        GrassBaremetal::vd_desktop();
+                        push(GrassValue::Num(1.0));
+                    }
                     // ===== БИБЛИОТЕКА !time! =====
                     else if (fn == "start_time") { GrassTime::start_time(); push(GrassValue::Num(1.0)); }
                     else if (fn == "stop_time") { push(GrassValue::Num(GrassTime::stop_time())); }

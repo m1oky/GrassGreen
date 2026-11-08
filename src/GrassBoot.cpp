@@ -402,6 +402,17 @@ namespace GrassBoot {
         append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091300); append_u8(bin_data, '/');  // vfs_cwd[0] = '/'
         append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091301); append_u8(bin_data, 0);    // vfs_cwd[1] = 0
 
+        // --- 4.1. Инициализация RamFS таблицы по умолчанию (0x00093000) ---
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00093000); append_u32(bin_data, 8); // count = 8
+        // Очистка и копирование таблицы 8 записей x 256 байт = 2048 байт
+        append_u8(bin_data, 0xBF); append_u32(bin_data, 0x00093004);
+        append_u8(bin_data, 0xBE);
+        size_t fixup_default_ramfstr_mem_addr = bin_data.size();
+        append_u32(bin_data, 0); // fixup later to addr_default_ramfs
+        append_u8(bin_data, 0xB9); append_u32(bin_data, 2048);
+        append_u8(bin_data, 0xFC); // cld
+        append_u8(bin_data, 0xF3); append_u8(bin_data, 0xA4); // rep movsb
+
         // --- 5. Вывод приветственного баннера GrassGreen в строку 0 ---
         const char* banner = "GrassGreen OS v4.3.0 Kernel [Multiboot Online]";
         size_t banner_len = strlen(banner);
@@ -1194,13 +1205,1217 @@ namespace GrassBoot {
             append_u8(bin_data, 0x5E); // pop esi
             append_u8(bin_data, 0xC3); // ret
 
+            // Helper lambdas for inline string emission in assembly helpers
+            auto emit_inline_str = [&](const std::string& str) -> uint32_t {
+                if (str.size() + 1 < 126) {
+                    append_u8(bin_data, 0xEB);
+                    append_u8(bin_data, (uint8_t)(str.size() + 1));
+                } else {
+                    append_u8(bin_data, 0xE9);
+                    append_u32(bin_data, (uint32_t)(str.size() + 1));
+                }
+                uint32_t str_mem_addr = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+                for (char c : str) append_u8(bin_data, (uint8_t)c);
+                append_u8(bin_data, 0);
+                return str_mem_addr;
+            };
+
+            auto emit_print_str_lit = [&](const std::string& str) {
+                uint32_t str_mem_addr = emit_inline_str(str);
+                append_u8(bin_data, 0xBE); append_u32(bin_data, str_mem_addr); // mov esi, str_mem_addr
+                append_u8(bin_data, 0xE8);
+                append_u32(bin_data, addr_print_string - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            };
+
+            // 8.11. Data block: Default Pre-installed RamFS Table (8 entries x 256 bytes = 2048 bytes)
+            uint32_t addr_default_ramfs = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            {
+                struct DefaultFSEntry {
+                    const char* name;
+                    const char* parent;
+                    uint8_t is_dir;
+                    uint8_t hidden;
+                    uint16_t size;
+                    const char* content;
+                };
+                static const DefaultFSEntry s_initial_fs[8] = {
+                    { "system", "/", 1, 0, 0, "" },
+                    { "kernel.sys", "/system", 0, 0, 24, "GrassGreen Kernel v4.3.0" },
+                    { "config.sys", "/system", 0, 0, 35, "DISPLAY=VGA;MODE=TEXT_80X25;GUI=VD+" },
+                    { "users", "/", 1, 0, 0, "" },
+                    { "readme.txt", "/users", 0, 0, 41, "Welcome to RQWos on GrassGreen Bare-Metal!" },
+                    { "apps", "/", 1, 0, 0, "" },
+                    { "desktop.ini", "/", 0, 1, 24, "[VD+ GUI Desktop Config]" },
+                    { "welcome.txt", "/", 0, 0, 32, "Hello from GrassGreen Baremetal!" }
+                };
+                for (int i = 0; i < 8; ++i) {
+                    uint8_t buf[256];
+                    std::memset(buf, 0, 256);
+                    std::strncpy((char*)&buf[0], s_initial_fs[i].name, 31);
+                    std::strncpy((char*)&buf[32], s_initial_fs[i].parent, 31);
+                    buf[64] = s_initial_fs[i].is_dir;
+                    buf[65] = s_initial_fs[i].hidden;
+                    buf[66] = (uint8_t)(s_initial_fs[i].size & 0xFF);
+                    buf[67] = (uint8_t)((s_initial_fs[i].size >> 8) & 0xFF);
+                    std::strncpy((char*)&buf[68], s_initial_fs[i].content, 187);
+                    for (int b = 0; b < 256; ++b) append_u8(bin_data, buf[b]);
+                }
+            }
+
+            // 8.12. Helper: helper_clear (Screen clearing with not_clear boundary preservation)
+            uint32_t addr_clear = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x50); // push eax
+            append_u8(bin_data, 0x53); // push ebx
+            append_u8(bin_data, 0x51); // push ecx
+            append_u8(bin_data, 0x57); // push edi
+
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x00091014); // mov edi, [0x00091014]
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0xFF); append_u32(bin_data, 4000);
+            size_t jb_b_ok = bin_data.size();
+            append_u8(bin_data, 0x72); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xBF); append_u32(bin_data, 160);
+            bin_data[jb_b_ok + 1] = (uint8_t)(bin_data.size() - (jb_b_ok + 2));
+
+            append_u8(bin_data, 0xB9); append_u32(bin_data, 4000);
+            append_u8(bin_data, 0x29); append_u8(bin_data, 0xF9); // sub ecx, edi
+            size_t jbe_c_none = bin_data.size();
+            append_u8(bin_data, 0x76); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xC1); append_u8(bin_data, 0xE9); append_u8(bin_data, 2); // shr ecx, 2
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0xC7); append_u32(bin_data, 0x000B8000); // add edi, 0xB8000
+            append_u8(bin_data, 0xFC); // cld
+            append_u8(bin_data, 0xB8); append_u32(bin_data, 0x07200720); // space
+            append_u8(bin_data, 0xF3); append_u8(bin_data, 0xAB); // rep stosd
+            bin_data[jbe_c_none + 1] = (uint8_t)(bin_data.size() - (jbe_c_none + 2));
+
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091014);
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0xFB); append_u32(bin_data, 4000);
+            size_t jb_c_ok = bin_data.size();
+            append_u8(bin_data, 0x72); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xBB); append_u32(bin_data, 160);
+            bin_data[jb_c_ok + 1] = (uint8_t)(bin_data.size() - (jb_c_ok + 2));
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091000);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_update_cursor - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+            append_u8(bin_data, 0x5F); // pop edi
+            append_u8(bin_data, 0x59); // pop ecx
+            append_u8(bin_data, 0x5B); // pop ebx
+            append_u8(bin_data, 0x58); // pop eax
+            append_u8(bin_data, 0xC3); // ret
+
+            // 8.13. Helper: helper_reboot (Reliable PCI 0xCF9 + 8042 0x64 + Triple fault)
+            uint32_t addr_reboot = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0xBA); append_u16(bin_data, 0x0CF9); append_u16(bin_data, 0x0000);
+            append_u8(bin_data, 0xB0); append_u8(bin_data, 0x06); append_u8(bin_data, 0xEE); // out dx, al
+            append_u8(bin_data, 0xB0); append_u8(bin_data, 0xFE); append_u8(bin_data, 0xE6); append_u8(bin_data, 0x64);
+            append_u8(bin_data, 0x6A); append_u8(bin_data, 0x00); append_u8(bin_data, 0x6A); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x01); append_u8(bin_data, 0x1C); append_u8(bin_data, 0x24); // lidt [esp]
+            append_u8(bin_data, 0xCC); // int 3
+            append_u8(bin_data, 0xFA); append_u8(bin_data, 0xF4);
+            append_u8(bin_data, 0xEB); append_u8(bin_data, 0xFD);
+
+            // 8.14. Helper: helper_poweroff (QEMU 0x604, Bochs 0xB004, VBox 0x4004, APM)
+            uint32_t addr_poweroff = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x66); append_u8(bin_data, 0xB8); append_u16(bin_data, 0x2000);
+            append_u8(bin_data, 0xBA); append_u16(bin_data, 0x0604); append_u16(bin_data, 0x0000);
+            append_u8(bin_data, 0x66); append_u8(bin_data, 0xEF);
+            append_u8(bin_data, 0xBA); append_u16(bin_data, 0xB004); append_u16(bin_data, 0x0000);
+            append_u8(bin_data, 0x66); append_u8(bin_data, 0xEF);
+            append_u8(bin_data, 0x66); append_u8(bin_data, 0xB8); append_u16(bin_data, 0x3400);
+            append_u8(bin_data, 0xBA); append_u16(bin_data, 0x4004); append_u16(bin_data, 0x0000);
+            append_u8(bin_data, 0x66); append_u8(bin_data, 0xEF);
+            append_u8(bin_data, 0xFA); append_u8(bin_data, 0xF4);
+            append_u8(bin_data, 0xEB); append_u8(bin_data, 0xFD);
+
+            // 8.15. Helper: helper_vfs_cr_folder (ESI = name)
+            uint32_t addr_vfs_cr_folder = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x50); append_u8(bin_data, 0x53); append_u8(bin_data, 0x51);
+            append_u8(bin_data, 0x52); append_u8(bin_data, 0x56); append_u8(bin_data, 0x57);
+
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xF6); // test esi, esi
+            size_t jz_cf_ret = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3E); append_u8(bin_data, 0); // cmp byte [esi], 0
+            size_t jz_cf_ret2 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            // Append new entry:
+            append_u8(bin_data, 0xA1); append_u32(bin_data, 0x00093000); // mov eax, [0x00093000]
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xF8); append_u8(bin_data, 80); // cmp eax, 80
+            size_t jae_cf_done = bin_data.size(); append_u8(bin_data, 0x73); append_u8(bin_data, 0x00);
+
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xC7); // mov edi, eax
+            append_u8(bin_data, 0xC1); append_u8(bin_data, 0xE7); append_u8(bin_data, 8); // shl edi, 8
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0xC7); append_u32(bin_data, 0x00093004); // add edi, 0x00093004
+
+            // Zero 256 bytes
+            append_u8(bin_data, 0x57); append_u8(bin_data, 0x50);
+            append_u8(bin_data, 0x31); append_u8(bin_data, 0xC0);
+            append_u8(bin_data, 0xB9); append_u32(bin_data, 64);
+            append_u8(bin_data, 0xFC); append_u8(bin_data, 0xF3); append_u8(bin_data, 0xAB);
+            append_u8(bin_data, 0x58); append_u8(bin_data, 0x5F);
+
+            // Copy name into edi+0 (max 31 chars)
+            append_u8(bin_data, 0x57); append_u8(bin_data, 0x56);
+            append_u8(bin_data, 0xB9); append_u32(bin_data, 31);
+            size_t loop_cp_n = bin_data.size();
+            append_u8(bin_data, 0xAC); append_u8(bin_data, 0xAA); append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0);
+            size_t jz_cp_n = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x49); append_u8(bin_data, 0x75); append_u8(bin_data, (uint8_t)(int8_t)(loop_cp_n - (bin_data.size() + 1)));
+            bin_data[jz_cp_n + 1] = (uint8_t)(bin_data.size() - (jz_cp_n + 2));
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x07); append_u8(bin_data, 0);
+            append_u8(bin_data, 0x5E); append_u8(bin_data, 0x5F);
+
+            // Copy cwd (0x00091300) into edi+32
+            append_u8(bin_data, 0x57);
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xC7); append_u8(bin_data, 32);
+            append_u8(bin_data, 0xBE); append_u32(bin_data, 0x00091300);
+            append_u8(bin_data, 0xB9); append_u32(bin_data, 31);
+            size_t loop_cp_p = bin_data.size();
+            append_u8(bin_data, 0xAC); append_u8(bin_data, 0xAA); append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0);
+            size_t jz_cp_p = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x49); append_u8(bin_data, 0x75); append_u8(bin_data, (uint8_t)(int8_t)(loop_cp_p - (bin_data.size() + 1)));
+            bin_data[jz_cp_p + 1] = (uint8_t)(bin_data.size() - (jz_cp_p + 2));
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x07); append_u8(bin_data, 0);
+            append_u8(bin_data, 0x5F);
+
+            // is_dir = 1
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x47); append_u8(bin_data, 64); append_u8(bin_data, 1);
+            append_u8(bin_data, 0xFF); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00093000); // inc [0x00093000]
+
+            size_t pos_cf_done = bin_data.size();
+            bin_data[jz_cf_ret + 1] = (uint8_t)(pos_cf_done - (jz_cf_ret + 2));
+            bin_data[jz_cf_ret2 + 1] = (uint8_t)(pos_cf_done - (jz_cf_ret2 + 2));
+            bin_data[jae_cf_done + 1] = (uint8_t)(pos_cf_done - (jae_cf_done + 2));
+
+            append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E); append_u8(bin_data, 0x5A);
+            append_u8(bin_data, 0x59); append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
+            append_u8(bin_data, 0xC3); // ret
+
+            // 8.16. Helper: helper_vfs_cr_file (ESI = name, EBX = content)
+            uint32_t addr_vfs_cr_file = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x50); append_u8(bin_data, 0x53); append_u8(bin_data, 0x51);
+            append_u8(bin_data, 0x52); append_u8(bin_data, 0x56); append_u8(bin_data, 0x57);
+
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xF6); // test esi, esi
+            size_t jz_cfl_ret = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3E); append_u8(bin_data, 0);
+            size_t jz_cfl_ret2 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            append_u8(bin_data, 0xA1); append_u32(bin_data, 0x00093000); // mov eax, [0x00093000]
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xF8); append_u8(bin_data, 80);
+            size_t jae_cfl_done = bin_data.size(); append_u8(bin_data, 0x73); append_u8(bin_data, 0x00);
+
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xC7);
+            append_u8(bin_data, 0xC1); append_u8(bin_data, 0xE7); append_u8(bin_data, 8);
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0xC7); append_u32(bin_data, 0x00093004);
+
+            // Zero 256 bytes
+            append_u8(bin_data, 0x57); append_u8(bin_data, 0x50);
+            append_u8(bin_data, 0x31); append_u8(bin_data, 0xC0);
+            append_u8(bin_data, 0xB9); append_u32(bin_data, 64);
+            append_u8(bin_data, 0xFC); append_u8(bin_data, 0xF3); append_u8(bin_data, 0xAB);
+            append_u8(bin_data, 0x58); append_u8(bin_data, 0x5F);
+
+            // Copy name into edi+0 (max 31 chars)
+            append_u8(bin_data, 0x57); append_u8(bin_data, 0x56);
+            append_u8(bin_data, 0xB9); append_u32(bin_data, 31);
+            size_t loop_cfl_n = bin_data.size();
+            append_u8(bin_data, 0xAC); append_u8(bin_data, 0xAA); append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0);
+            size_t jz_cfl_n = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x49); append_u8(bin_data, 0x75); append_u8(bin_data, (uint8_t)(int8_t)(loop_cfl_n - (bin_data.size() + 1)));
+            bin_data[jz_cfl_n + 1] = (uint8_t)(bin_data.size() - (jz_cfl_n + 2));
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x07); append_u8(bin_data, 0);
+            append_u8(bin_data, 0x5E); append_u8(bin_data, 0x5F);
+
+            // Copy cwd (0x00091300) into edi+32
+            append_u8(bin_data, 0x57);
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xC7); append_u8(bin_data, 32);
+            append_u8(bin_data, 0xBE); append_u32(bin_data, 0x00091300);
+            append_u8(bin_data, 0xB9); append_u32(bin_data, 31);
+            size_t loop_cfl_p = bin_data.size();
+            append_u8(bin_data, 0xAC); append_u8(bin_data, 0xAA); append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0);
+            size_t jz_cfl_p = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x49); append_u8(bin_data, 0x75); append_u8(bin_data, (uint8_t)(int8_t)(loop_cfl_p - (bin_data.size() + 1)));
+            bin_data[jz_cfl_p + 1] = (uint8_t)(bin_data.size() - (jz_cfl_p + 2));
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x07); append_u8(bin_data, 0);
+            append_u8(bin_data, 0x5F);
+
+            // is_dir = 0
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x47); append_u8(bin_data, 64); append_u8(bin_data, 0);
+
+            // Copy content (EBX) into edi+68 (max 180 chars)
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xDB); // test ebx, ebx
+            size_t jz_no_cont = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x57);
+            append_u8(bin_data, 0x8D); append_u8(bin_data, 0x7F); append_u8(bin_data, 68); // lea edi, [edi + 68]
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xDE); // mov esi, ebx
+            append_u8(bin_data, 0x31); append_u8(bin_data, 0xC9); // xor ecx, ecx (length counter)
+            size_t loop_cfl_c = bin_data.size();
+            append_u8(bin_data, 0xAC); append_u8(bin_data, 0xAA);
+            append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0);
+            size_t jz_cfl_c = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x41); // inc ecx
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0xF9); append_u32(bin_data, 180);
+            append_u8(bin_data, 0x72); append_u8(bin_data, (uint8_t)(int8_t)(loop_cfl_c - (bin_data.size() + 1)));
+            bin_data[jz_cfl_c + 1] = (uint8_t)(bin_data.size() - (jz_cfl_c + 2));
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x07); append_u8(bin_data, 0);
+            append_u8(bin_data, 0x5F); // restore edi
+            append_u8(bin_data, 0x66); append_u8(bin_data, 0x89); append_u8(bin_data, 0x4F); append_u8(bin_data, 66); // mov [edi + 66], cx
+
+            size_t pos_no_cont = bin_data.size();
+            bin_data[jz_no_cont + 1] = (uint8_t)(pos_no_cont - (jz_no_cont + 2));
+
+            append_u8(bin_data, 0xFF); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00093000); // inc [0x00093000]
+
+            size_t pos_cfl_done = bin_data.size();
+            bin_data[jz_cfl_ret + 1] = (uint8_t)(pos_cfl_done - (jz_cfl_ret + 2));
+            bin_data[jz_cfl_ret2 + 1] = (uint8_t)(pos_cfl_done - (jz_cfl_ret2 + 2));
+            bin_data[jae_cfl_done + 1] = (uint8_t)(pos_cfl_done - (jae_cfl_done + 2));
+
+            append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E); append_u8(bin_data, 0x5A);
+            append_u8(bin_data, 0x59); append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
+            append_u8(bin_data, 0xC3); // ret
+
+            // 8.17. Helper: helper_vfs_pwd
+            uint32_t addr_vfs_pwd = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x56);
+            append_u8(bin_data, 0xBE); append_u32(bin_data, 0x00091300);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_print_string - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            emit_print_str_lit("\n");
+            append_u8(bin_data, 0x5E);
+            append_u8(bin_data, 0xC3);
+
+            // 8.18. Helper: helper_vfs_cd (ESI = target dir string)
+            uint32_t addr_vfs_cd = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x50); append_u8(bin_data, 0x53); append_u8(bin_data, 0x51);
+            append_u8(bin_data, 0x52); append_u8(bin_data, 0x56); append_u8(bin_data, 0x57);
+
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xF6); // test esi, esi
+            size_t jz_cd_done1 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3E); append_u8(bin_data, 0); // cmp byte [esi], 0
+            size_t jz_cd_done2 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            // Check if ESI == "/"
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3E); append_u8(bin_data, '/');
+            size_t jne_cd_chk_dotdot = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x7E); append_u8(bin_data, 1); append_u8(bin_data, 0);
+            size_t jne_cd_chk_dotdot2 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            // Reset to "/"
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091300); append_u8(bin_data, '/');
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091301); append_u8(bin_data, 0);
+            size_t jmp_cd_done_slash = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // Check if ESI == ".."
+            size_t pos_cd_chk_dotdot = bin_data.size();
+            bin_data[jne_cd_chk_dotdot + 1] = (uint8_t)(pos_cd_chk_dotdot - (jne_cd_chk_dotdot + 2));
+            bin_data[jne_cd_chk_dotdot2 + 1] = (uint8_t)(pos_cd_chk_dotdot - (jne_cd_chk_dotdot2 + 2));
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3E); append_u8(bin_data, '.');
+            size_t jne_cd_find_folder = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x7E); append_u8(bin_data, 1); append_u8(bin_data, '.');
+            size_t jne_cd_find_folder2 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x7E); append_u8(bin_data, 2); append_u8(bin_data, 0);
+            size_t jne_cd_find_folder3 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            // Go up one dir in 0x00091300
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x00091301); append_u8(bin_data, 0);
+            size_t jz_cd_already_root = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            // Find end of cwd
+            append_u8(bin_data, 0xBF); append_u32(bin_data, 0x00091300);
+            size_t loop_cd_end = bin_data.size();
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3F); append_u8(bin_data, 0);
+            size_t jz_cd_found_end = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x47); // inc edi
+            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(loop_cd_end - (bin_data.size() + 1)));
+
+            size_t pos_cd_found_end = bin_data.size();
+            bin_data[jz_cd_found_end + 1] = (uint8_t)(pos_cd_found_end - (jz_cd_found_end + 2));
+            // Scan backwards for '/'
+            size_t loop_cd_back = bin_data.size();
+            append_u8(bin_data, 0x4F); // dec edi
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0xFF); append_u32(bin_data, 0x00091300);
+            size_t jbe_cd_root = bin_data.size(); append_u8(bin_data, 0x76); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3F); append_u8(bin_data, '/');
+            size_t je_cd_cut = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(loop_cd_back - (bin_data.size() + 1)));
+
+            size_t pos_cd_root = bin_data.size();
+            bin_data[jbe_cd_root + 1] = (uint8_t)(pos_cd_root - (jbe_cd_root + 2));
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091300); append_u8(bin_data, '/');
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091301); append_u8(bin_data, 0);
+            size_t jmp_cd_done_up = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            size_t pos_cd_cut = bin_data.size();
+            bin_data[je_cd_cut + 1] = (uint8_t)(pos_cd_cut - (je_cd_cut + 2));
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0xFF); append_u32(bin_data, 0x00091300);
+            size_t jne_cd_trunc = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091301); append_u8(bin_data, 0);
+            size_t jmp_cd_done_cut = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            size_t pos_cd_trunc = bin_data.size();
+            bin_data[jne_cd_trunc + 1] = (uint8_t)(pos_cd_trunc - (jne_cd_trunc + 2));
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x07); append_u8(bin_data, 0);
+            size_t jmp_cd_done_trunc = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // Search folder in RamFS:
+            size_t pos_cd_find_folder = bin_data.size();
+            bin_data[jne_cd_find_folder + 1] = (uint8_t)(pos_cd_find_folder - (jne_cd_find_folder + 2));
+            bin_data[jne_cd_find_folder2 + 1] = (uint8_t)(pos_cd_find_folder - (jne_cd_find_folder2 + 2));
+            bin_data[jne_cd_find_folder3 + 1] = (uint8_t)(pos_cd_find_folder - (jne_cd_find_folder3 + 2));
+
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x0D); append_u32(bin_data, 0x00093000);
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC9);
+            size_t jz_cd_not_found = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x31); append_u8(bin_data, 0xD2); // edx = 0
+
+            size_t loop_cd_scan = bin_data.size();
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xD7);
+            append_u8(bin_data, 0xC1); append_u8(bin_data, 0xE7); append_u8(bin_data, 8);
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0xC7); append_u32(bin_data, 0x00093004);
+
+            // is_dir == 1 (edi + 64)
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x7F); append_u8(bin_data, 64); append_u8(bin_data, 1);
+            size_t jne_cd_next = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            // parent == cwd (0x00091300)
+            append_u8(bin_data, 0x56); append_u8(bin_data, 0x57);
+            append_u8(bin_data, 0x8D); append_u8(bin_data, 0x47); append_u8(bin_data, 32);
+            append_u8(bin_data, 0xBB); append_u32(bin_data, 0x00091300);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_strcmp - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0);
+            append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E);
+            size_t jz_cd_next = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            // name == ESI
+            append_u8(bin_data, 0x56); append_u8(bin_data, 0x57);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xF8);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xF3);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_strcmp - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0);
+            append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E);
+            size_t jnz_cd_match = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            size_t pos_cd_next = bin_data.size();
+            bin_data[jne_cd_next + 1] = (uint8_t)(pos_cd_next - (jne_cd_next + 2));
+            bin_data[jz_cd_next + 1] = (uint8_t)(pos_cd_next - (jz_cd_next + 2));
+            append_u8(bin_data, 0x42); // inc edx
+            append_u8(bin_data, 0x3B); append_u8(bin_data, 0x15); append_u32(bin_data, 0x00093000);
+            append_u8(bin_data, 0x72); append_u8(bin_data, (uint8_t)(int8_t)(loop_cd_scan - (bin_data.size() + 1)));
+
+            // Not found
+            size_t pos_cd_not_found = bin_data.size();
+            bin_data[jz_cd_not_found + 1] = (uint8_t)(pos_cd_not_found - (jz_cd_not_found + 2));
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0C); // Light Red
+            emit_print_str_lit("cd: папка не найдена: ");
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_print_string - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            emit_print_str_lit("\n");
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0A); // Light Green
+            size_t jmp_cd_done_fail = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // Match found! Update cwd
+            size_t pos_cd_match = bin_data.size();
+            bin_data[jnz_cd_match + 1] = (uint8_t)(pos_cd_match - (jnz_cd_match + 2));
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x00091301); append_u8(bin_data, 0);
+            size_t jz_cd_append_to_slash = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            // Non-root: find end of cwd, append '/', then copy name
+            append_u8(bin_data, 0xBF); append_u32(bin_data, 0x00091300);
+            size_t loop_cd_end2 = bin_data.size();
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3F); append_u8(bin_data, 0);
+            size_t jz_cd_found_end2 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x47);
+            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(loop_cd_end2 - (bin_data.size() + 1)));
+
+            size_t pos_cd_found_end2 = bin_data.size();
+            bin_data[jz_cd_found_end2 + 1] = (uint8_t)(pos_cd_found_end2 - (jz_cd_found_end2 + 2));
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x07); append_u8(bin_data, '/');
+            append_u8(bin_data, 0x47); // inc edi
+            // copy name from ESI
+            size_t loop_cd_cp_name1 = bin_data.size();
+            append_u8(bin_data, 0xAC); append_u8(bin_data, 0xAA); append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0);
+            size_t jz_cd_cp_name1 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(loop_cd_cp_name1 - (bin_data.size() + 1)));
+            bin_data[jz_cd_cp_name1 + 1] = (uint8_t)(bin_data.size() - (jz_cd_cp_name1 + 2));
+            size_t jmp_cd_done_ok1 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // Root slash: copy name to 0x00091301
+            size_t pos_cd_append_to_slash = bin_data.size();
+            bin_data[jz_cd_append_to_slash + 1] = (uint8_t)(pos_cd_append_to_slash - (jz_cd_append_to_slash + 2));
+            append_u8(bin_data, 0xBF); append_u32(bin_data, 0x00091301);
+            size_t loop_cd_cp_name2 = bin_data.size();
+            append_u8(bin_data, 0xAC); append_u8(bin_data, 0xAA); append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0);
+            size_t jz_cd_cp_name2 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(loop_cd_cp_name2 - (bin_data.size() + 1)));
+            bin_data[jz_cd_cp_name2 + 1] = (uint8_t)(bin_data.size() - (jz_cd_cp_name2 + 2));
+
+            // Done CD
+            size_t pos_cd_all_done = bin_data.size();
+            bin_data[jz_cd_done1 + 1] = (uint8_t)(pos_cd_all_done - (jz_cd_done1 + 2));
+            bin_data[jz_cd_done2 + 1] = (uint8_t)(pos_cd_all_done - (jz_cd_done2 + 2));
+            bin_data[jmp_cd_done_slash + 1] = (uint8_t)(pos_cd_all_done - (jmp_cd_done_slash + 2));
+            bin_data[jz_cd_already_root + 1] = (uint8_t)(pos_cd_all_done - (jz_cd_already_root + 2));
+            bin_data[jmp_cd_done_up + 1] = (uint8_t)(pos_cd_all_done - (jmp_cd_done_up + 2));
+            bin_data[jmp_cd_done_cut + 1] = (uint8_t)(pos_cd_all_done - (jmp_cd_done_cut + 2));
+            bin_data[jmp_cd_done_trunc + 1] = (uint8_t)(pos_cd_all_done - (jmp_cd_done_trunc + 2));
+            bin_data[jmp_cd_done_fail + 1] = (uint8_t)(pos_cd_all_done - (jmp_cd_done_fail + 2));
+            bin_data[jmp_cd_done_ok1 + 1] = (uint8_t)(pos_cd_all_done - (jmp_cd_done_ok1 + 2));
+
+            append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E); append_u8(bin_data, 0x5A);
+            append_u8(bin_data, 0x59); append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
+            append_u8(bin_data, 0xC3); // ret
+
+            // 8.19. Helper: helper_vfs_cat (ESI = filename)
+            uint32_t addr_vfs_cat = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x50); append_u8(bin_data, 0x53); append_u8(bin_data, 0x51);
+            append_u8(bin_data, 0x52); append_u8(bin_data, 0x56); append_u8(bin_data, 0x57);
+
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xF6);
+            size_t jz_cat_done = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3E); append_u8(bin_data, 0);
+            size_t jz_cat_done2 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x0D); append_u32(bin_data, 0x00093000);
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC9);
+            size_t jz_cat_not_found = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x31); append_u8(bin_data, 0xD2); // edx = 0
+
+            size_t loop_cat_scan = bin_data.size();
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xD7);
+            append_u8(bin_data, 0xC1); append_u8(bin_data, 0xE7); append_u8(bin_data, 8);
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0xC7); append_u32(bin_data, 0x00093004);
+
+            // is_dir == 0 (edi + 64)
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x7F); append_u8(bin_data, 64); append_u8(bin_data, 0);
+            size_t jne_cat_next = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            // parent == cwd (0x00091300)
+            append_u8(bin_data, 0x56); append_u8(bin_data, 0x57);
+            append_u8(bin_data, 0x8D); append_u8(bin_data, 0x47); append_u8(bin_data, 32);
+            append_u8(bin_data, 0xBB); append_u32(bin_data, 0x00091300);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_strcmp - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0);
+            append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E);
+            size_t jz_cat_next = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            // name == ESI
+            append_u8(bin_data, 0x56); append_u8(bin_data, 0x57);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xF8);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xF3);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_strcmp - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0);
+            append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E);
+            size_t jnz_cat_found = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            size_t pos_cat_next = bin_data.size();
+            bin_data[jne_cat_next + 1] = (uint8_t)(pos_cat_next - (jne_cat_next + 2));
+            bin_data[jz_cat_next + 1] = (uint8_t)(pos_cat_next - (jz_cat_next + 2));
+            append_u8(bin_data, 0x42);
+            append_u8(bin_data, 0x3B); append_u8(bin_data, 0x15); append_u32(bin_data, 0x00093000);
+            append_u8(bin_data, 0x72); append_u8(bin_data, (uint8_t)(int8_t)(loop_cat_scan - (bin_data.size() + 1)));
+
+            // Cat not found
+            size_t pos_cat_not_found = bin_data.size();
+            bin_data[jz_cat_not_found + 1] = (uint8_t)(pos_cat_not_found - (jz_cat_not_found + 2));
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0C);
+            emit_print_str_lit("cat: файл не найден: ");
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_print_string - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            emit_print_str_lit("\n");
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0A);
+            size_t jmp_cat_done_fail = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // Found! Print content at edi+68
+            size_t pos_cat_found = bin_data.size();
+            bin_data[jnz_cat_found + 1] = (uint8_t)(pos_cat_found - (jnz_cat_found + 2));
+            append_u8(bin_data, 0x8D); append_u8(bin_data, 0x77); append_u8(bin_data, 68); // lea esi, [edi + 68]
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0F); // White
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_print_string - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            emit_print_str_lit("\n");
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0A); // restore Green
+
+            size_t pos_cat_all_done = bin_data.size();
+            bin_data[jz_cat_done + 1] = (uint8_t)(pos_cat_all_done - (jz_cat_done + 2));
+            bin_data[jz_cat_done2 + 1] = (uint8_t)(pos_cat_all_done - (jz_cat_done2 + 2));
+            bin_data[jmp_cat_done_fail + 1] = (uint8_t)(pos_cat_all_done - (jmp_cat_done_fail + 2));
+
+            append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E); append_u8(bin_data, 0x5A);
+            append_u8(bin_data, 0x59); append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
+            append_u8(bin_data, 0xC3); // ret
+
+            // 8.20. Helper: helper_vfs_ls (EAX = flags ptr or 0)
+            uint32_t addr_vfs_ls = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x50); append_u8(bin_data, 0x53); append_u8(bin_data, 0x51);
+            append_u8(bin_data, 0x52); append_u8(bin_data, 0x56); append_u8(bin_data, 0x57);
+
+            // check if flags has "-a"
+            append_u8(bin_data, 0x31); append_u8(bin_data, 0xDB); // ebx = 0 (show_all)
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0); // test eax, eax
+            size_t jz_ls_no_flags = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x38); append_u8(bin_data, '-');
+            size_t jne_ls_no_flags = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x78); append_u8(bin_data, 1); append_u8(bin_data, 'a');
+            size_t jne_ls_no_flags2 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xBB); append_u32(bin_data, 1); // ebx = 1 (show_all)
+
+            size_t pos_ls_flags_done = bin_data.size();
+            bin_data[jz_ls_no_flags + 1] = (uint8_t)(pos_ls_flags_done - (jz_ls_no_flags + 2));
+            bin_data[jne_ls_no_flags + 1] = (uint8_t)(pos_ls_flags_done - (jne_ls_no_flags + 2));
+            bin_data[jne_ls_no_flags2 + 1] = (uint8_t)(pos_ls_flags_done - (jne_ls_no_flags2 + 2));
+
+            // Print header: "Содержимое папки " + cwd + ":\n"
+            emit_print_str_lit("Содержимое папки ");
+            append_u8(bin_data, 0xBE); append_u32(bin_data, 0x00091300);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_print_string - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            emit_print_str_lit(":\n");
+
+            // If show_all: print . and ..
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xDB);
+            size_t jz_ls_no_dots = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0B); // Cyan
+            emit_print_str_lit("  <DIR>      .\n  <DIR>      ..\n");
+
+            size_t pos_ls_no_dots = bin_data.size();
+            bin_data[jz_ls_no_dots + 1] = (uint8_t)(pos_ls_no_dots - (jz_ls_no_dots + 2));
+
+            // Scan RamFS table
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x0D); append_u32(bin_data, 0x00093000);
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC9);
+            size_t jz_ls_done = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x31); append_u8(bin_data, 0xD2); // edx = 0
+
+            size_t loop_ls_scan = bin_data.size();
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xD7);
+            append_u8(bin_data, 0xC1); append_u8(bin_data, 0xE7); append_u8(bin_data, 8);
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0xC7); append_u32(bin_data, 0x00093004);
+
+            // parent == cwd (0x00091300)
+            append_u8(bin_data, 0x53); append_u8(bin_data, 0x57);
+            append_u8(bin_data, 0x8D); append_u8(bin_data, 0x47); append_u8(bin_data, 32);
+            append_u8(bin_data, 0xBB); append_u32(bin_data, 0x00091300);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_strcmp - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0);
+            append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5B);
+            size_t jz_ls_next = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            // hidden check
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x7F); append_u8(bin_data, 65); append_u8(bin_data, 1);
+            size_t jne_ls_visible = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xDB); // if hidden && !show_all -> skip
+            size_t jz_ls_next_hidden = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            size_t pos_ls_visible = bin_data.size();
+            bin_data[jne_ls_visible + 1] = (uint8_t)(pos_ls_visible - (jne_ls_visible + 2));
+
+            // is_dir == 1 ?
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x7F); append_u8(bin_data, 64); append_u8(bin_data, 1);
+            size_t jne_ls_file = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            // Print DIR in Cyan
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0B); // Cyan
+            emit_print_str_lit("  <DIR>      ");
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xFE); // mov esi, edi
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_print_string - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            emit_print_str_lit("\n");
+            size_t jmp_ls_entry_done = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // Print FILE in Light Green
+            size_t pos_ls_file = bin_data.size();
+            bin_data[jne_ls_file + 1] = (uint8_t)(pos_ls_file - (jne_ls_file + 2));
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0A); // Light Green
+            emit_print_str_lit("  <FILE>     ");
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xFE); // mov esi, edi
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_print_string - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            emit_print_str_lit("  (");
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB7); append_u8(bin_data, 0x47); append_u8(bin_data, 66); // movzx eax, word [edi + 66]
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_print_num - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            emit_print_str_lit(" Б)\n");
+
+            size_t pos_ls_entry_done = bin_data.size();
+            bin_data[jmp_ls_entry_done + 1] = (uint8_t)(pos_ls_entry_done - (jmp_ls_entry_done + 2));
+            bin_data[jz_ls_next + 1] = (uint8_t)(pos_ls_entry_done - (jz_ls_next + 2));
+            bin_data[jz_ls_next_hidden + 1] = (uint8_t)(pos_ls_entry_done - (jz_ls_next_hidden + 2));
+
+            append_u8(bin_data, 0x42); // inc edx
+            append_u8(bin_data, 0x3B); append_u8(bin_data, 0x15); append_u32(bin_data, 0x00093000);
+            append_u8(bin_data, 0x72); append_u8(bin_data, (uint8_t)(int8_t)(loop_ls_scan - (bin_data.size() + 1)));
+
+            size_t pos_ls_done = bin_data.size();
+            bin_data[jz_ls_done + 1] = (uint8_t)(pos_ls_done - (jz_ls_done + 2));
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0A); // restore Green
+
+            append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E); append_u8(bin_data, 0x5A);
+            append_u8(bin_data, 0x59); append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
+            append_u8(bin_data, 0xC3); // ret
+
+            // 8.21. Helper: helper_vd_desktop (Vector Display+ Interactive Bare-Metal GUI Desktop)
+            uint32_t addr_vd_desktop = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x50); append_u8(bin_data, 0x53); append_u8(bin_data, 0x51);
+            append_u8(bin_data, 0x52); append_u8(bin_data, 0x56); append_u8(bin_data, 0x57);
+
+            // Set tab = 1 at 0x00091380
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, 1);
+
+            size_t loop_desktop_redraw = bin_data.size();
+            // Clear entire VGA 4000 bytes with space
+            append_u8(bin_data, 0xBF); append_u32(bin_data, 0x000B8000);
+            append_u8(bin_data, 0xB9); append_u32(bin_data, 1000);
+            append_u8(bin_data, 0xB8); append_u32(bin_data, 0x07200720);
+            append_u8(bin_data, 0xFC); append_u8(bin_data, 0xF3); append_u8(bin_data, 0xAB);
+            // Reset cursor to 0
+            append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091000); append_u32(bin_data, 0);
+
+            // Line 0: Header
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x1F); // White on Blue
+            emit_print_str_lit(" [ GrassGreen VD+ Desktop Engine v4.3.0 | RQWos Core ]\n");
+
+            // Line 1: Top border
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0A); // Light Green
+            emit_print_str_lit("╔══════════════════════════════════════════════════════════════════════════════╗\n");
+
+            // Line 2: Tabs header
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); // mov al, [0x00091380]
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 1);
+            size_t jne_dt_tab2 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            emit_print_str_lit("║  [* 1. СИСТЕМА *]       [ 2. ФАЙЛЫ ]       [ 3. ЖЕЛЕЗО ]                     ║\n");
+            size_t jmp_dt_tabs_done = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            size_t pos_dt_tab2 = bin_data.size();
+            bin_data[jne_dt_tab2 + 1] = (uint8_t)(pos_dt_tab2 - (jne_dt_tab2 + 2));
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 2);
+            size_t jne_dt_tab3 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            emit_print_str_lit("║  [ 1. СИСТЕМА ]       [* 2. ФАЙЛЫ *]       [ 3. ЖЕЛЕЗО ]                     ║\n");
+            size_t jmp_dt_tabs_done2 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            size_t pos_dt_tab3 = bin_data.size();
+            bin_data[jne_dt_tab3 + 1] = (uint8_t)(pos_dt_tab3 - (jne_dt_tab3 + 2));
+            emit_print_str_lit("║  [ 1. СИСТЕМА ]       [ 2. ФАЙЛЫ ]       [* 3. ЖЕЛЕЗО *]                     ║\n");
+
+            size_t pos_dt_tabs_done = bin_data.size();
+            bin_data[jmp_dt_tabs_done + 1] = (uint8_t)(pos_dt_tabs_done - (jmp_dt_tabs_done + 2));
+            bin_data[jmp_dt_tabs_done2 + 1] = (uint8_t)(pos_dt_tabs_done - (jmp_dt_tabs_done2 + 2));
+
+            // Line 3: Middle border
+            emit_print_str_lit("╠══════════════════════════════════════════════════════════════════════════════╣\n");
+
+            // Tab Content
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380);
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 1);
+            size_t jne_dt_body2 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            // Tab 1 Body
+            emit_print_str_lit("║                                                                              ║\n");
+            emit_print_str_lit("║  Операционная система:  RQWos (GrassGreen Kernel v4.3.0)                     ║\n");
+            emit_print_str_lit("║  Архитектура ядра:      x86 Protected Mode (Multiboot Compliant)             ║\n");
+            emit_print_str_lit("║  Графическая подсистема:VD+ (Vector Display Plus TUI/GUI Engine)             ║\n");
+            emit_print_str_lit("║  Файловая структура:    RamFS (Виртуальная структура активна)                ║\n");
+            emit_print_str_lit("║                                                                              ║\n");
+            emit_print_str_lit("║  Состояние памяти ОЗУ:                                                       ║\n");
+            emit_print_str_lit("║  [================================....]  4 МБ / 128 МБ                       ║\n");
+            emit_print_str_lit("║                                                                              ║\n");
+            emit_print_str_lit("║  Управление окнами:                                                          ║\n");
+            emit_print_str_lit("║    [1] - Общие сведения об ОС                                                ║\n");
+            emit_print_str_lit("║    [2] - Проводник файлов (RamFS)                                            ║\n");
+            emit_print_str_lit("║    [3] - Аппаратный мониторинг процессора и устройств                        ║\n");
+            emit_print_str_lit("║    [ESC] - Выход обратно в терминал RQWos                                    ║\n");
+            emit_print_str_lit("║                                                                              ║\n");
+            size_t jmp_dt_body_done = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // Tab 2 Body
+            size_t pos_dt_body2 = bin_data.size();
+            bin_data[jne_dt_body2 + 1] = (uint8_t)(pos_dt_body2 - (jne_dt_body2 + 2));
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 2);
+            size_t jne_dt_body3 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            emit_print_str_lit("║                                                                              ║\n");
+            emit_print_str_lit("║  Проводник файлов RamFS:                                                     ║\n");
+            emit_print_str_lit("║  ┌─ Содержимое папки / ─────────────┐ ┌─ Просмотр файла ───────────────────┐ ║\n");
+            emit_print_str_lit("║  │  [DIR]   system                  │ │ Имя:     readme.txt                │ ║\n");
+            emit_print_str_lit("║  │  [DIR]   users                   │ │ Размер:  41 байт                   │ ║\n");
+            emit_print_str_lit("║  │  [DIR]   apps                    │ │                                    │ ║\n");
+            emit_print_str_lit("║  │  [FILE]  welcome.txt (32 Б)      │ │ Содержимое:                        │ ║\n");
+            emit_print_str_lit("║  │  [FILE]  desktop.ini (скрытый)   │ │  \"Welcome to RQWos on              │ ║\n");
+            emit_print_str_lit("║  │                                  │ │   GrassGreen Bare-Metal!\"          │ ║\n");
+            emit_print_str_lit("║  └──────────────────────────────────┘ └────────────────────────────────────┘ ║\n");
+            emit_print_str_lit("║                                                                              ║\n");
+            emit_print_str_lit("║  Для навигации в консоли используйте команды: cd, ls, cat                    ║\n");
+            emit_print_str_lit("║                                                                              ║\n");
+            size_t jmp_dt_body_done2 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // Tab 3 Body
+            size_t pos_dt_body3 = bin_data.size();
+            bin_data[jne_dt_body3 + 1] = (uint8_t)(pos_dt_body3 - (jne_dt_body3 + 2));
+
+            emit_print_str_lit("║                                                                              ║\n");
+            emit_print_str_lit("║  Аппаратный монитор железа в реальном времени:                               ║\n");
+            emit_print_str_lit("║                                                                              ║\n");
+            emit_print_str_lit("║  ЦПУ Вендор:    AuthenticAMD / GenuineIntel                                  ║\n");
+            emit_print_str_lit("║  ЦПУ Модель:    QEMU Virtual CPU 2.5+                                        ║\n");
+            emit_print_str_lit("║  Ядра / Потоки: 1 ядро / 1 поток (Базовая частота: 2900 МГц)                 ║\n");
+            emit_print_str_lit("║  Кэш L1/L2/L3:  256 КБ / 2048 КБ / 16384 КБ                                  ║\n");
+            emit_print_str_lit("║  Всего ОЗУ:     128 МБ (DIMM DDR4 3200 МГц)                                  ║\n");
+            emit_print_str_lit("║  Свободно ОЗУ:  124 МБ                                                       ║\n");
+            emit_print_str_lit("║  Материнская:   QEMU Standard PC (i440FX)                                    ║\n");
+            emit_print_str_lit("║  Версия BIOS:   SeaBIOS (04/01/2014)                                         ║\n");
+            emit_print_str_lit("║  Видеоадаптер:  QEMU Standard VGA (128 МБ VRAM)                              ║\n");
+            emit_print_str_lit("║  Сетевой чип:   Intel 82540EM Gigabit Ethernet (10.0.2.15)                   ║\n");
+            emit_print_str_lit("║                                                                              ║\n");
+
+            size_t pos_dt_body_done = bin_data.size();
+            bin_data[jmp_dt_body_done + 1] = (uint8_t)(pos_dt_body_done - (jmp_dt_body_done + 2));
+            bin_data[jmp_dt_body_done2 + 1] = (uint8_t)(pos_dt_body_done - (jmp_dt_body_done2 + 2));
+
+            // Line 23: Bottom border
+            emit_print_str_lit("╚══════════════════════════════════════════════════════════════════════════════╝\n");
+
+            // Line 24: Status bar
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x70); // Black on Gray
+            emit_print_str_lit(" [Tab/1,2,3]: Вкладки | [ESC]: Выход в консоль | [R]: Перезагрузка | [P]: Выкл ");
+
+            // Move cursor to bottom right
+            append_u8(bin_data, 0xBB); append_u32(bin_data, 3998);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_update_cursor - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+            // Event Loop
+            size_t loop_dt_event = bin_data.size();
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_read_char - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+            append_u8(bin_data, 0x3C); append_u8(bin_data, '1');
+            size_t jne_dt_k2 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, 1);
+            append_u8(bin_data, 0xE9);
+            size_t jmp_dt_re1 = bin_data.size(); append_u32(bin_data, 0);
+
+            size_t pos_dt_k2 = bin_data.size();
+            bin_data[jne_dt_k2 + 1] = (uint8_t)(pos_dt_k2 - (jne_dt_k2 + 2));
+            append_u8(bin_data, 0x3C); append_u8(bin_data, '2');
+            size_t jne_dt_k3 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, 2);
+            append_u8(bin_data, 0xE9);
+            size_t jmp_dt_re2 = bin_data.size(); append_u32(bin_data, 0);
+
+            size_t pos_dt_k3 = bin_data.size();
+            bin_data[jne_dt_k3 + 1] = (uint8_t)(pos_dt_k3 - (jne_dt_k3 + 2));
+            append_u8(bin_data, 0x3C); append_u8(bin_data, '3');
+            size_t jne_dt_ktab = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, 3);
+            append_u8(bin_data, 0xE9);
+            size_t jmp_dt_re3 = bin_data.size(); append_u32(bin_data, 0);
+
+            size_t pos_dt_ktab = bin_data.size();
+            bin_data[jne_dt_ktab + 1] = (uint8_t)(pos_dt_ktab - (jne_dt_ktab + 2));
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x09); // Tab
+            size_t jne_dt_kr = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xFE); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); // inc [0x00091380]
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x00091380); append_u8(bin_data, 3);
+            size_t jbe_dt_tab_ok = bin_data.size(); append_u8(bin_data, 0x76); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, 1);
+            size_t pos_dt_tab_ok = bin_data.size();
+            bin_data[jbe_dt_tab_ok + 1] = (uint8_t)(pos_dt_tab_ok - (jbe_dt_tab_ok + 2));
+            append_u8(bin_data, 0xE9);
+            size_t jmp_dt_re4 = bin_data.size(); append_u32(bin_data, 0);
+
+            size_t pos_dt_kr = bin_data.size();
+            bin_data[jne_dt_kr + 1] = (uint8_t)(pos_dt_kr - (jne_dt_kr + 2));
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 'r');
+            size_t jne_dt_kR = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_reboot - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+            size_t pos_dt_kR = bin_data.size();
+            bin_data[jne_dt_kR + 1] = (uint8_t)(pos_dt_kR - (jne_dt_kR + 2));
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 'R');
+            size_t jne_dt_kp = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_reboot - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+            size_t pos_dt_kp = bin_data.size();
+            bin_data[jne_dt_kp + 1] = (uint8_t)(pos_dt_kp - (jne_dt_kp + 2));
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 'p');
+            size_t jne_dt_kP = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_poweroff - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+            size_t pos_dt_kP = bin_data.size();
+            bin_data[jne_dt_kP + 1] = (uint8_t)(pos_dt_kP - (jne_dt_kP + 2));
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 'P');
+            size_t jne_dt_kesc = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_poweroff - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+            size_t pos_dt_kesc = bin_data.size();
+            bin_data[jne_dt_kesc + 1] = (uint8_t)(pos_dt_kesc - (jne_dt_kesc + 2));
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x1B); // ESC
+            size_t jne_dt_loop = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            // Exit Desktop: Clear screen, restore color, print resume notice
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_clear - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0A);
+            emit_print_str_lit("[VD+] Возврат в командную строку RQWos.\n");
+            append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E); append_u8(bin_data, 0x5A);
+            append_u8(bin_data, 0x59); append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
+            append_u8(bin_data, 0xC3); // ret
+
+            size_t pos_dt_loop = bin_data.size();
+            bin_data[jne_dt_loop + 1] = (uint8_t)(pos_dt_loop - (jne_dt_loop + 2));
+            // Loop back to wait for key
+            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(loop_dt_event - (bin_data.size() + 1)));
+
+            // Fixup rel32 jumps back to loop_desktop_redraw
+            write_u32_le(bin_data, jmp_dt_re1, (uint32_t)((int32_t)loop_desktop_redraw - (int32_t)(jmp_dt_re1 + 4)));
+            write_u32_le(bin_data, jmp_dt_re2, (uint32_t)((int32_t)loop_desktop_redraw - (int32_t)(jmp_dt_re2 + 4)));
+            write_u32_le(bin_data, jmp_dt_re3, (uint32_t)((int32_t)loop_desktop_redraw - (int32_t)(jmp_dt_re3 + 4)));
+            write_u32_le(bin_data, jmp_dt_re4, (uint32_t)((int32_t)loop_desktop_redraw - (int32_t)(jmp_dt_re4 + 4)));
+
+            // 8.22. Helper: helper_bm_exec (ESI = command string)
+            uint32_t addr_bm_exec = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x53); append_u8(bin_data, 0x51);
+            append_u8(bin_data, 0x52); append_u8(bin_data, 0x56); append_u8(bin_data, 0x57);
+
+            // Skip leading spaces
+            size_t loop_bm_sp = bin_data.size();
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3E); append_u8(bin_data, ' ');
+            size_t jne_bm_nonsp = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x46); // inc esi
+            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(loop_bm_sp - (bin_data.size() + 1)));
+
+            size_t pos_bm_nonsp = bin_data.size();
+            bin_data[jne_bm_nonsp + 1] = (uint8_t)(pos_bm_nonsp - (jne_bm_nonsp + 2));
+
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3E); append_u8(bin_data, 0);
+            size_t jz_bm_ok = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            // 1. Check "help"
+            append_u8(bin_data, 0x56);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xF0); // mov eax, esi
+            uint32_t s_help = emit_inline_str("help");
+            append_u8(bin_data, 0xBB); append_u32(bin_data, s_help);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_strcmp - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0);
+            append_u8(bin_data, 0x5E);
+            size_t jz_bm_chk_ls = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0E); // Yellow
+            emit_print_str_lit("Команды системы RQWos (GrassGreen Baremetal v4.3.0):\n");
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0A); // Green
+            emit_print_str_lit("  ls [-a]     - Список файлов и папок в директории\n");
+            emit_print_str_lit("  cd <папка>  - Перейти в папку (напр.: cd system, cd .., cd /)\n");
+            emit_print_str_lit("  pwd         - Показать текущую рабочую директорию\n");
+            emit_print_str_lit("  cat <файл>  - Просмотреть содержимое файла\n");
+            emit_print_str_lit("  disp        - Диспетчер памяти и опрос железа\n");
+            emit_print_str_lit("  gui / vd    - Запуск графического интерфейса VD+ Desktop\n");
+            emit_print_str_lit("  clear       - Очистить экран (сохраняя приветствие)\n");
+            emit_print_str_lit("  reboot      - Мгновенная перезагрузка компьютера\n");
+            emit_print_str_lit("  poweroff    - Выключение питания машины\n");
+            size_t jmp_bm_ok1 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // 2. Check "ls"
+            size_t pos_bm_chk_ls = bin_data.size();
+            bin_data[jz_bm_chk_ls + 1] = (uint8_t)(pos_bm_chk_ls - (jz_bm_chk_ls + 2));
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3E); append_u8(bin_data, 'l');
+            size_t jne_bm_chk_cd = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x7E); append_u8(bin_data, 1); append_u8(bin_data, 's');
+            size_t jne_bm_chk_cd2 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x7E); append_u8(bin_data, 2); append_u8(bin_data, 0);
+            size_t je_bm_do_ls = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x7E); append_u8(bin_data, 2); append_u8(bin_data, ' ');
+            size_t jne_bm_chk_cd3 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            // ls with args
+            append_u8(bin_data, 0x8D); append_u8(bin_data, 0x46); append_u8(bin_data, 3); // lea eax, [esi + 3]
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_vfs_ls - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            size_t jmp_bm_ok2 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            size_t pos_bm_do_ls = bin_data.size();
+            bin_data[je_bm_do_ls + 1] = (uint8_t)(pos_bm_do_ls - (je_bm_do_ls + 2));
+            append_u8(bin_data, 0x31); append_u8(bin_data, 0xC0); // eax = 0
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_vfs_ls - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            size_t jmp_bm_ok3 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // 3. Check "cd"
+            size_t pos_bm_chk_cd = bin_data.size();
+            bin_data[jne_bm_chk_cd + 1] = (uint8_t)(pos_bm_chk_cd - (jne_bm_chk_cd + 2));
+            bin_data[jne_bm_chk_cd2 + 1] = (uint8_t)(pos_bm_chk_cd - (jne_bm_chk_cd2 + 2));
+            bin_data[jne_bm_chk_cd3 + 1] = (uint8_t)(pos_bm_chk_cd - (jne_bm_chk_cd3 + 2));
+
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3E); append_u8(bin_data, 'c');
+            size_t jne_bm_chk_pwd = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x7E); append_u8(bin_data, 1); append_u8(bin_data, 'd');
+            size_t jne_bm_chk_pwd2 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x7E); append_u8(bin_data, 2); append_u8(bin_data, 0);
+            size_t je_bm_do_cd_up = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x7E); append_u8(bin_data, 2); append_u8(bin_data, ' ');
+            size_t jne_bm_chk_pwd3 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            // cd <arg>
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xC6); append_u8(bin_data, 3); // add esi, 3
+            size_t loop_cd_arg_sp = bin_data.size();
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3E); append_u8(bin_data, ' ');
+            size_t jne_cd_arg_ready = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x46);
+            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(loop_cd_arg_sp - (bin_data.size() + 1)));
+
+            size_t pos_cd_arg_ready = bin_data.size();
+            bin_data[jne_cd_arg_ready + 1] = (uint8_t)(pos_cd_arg_ready - (jne_cd_arg_ready + 2));
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_vfs_cd - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            size_t jmp_bm_ok4 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            size_t pos_bm_do_cd_up = bin_data.size();
+            bin_data[je_bm_do_cd_up + 1] = (uint8_t)(pos_bm_do_cd_up - (je_bm_do_cd_up + 2));
+            uint32_t s_dotdot2 = emit_inline_str("..");
+            append_u8(bin_data, 0xBE); append_u32(bin_data, s_dotdot2);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_vfs_cd - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            size_t jmp_bm_ok5 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // 4. Check "pwd"
+            size_t pos_bm_chk_pwd = bin_data.size();
+            bin_data[jne_bm_chk_pwd + 1] = (uint8_t)(pos_bm_chk_pwd - (jne_bm_chk_pwd + 2));
+            bin_data[jne_bm_chk_pwd2 + 1] = (uint8_t)(pos_bm_chk_pwd - (jne_bm_chk_pwd2 + 2));
+            bin_data[jne_bm_chk_pwd3 + 1] = (uint8_t)(pos_bm_chk_pwd - (jne_bm_chk_pwd3 + 2));
+
+            append_u8(bin_data, 0x56);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xF0);
+            uint32_t s_pwd = emit_inline_str("pwd");
+            append_u8(bin_data, 0xBB); append_u32(bin_data, s_pwd);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_strcmp - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0);
+            append_u8(bin_data, 0x5E);
+            size_t jz_bm_chk_cat = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_vfs_pwd - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            size_t jmp_bm_ok6 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // 5. Check "cat"
+            size_t pos_bm_chk_cat = bin_data.size();
+            bin_data[jz_bm_chk_cat + 1] = (uint8_t)(pos_bm_chk_cat - (jz_bm_chk_cat + 2));
+
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3E); append_u8(bin_data, 'c');
+            size_t jne_bm_chk_disp = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x7E); append_u8(bin_data, 1); append_u8(bin_data, 'a');
+            size_t jne_bm_chk_disp2 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x7E); append_u8(bin_data, 2); append_u8(bin_data, 't');
+            size_t jne_bm_chk_disp3 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x7E); append_u8(bin_data, 3); append_u8(bin_data, ' ');
+            size_t jne_bm_chk_disp4 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xC6); append_u8(bin_data, 4); // add esi, 4
+            size_t loop_cat_arg_sp = bin_data.size();
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3E); append_u8(bin_data, ' ');
+            size_t jne_cat_arg_ready = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x46);
+            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(loop_cat_arg_sp - (bin_data.size() + 1)));
+
+            size_t pos_cat_arg_ready = bin_data.size();
+            bin_data[jne_cat_arg_ready + 1] = (uint8_t)(pos_cat_arg_ready - (jne_cat_arg_ready + 2));
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_vfs_cat - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            size_t jmp_bm_ok7 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // 6. Check "disp"
+            size_t pos_bm_chk_disp = bin_data.size();
+            bin_data[jne_bm_chk_disp + 1] = (uint8_t)(pos_bm_chk_disp - (jne_bm_chk_disp + 2));
+            bin_data[jne_bm_chk_disp2 + 1] = (uint8_t)(pos_bm_chk_disp - (jne_bm_chk_disp2 + 2));
+            bin_data[jne_bm_chk_disp3 + 1] = (uint8_t)(pos_bm_chk_disp - (jne_bm_chk_disp3 + 2));
+            bin_data[jne_bm_chk_disp4 + 1] = (uint8_t)(pos_bm_chk_disp - (jne_bm_chk_disp4 + 2));
+
+            append_u8(bin_data, 0x56);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xF0);
+            uint32_t s_disp = emit_inline_str("disp");
+            append_u8(bin_data, 0xBB); append_u32(bin_data, s_disp);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_strcmp - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0);
+            append_u8(bin_data, 0x5E);
+            size_t jz_bm_chk_gui = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0A);
+            emit_print_str_lit("Всего ОЗУ:  ");
+            append_u8(bin_data, 0xA1); append_u32(bin_data, 0x00091020);
+            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_print_num - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            emit_print_str_lit(" МБ (3200 МГц DIMM)\nЗанято ОЗУ: ");
+            append_u8(bin_data, 0xA1); append_u32(bin_data, 0x00091024);
+            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_print_num - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            emit_print_str_lit(" МБ | Кэш: 16 МБ\nСвободно:   ");
+            append_u8(bin_data, 0xA1); append_u32(bin_data, 0x00091028);
+            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_print_num - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            emit_print_str_lit(" МБ\nПлата:      ");
+            append_u8(bin_data, 0xBE); append_u32(bin_data, 0x00091090);
+            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_print_string - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            emit_print_str_lit(" ");
+            append_u8(bin_data, 0xBE); append_u32(bin_data, 0x000910A0);
+            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_print_string - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            emit_print_str_lit("\nBIOS:       ");
+            append_u8(bin_data, 0xBE); append_u32(bin_data, 0x00091080);
+            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_print_string - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            emit_print_str_lit(" (");
+            append_u8(bin_data, 0xBE); append_u32(bin_data, 0x000910C0);
+            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_print_string - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            emit_print_str_lit(")\nЦПУ:        ");
+            append_u8(bin_data, 0xBE); append_u32(bin_data, 0x00091030);
+            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_print_string - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            emit_print_str_lit(" (");
+            append_u8(bin_data, 0xBE); append_u32(bin_data, 0x00091040);
+            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_print_string - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            emit_print_str_lit(")\nЯдер/поток: 1 / 1 | 2900 МГц (18% 42 C)\nКэш L1/2/3: 256 КБ / 2048 КБ / 16384 КБ\nВиртуал.:   Включено\nДиск:       QEMU HARDDISK [SSD] 512 ГБ\nСеть:       Intel 82540EM Gigabit Ethernet (10.0.2.15)\nГПУ:        QEMU Standard VGA | VRAM: 128 МБ | 45 C\n");
+            size_t jmp_bm_ok8 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // 7. Check "gui" or "vd"
+            size_t pos_bm_chk_gui = bin_data.size();
+            bin_data[jz_bm_chk_gui + 1] = (uint8_t)(pos_bm_chk_gui - (jz_bm_chk_gui + 2));
+
+            append_u8(bin_data, 0x56);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xF0);
+            uint32_t s_gui = emit_inline_str("gui");
+            append_u8(bin_data, 0xBB); append_u32(bin_data, s_gui);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_strcmp - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0);
+            append_u8(bin_data, 0x5E);
+            size_t jnz_bm_do_gui = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            append_u8(bin_data, 0x56);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xF0);
+            uint32_t s_vd = emit_inline_str("vd");
+            append_u8(bin_data, 0xBB); append_u32(bin_data, s_vd);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_strcmp - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0);
+            append_u8(bin_data, 0x5E);
+            size_t jz_bm_chk_clear = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            size_t pos_bm_do_gui = bin_data.size();
+            bin_data[jnz_bm_do_gui + 1] = (uint8_t)(pos_bm_do_gui - (jnz_bm_do_gui + 2));
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_vd_desktop - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            size_t jmp_bm_ok9 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // 8. Check "clear" or "cls"
+            size_t pos_bm_chk_clear = bin_data.size();
+            bin_data[jz_bm_chk_clear + 1] = (uint8_t)(pos_bm_chk_clear - (jz_bm_chk_clear + 2));
+
+            append_u8(bin_data, 0x56);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xF0);
+            uint32_t s_clear = emit_inline_str("clear");
+            append_u8(bin_data, 0xBB); append_u32(bin_data, s_clear);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_strcmp - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0);
+            append_u8(bin_data, 0x5E);
+            size_t jnz_bm_do_clear = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            append_u8(bin_data, 0x56);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xF0);
+            uint32_t s_cls = emit_inline_str("cls");
+            append_u8(bin_data, 0xBB); append_u32(bin_data, s_cls);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_strcmp - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0);
+            append_u8(bin_data, 0x5E);
+            size_t jz_bm_chk_rb = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            size_t pos_bm_do_clear = bin_data.size();
+            bin_data[jnz_bm_do_clear + 1] = (uint8_t)(pos_bm_do_clear - (jnz_bm_do_clear + 2));
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_clear - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            size_t jmp_bm_ok10 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // 9. Check "reboot"
+            size_t pos_bm_chk_rb = bin_data.size();
+            bin_data[jz_bm_chk_rb + 1] = (uint8_t)(pos_bm_chk_rb - (jz_bm_chk_rb + 2));
+
+            append_u8(bin_data, 0x56);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xF0);
+            uint32_t s_reboot = emit_inline_str("reboot");
+            append_u8(bin_data, 0xBB); append_u32(bin_data, s_reboot);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_strcmp - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0);
+            append_u8(bin_data, 0x5E);
+            size_t jz_bm_chk_po = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_reboot - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+            // 10. Check "poweroff"
+            size_t pos_bm_chk_po = bin_data.size();
+            bin_data[jz_bm_chk_po + 1] = (uint8_t)(pos_bm_chk_po - (jz_bm_chk_po + 2));
+
+            append_u8(bin_data, 0x56);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xF0);
+            uint32_t s_poweroff = emit_inline_str("poweroff");
+            append_u8(bin_data, 0xBB); append_u32(bin_data, s_poweroff);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_strcmp - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0);
+            append_u8(bin_data, 0x5E);
+            size_t jz_bm_unknown = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_poweroff - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+            // Unknown command
+            size_t pos_bm_unknown = bin_data.size();
+            bin_data[jz_bm_unknown + 1] = (uint8_t)(pos_bm_unknown - (jz_bm_unknown + 2));
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0C); // Red
+            emit_print_str_lit("Команда не найдена: ");
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_print_string - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            emit_print_str_lit(" (введите 'help' для списка команд)\n");
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0A); // Green
+            append_u8(bin_data, 0x31); append_u8(bin_data, 0xC0); // eax = 0
+            size_t jmp_bm_final_ret = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            // Command succeeded
+            size_t pos_bm_ok = bin_data.size();
+            bin_data[jz_bm_ok + 1] = (uint8_t)(pos_bm_ok - (jz_bm_ok + 2));
+            bin_data[jmp_bm_ok1 + 1] = (uint8_t)(pos_bm_ok - (jmp_bm_ok1 + 2));
+            bin_data[jmp_bm_ok2 + 1] = (uint8_t)(pos_bm_ok - (jmp_bm_ok2 + 2));
+            bin_data[jmp_bm_ok3 + 1] = (uint8_t)(pos_bm_ok - (jmp_bm_ok3 + 2));
+            bin_data[jmp_bm_ok4 + 1] = (uint8_t)(pos_bm_ok - (jmp_bm_ok4 + 2));
+            bin_data[jmp_bm_ok5 + 1] = (uint8_t)(pos_bm_ok - (jmp_bm_ok5 + 2));
+            bin_data[jmp_bm_ok6 + 1] = (uint8_t)(pos_bm_ok - (jmp_bm_ok6 + 2));
+            bin_data[jmp_bm_ok7 + 1] = (uint8_t)(pos_bm_ok - (jmp_bm_ok7 + 2));
+            bin_data[jmp_bm_ok8 + 1] = (uint8_t)(pos_bm_ok - (jmp_bm_ok8 + 2));
+            bin_data[jmp_bm_ok9 + 1] = (uint8_t)(pos_bm_ok - (jmp_bm_ok9 + 2));
+            bin_data[jmp_bm_ok10 + 1] = (uint8_t)(pos_bm_ok - (jmp_bm_ok10 + 2));
+            append_u8(bin_data, 0xB8); append_u32(bin_data, 1); // eax = 1
+
+            size_t pos_bm_final_ret = bin_data.size();
+            bin_data[jmp_bm_final_ret + 1] = (uint8_t)(pos_bm_final_ret - (jmp_bm_final_ret + 2));
+
+            append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E); append_u8(bin_data, 0x5A);
+            append_u8(bin_data, 0x59); append_u8(bin_data, 0x5B);
+            append_u8(bin_data, 0xC3); // ret
+
+
             // Fixup jump over helpers
             uint32_t after_helpers_offset = (uint32_t)bin_data.size();
             uint32_t rel_helpers = after_helpers_offset - (uint32_t)(jmp_helpers_fixup + 4);
             write_u32_le(bin_data, jmp_helpers_fixup, rel_helpers);
 
-            // Fixup initial font load and cursor calls
+            // Fixup initial font load, ramfs and cursor calls
             write_u32_le(bin_data, fixup_font_addr, addr_cyrillic_font);
+            write_u32_le(bin_data, fixup_default_ramfstr_mem_addr, addr_default_ramfs);
             write_u32_le(bin_data, fixup_init_cursor, addr_update_cursor - (KERNEL_LOAD_ADDR + (uint32_t)fixup_init_cursor + 4));
 
             // Execute inline ASM if present
@@ -1217,7 +2432,7 @@ namespace GrassBoot {
 
             std::unordered_map<uint32_t, size_t> bc_to_mc;
             std::unordered_map<std::string, uint32_t> var_slots;
-            uint32_t next_var_addr = 0x00094000;
+            uint32_t next_var_addr = 0x00098000;
 
             size_t ip = 0;
             auto readU8 = [&]() -> uint8_t {
@@ -1463,40 +2678,8 @@ namespace GrassBoot {
                             append_u8(bin_data, 0x68); append_u32(bin_data, 0x00092000); // push 0x00092000
                         } else if (fn == "clear" || fn == "cls") {
                             for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
-                            // 1. EDI = [0x00091014] (boundary)
-                            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x00091014);
-                            append_u8(bin_data, 0x81); append_u8(bin_data, 0xFF); append_u32(bin_data, 4000);
-                            size_t jb_b_ok = bin_data.size();
-                            append_u8(bin_data, 0x72); append_u8(bin_data, 0x00);
-                            append_u8(bin_data, 0xBF); append_u32(bin_data, 160);
-                            bin_data[jb_b_ok + 1] = (uint8_t)(bin_data.size() - (jb_b_ok + 2));
-
-                            // 2. ECX = (4000 - EDI) / 4
-                            append_u8(bin_data, 0xB9); append_u32(bin_data, 4000);
-                            append_u8(bin_data, 0x29); append_u8(bin_data, 0xF9); // sub ecx, edi
-                            size_t jbe_c_none = bin_data.size();
-                            append_u8(bin_data, 0x76); append_u8(bin_data, 0x00); // jbe
-                            append_u8(bin_data, 0xC1); append_u8(bin_data, 0xE9); append_u8(bin_data, 2); // shr ecx, 2
-
-                            // 3. Clear VGA memory from 0x000B8000 + EDI
-                            append_u8(bin_data, 0x81); append_u8(bin_data, 0xC7); append_u32(bin_data, 0x000B8000);
-                            append_u8(bin_data, 0xFC); // cld
-                            append_u8(bin_data, 0xB8); append_u32(bin_data, 0x07200720); // space
-                            append_u8(bin_data, 0xF3); append_u8(bin_data, 0xAB); // rep stosd
-                            bin_data[jbe_c_none + 1] = (uint8_t)(bin_data.size() - (jbe_c_none + 2));
-
-                            // 4. Cursor to boundary
-                            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091014);
-                            append_u8(bin_data, 0x81); append_u8(bin_data, 0xFB); append_u32(bin_data, 4000);
-                            size_t jb_c_ok = bin_data.size();
-                            append_u8(bin_data, 0x72); append_u8(bin_data, 0x00);
-                            append_u8(bin_data, 0xBB); append_u32(bin_data, 160);
-                            bin_data[jb_c_ok + 1] = (uint8_t)(bin_data.size() - (jb_c_ok + 2));
-                            append_u8(bin_data, 0x89); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091000);
                             append_u8(bin_data, 0xE8);
-                            append_u32(bin_data, addr_update_cursor - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-
-                            // 5. push 1
+                            append_u32(bin_data, addr_clear - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
                             append_u8(bin_data, 0x6A); append_u8(bin_data, 1);
                         } else if (fn == "clear_all" || fn == "cls_all") {
                             for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
@@ -1728,22 +2911,13 @@ namespace GrassBoot {
     append_u8(bin_data, 0x50);
 } else if (fn == "reboot" || fn == "hw_reboot") {
     for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
-    append_u8(bin_data, 0xB0); append_u8(bin_data, 0xFE);
-    append_u8(bin_data, 0xE6); append_u8(bin_data, 0x64);
-    append_u8(bin_data, 0xF4);
+    append_u8(bin_data, 0xE8);
+    append_u32(bin_data, addr_reboot - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
     append_u8(bin_data, 0x6A); append_u8(bin_data, 1);
 } else if (fn == "poweroff") {
     for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
-    // ACPI shutdown ports (QEMU 0x604, Bochs 0xB004, VirtualBox 0x4004)
-    append_u8(bin_data, 0x66); append_u8(bin_data, 0xB8); append_u16(bin_data, 0x2000);
-    append_u8(bin_data, 0xBA); append_u16(bin_data, 0x0604); append_u16(bin_data, 0x0000);
-    append_u8(bin_data, 0x66); append_u8(bin_data, 0xEF);
-    append_u8(bin_data, 0xBA); append_u16(bin_data, 0xB004); append_u16(bin_data, 0x0000);
-    append_u8(bin_data, 0x66); append_u8(bin_data, 0xEF);
-    append_u8(bin_data, 0x66); append_u8(bin_data, 0xB8); append_u16(bin_data, 0x3400);
-    append_u8(bin_data, 0xBA); append_u16(bin_data, 0x4004); append_u16(bin_data, 0x0000);
-    append_u8(bin_data, 0x66); append_u8(bin_data, 0xEF);
-    append_u8(bin_data, 0xF4);
+    append_u8(bin_data, 0xE8);
+    append_u32(bin_data, addr_poweroff - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
     append_u8(bin_data, 0x6A); append_u8(bin_data, 1);
 } else if (fn == "color") {
     if (argc >= 2) {
@@ -1770,9 +2944,83 @@ namespace GrassBoot {
 } else if (fn == "pwd") {
     for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
     append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091300); // push static root "/"
-} else if (fn == "ls" || fn == "virtual_struct" || fn == "physical_struct" || fn == "cd" ||
-           fn == "copy" || fn == "move" || fn == "delete" || fn == "cr_folder" || fn == "cr_file" ||
-           fn == "not_show" || fn == "specSign_show") {
+} else if (fn == "ls") {
+    if (argc >= 1) {
+        append_u8(bin_data, 0x58); // pop eax (flags/arg)
+        for (int i = 1; i < argc; ++i) append_u8(bin_data, 0x58);
+    } else {
+        append_u8(bin_data, 0x31); append_u8(bin_data, 0xC0); // xor eax, eax
+    }
+    append_u8(bin_data, 0xE8);
+    append_u32(bin_data, addr_vfs_ls - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+    append_u8(bin_data, 0x6A); append_u8(bin_data, 1);
+} else if (fn == "cd") {
+    if (argc >= 1) {
+        append_u8(bin_data, 0x5E); // pop esi (path)
+        for (int i = 1; i < argc; ++i) append_u8(bin_data, 0x58);
+    } else {
+        uint32_t s_dd = emit_inline_str("..");
+        append_u8(bin_data, 0xBE); append_u32(bin_data, s_dd);
+    }
+    append_u8(bin_data, 0xE8);
+    append_u32(bin_data, addr_vfs_cd - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+    append_u8(bin_data, 0x6A); append_u8(bin_data, 1);
+} else if (fn == "cat" || fn == "read_file") {
+    if (argc >= 1) {
+        append_u8(bin_data, 0x5E); // pop esi (filename)
+        for (int i = 1; i < argc; ++i) append_u8(bin_data, 0x58);
+    } else {
+        append_u8(bin_data, 0x31); append_u8(bin_data, 0xF6);
+    }
+    append_u8(bin_data, 0xE8);
+    append_u32(bin_data, addr_vfs_cat - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+    append_u8(bin_data, 0x6A); append_u8(bin_data, 1);
+} else if (fn == "cr_folder") {
+    if (argc >= 1) {
+        append_u8(bin_data, 0x5E); // pop esi (name)
+        for (int i = 1; i < argc; ++i) append_u8(bin_data, 0x58);
+    } else {
+        append_u8(bin_data, 0x31); append_u8(bin_data, 0xF6);
+    }
+    append_u8(bin_data, 0xE8);
+    append_u32(bin_data, addr_vfs_cr_folder - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+    append_u8(bin_data, 0x6A); append_u8(bin_data, 1);
+} else if (fn == "cr_file") {
+    if (argc >= 2) {
+        append_u8(bin_data, 0x5B); // pop ebx (content)
+        append_u8(bin_data, 0x5E); // pop esi (name)
+        for (int i = 2; i < argc; ++i) append_u8(bin_data, 0x58);
+    } else if (argc == 1) {
+        append_u8(bin_data, 0x5E);
+        append_u8(bin_data, 0x31); append_u8(bin_data, 0xDB);
+    } else {
+        append_u8(bin_data, 0x31); append_u8(bin_data, 0xF6);
+        append_u8(bin_data, 0x31); append_u8(bin_data, 0xDB);
+    }
+    append_u8(bin_data, 0xE8);
+    append_u32(bin_data, addr_vfs_cr_file - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+    append_u8(bin_data, 0x6A); append_u8(bin_data, 1);
+} else if (fn == "virtual_struct" || fn == "physical_struct") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091300); append_u8(bin_data, '/');
+    append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091301); append_u8(bin_data, 0);
+    append_u8(bin_data, 0x6A); append_u8(bin_data, 1);
+} else if (fn == "bm_exec") {
+    if (argc >= 1) {
+        append_u8(bin_data, 0x5E); // pop esi (command line)
+        for (int i = 1; i < argc; ++i) append_u8(bin_data, 0x58);
+    } else {
+        append_u8(bin_data, 0x31); append_u8(bin_data, 0xF6);
+    }
+    append_u8(bin_data, 0xE8);
+    append_u32(bin_data, addr_bm_exec - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+    append_u8(bin_data, 0x50); // push eax
+} else if (fn == "gui" || fn == "vd" || fn == "vd_desktop") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xE8);
+    append_u32(bin_data, addr_vd_desktop - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+    append_u8(bin_data, 0x6A); append_u8(bin_data, 1);
+} else if (fn == "copy" || fn == "move" || fn == "delete" || fn == "not_show" || fn == "specSign_show") {
     for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
     append_u8(bin_data, 0x6A); append_u8(bin_data, 1);
 } else if (fn == "use_utf" || fn == "use_locale" || fn == "set_layout" || fn == "kbd_set_layout") {

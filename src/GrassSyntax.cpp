@@ -443,7 +443,9 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
              fn == "ls" || fn == "pwd" || fn == "cd" || fn == "copy" || fn == "move" ||
              fn == "delete" || fn == "cr_folder" || fn == "cr_file" ||
              fn == "not_show" || fn == "specSign_show" ||
-             fn == "virtual_struct" || fn == "physical_struct") {
+             fn == "virtual_struct" || fn == "physical_struct" ||
+             fn == "bm_exec" || fn == "cat" || fn == "read_file" ||
+             fn == "gui" || fn == "vd" || fn == "vd_desktop") {
         requireLib("baremetal", "!baremetal!", fn + "()", line);
     }
 }
@@ -1106,6 +1108,9 @@ void BytecodeCompiler::parseStatement() {
             included_libs.insert("hardware");
         } else if (lib == "!baremetal!" || lib == "!bm!" || lib == "!kernel!" || lib == "!BareMetal!") {
             included_libs.insert("baremetal");
+        } else if (lib == "!vd+!" || lib == "!VD+!" || lib == "!vd!" || lib == "!VD!" || lib == "!gui!") {
+            included_libs.insert("vd");
+            included_libs.insert("baremetal");
         } else if (lib == "!mmio!" || lib == "!io!") {
             included_libs.insert("mmio");
         } else if (lib == "!database!" || lib == "!gdb!") {
@@ -1255,6 +1260,39 @@ void BytecodeCompiler::parseStatement() {
         match(TOK_SEMI);
         emitByte(OP_CONST_STR); emitString(path);
         emitByte(OP_CALL_BUILTIN); emitString("physical_struct"); emitByte(1); emitByte(OP_POP);
+        return;
+    }
+    if (peek().kind == TOK_IDENT && peek().text == "bm_exec") {
+        int bme_line = peek().line;
+        advance();
+        requireLib("baremetal", "!baremetal!", "bm_exec", bme_line);
+        match(TOK_LPAREN);
+        parseExpression();
+        match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("bm_exec"); emitByte(1); emitByte(OP_POP);
+        return;
+    }
+    if (peek().kind == TOK_IDENT && (peek().text == "cat" || peek().text == "read_file")) {
+        string cname = peek().text;
+        int cat_line = peek().line;
+        advance();
+        requireLib("baremetal", "!baremetal!", cname, cat_line);
+        match(TOK_LPAREN);
+        parseExpression();
+        match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("cat"); emitByte(1); emitByte(OP_POP);
+        return;
+    }
+    if (peek().kind == TOK_IDENT && (peek().text == "gui" || peek().text == "vd" || peek().text == "vd_desktop")) {
+        string gname = peek().text;
+        int gui_line = peek().line;
+        advance();
+        requireLib("baremetal", "!baremetal!", gname, gui_line);
+        if (match(TOK_LPAREN)) match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("gui"); emitByte(0); emitByte(OP_POP);
         return;
     }
     if (peek().kind == TOK_IDENT && peek().text == "reboot") {

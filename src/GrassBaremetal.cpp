@@ -564,4 +564,93 @@ namespace GrassBaremetal {
     void not_clear_off() {
         g_not_clear_active = false;
     }
+
+    // ── 8. High-Level Bare-Metal Command Executor & VD+ GUI Desktop ──
+    std::string cat(const std::string& path) {
+        return vfs_read_file(path);
+    }
+
+    void vd_desktop() {
+        clear();
+        std::cout << " [ GrassGreen VD+ Desktop Engine v4.3.0 | RQWos Core ] \n";
+        std::cout << "╔══════════════════════════════════════════════════════════════════════════════╗\n";
+        std::cout << "║  [* 1. СИСТЕМА *]       [ 2. ФАЙЛЫ ]       [ 3. ЖЕЛЕЗО ]                     ║\n";
+        std::cout << "╠══════════════════════════════════════════════════════════════════════════════╣\n";
+        std::cout << "║                                                                              ║\n";
+        std::cout << "║  Операционная система:  RQWos (GrassGreen Kernel v4.3.0)                     ║\n";
+        std::cout << "║  Графическая среда:     VD+ (Vector Display Plus TUI/GUI Engine)             ║\n";
+        std::cout << "║  Файловая система:      RamFS (Виртуальная структура активна)                ║\n";
+        std::cout << "║  Текущий путь:          " << vfs_pwd() << "\n";
+        std::cout << "║                                                                              ║\n";
+        std::cout << "║  [1] Система   [2] Файлы   [3] Железо   [ESC] Выход                          ║\n";
+        std::cout << "╚══════════════════════════════════════════════════════════════════════════════╝\n";
+        std::cout << "Нажмите любую клавишу для возврата в терминал...\n";
+        read_key();
+        clear();
+    }
+
+    bool bm_exec(const std::string& cmd) {
+        std::string trimmed = cmd;
+        while (!trimmed.empty() && (trimmed.front() == ' ' || trimmed.front() == '\t')) trimmed.erase(0, 1);
+        while (!trimmed.empty() && (trimmed.back() == ' ' || trimmed.back() == '\t' || trimmed.back() == '\r' || trimmed.back() == '\n')) trimmed.pop_back();
+        if (trimmed.empty()) return true;
+
+        if (trimmed == "help") {
+            std::cout << "Команды системы RQWos (GrassGreen Baremetal v4.3.0):\n";
+            std::cout << "  ls [-a]     - Список файлов и папок в директории\n";
+            std::cout << "  cd <папка>  - Перейти в папку (напр.: cd system, cd .., cd /)\n";
+            std::cout << "  pwd         - Показать текущую рабочую директорию\n";
+            std::cout << "  cat <файл>  - Просмотреть содержимое файла\n";
+            std::cout << "  disp        - Диспетчер памяти и опрос железа\n";
+            std::cout << "  gui / vd    - Запуск графического интерфейса VD+ Desktop\n";
+            std::cout << "  clear       - Очистить экран (сохраняя приветствие)\n";
+            std::cout << "  reboot      - Мгновенная перезагрузка компьютера\n";
+            std::cout << "  poweroff    - Выключение питания машины\n";
+            return true;
+        }
+        if (trimmed == "ls" || trimmed.rfind("ls ", 0) == 0) {
+            std::string flags = (trimmed.size() > 3) ? trimmed.substr(3) : "";
+            std::cout << vfs_ls(flags) << "\n";
+            return true;
+        }
+        if (trimmed == "cd" || trimmed.rfind("cd ", 0) == 0) {
+            std::string p = (trimmed.size() > 3) ? trimmed.substr(3) : "..";
+            vfs_cd(p);
+            return true;
+        }
+        if (trimmed == "pwd") {
+            std::cout << vfs_pwd() << "\n";
+            return true;
+        }
+        if (trimmed.rfind("cat ", 0) == 0 || trimmed.rfind("read ", 0) == 0) {
+            size_t sp = trimmed.find(' ');
+            std::string f = trimmed.substr(sp + 1);
+            std::string c = vfs_read_file(f);
+            if (!c.empty()) std::cout << c << "\n";
+            else std::cout << "cat: файл не найден: " << f << "\n";
+            return true;
+        }
+        if (trimmed == "disp") {
+            std::cout << "Диспетчер задач и опрос оборудования активен.\n";
+            return true;
+        }
+        if (trimmed == "gui" || trimmed == "vd" || trimmed == "desktop") {
+            vd_desktop();
+            return true;
+        }
+        if (trimmed == "clear" || trimmed == "cls") {
+            clear();
+            return true;
+        }
+        if (trimmed == "reboot") {
+            reboot();
+            return true;
+        }
+        if (trimmed == "poweroff") {
+            poweroff();
+            return true;
+        }
+        std::cout << "Команда не найдена: " << trimmed << " (введите 'help' для списка команд)\n";
+        return false;
+    }
 }
