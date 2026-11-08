@@ -2,6 +2,7 @@
 #include "GrassHAL.h"
 #include <filesystem>
 #include <sstream>
+#include <fstream>
 
 namespace fs = std::filesystem;
 
@@ -51,4 +52,44 @@ std::string GrassFsys::list(const std::string& path) {
         ss << entry.path().filename().string() << (entry.is_directory() ? "/" : "") << "\n";
     }
     return ss.str();
+}
+
+std::string GrassFsys::read(const std::string& path) {
+    if (GrassHAL::is_freestanding()) {
+        return GrassHAL::vfs_read(path);
+    }
+    std::ifstream f(path, std::ios::binary);
+    if (!f.is_open()) return "";
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+}
+
+bool GrassFsys::write(const std::string& path, const std::string& content) {
+    if (GrassHAL::is_freestanding()) {
+        return GrassHAL::vfs_write(path, content);
+    }
+    std::error_code ec;
+    auto parent = fs::path(path).parent_path();
+    if (!parent.empty()) fs::create_directories(parent, ec);
+    std::ofstream f(path, std::ios::binary);
+    if (!f.is_open()) return false;
+    f << content;
+    return true;
+}
+
+bool GrassFsys::exists(const std::string& path) {
+    if (GrassHAL::is_freestanding()) {
+        return GrassHAL::vfs_exists(path);
+    }
+    std::error_code ec;
+    return fs::exists(path, ec);
+}
+
+bool GrassFsys::remove(const std::string& path) {
+    if (GrassHAL::is_freestanding()) {
+        return GrassHAL::vfs_remove(path);
+    }
+    std::error_code ec;
+    return fs::remove_all(path, ec) > 0;
 }

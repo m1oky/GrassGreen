@@ -46,6 +46,7 @@ namespace GrassHAL {
     bool vfs_write(const std::string& path, const std::string& content);
     std::string vfs_read(const std::string& path);
     bool vfs_exists(const std::string& path);
+    bool vfs_remove(const std::string& path);
 
     // ── 5. Задачи и процессы (Task Table) ──
     int64_t proc_find(const std::string& name);

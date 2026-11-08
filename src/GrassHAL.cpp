@@ -183,6 +183,12 @@ namespace GrassHAL {
         return g_vfs_files.count(path) > 0 || g_vfs_dirs.count(path) > 0;
     }
 
+    bool vfs_remove(const std::string& path) {
+        g_vfs_files.erase(path);
+        g_vfs_dirs.erase(path);
+        return true;
+    }
+
     // ── Реализация Task Table ──
     int64_t proc_find(const std::string& name) {
         if (name == "init" || name == "system") return 1;

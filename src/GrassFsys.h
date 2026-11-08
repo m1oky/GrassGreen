@@ -11,6 +11,10 @@ public:
     static int64_t size(const std::string& path);
     static bool copy(const std::string& src, const std::string& dst);
     static std::string list(const std::string& path);
+    static std::string read(const std::string& path);
+    static bool write(const std::string& path, const std::string& content);
+    static bool exists(const std::string& path);
+    static bool remove(const std::string& path);
 };
 
 #endif // GRASS_FSYS_H

@@ -357,7 +357,7 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
     }
     // 12. Проверка библиотеки !fsys!
     else if (fn == "fs_mkdir" || fn == "fs_is_dir" || fn == "fs_size" ||
-             fn == "fs_copy"  || fn == "fs_list") {
+             fn == "fs_copy"  || fn == "fs_list" || fn == "fs_read" || fn == "fs_write" || fn == "fs_exists" || fn == "fs_remove") {
         requireLib("fsys", "!fsys!", fn + "()", line);
     }
     // 13. Проверка библиотеки !tg!

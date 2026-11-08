@@ -1,4 +1,5 @@
 #include "gui_engine.h"
+#include "GrassAudio.h"
 #include "GrassHAL.h"
 #include "GrassMMIO.h"
 #include <iostream>
@@ -1407,9 +1408,11 @@ using namespace std;
                         if (elem.type == "button") {
                             hit_button = true;
                             elem.is_pressed = true;
+                            GrassAudio::tone(950, 12, 25);
 
                             // Переключение вкладки (tab switch)
                             if (elem.has_tab_switch && !elem.target_tab_name.empty()) {
+                                GrassAudio::tone(640, 20, 35);
                                 switch_tab(elem.target_tab_name);
                                 InvalidateRect(hwnd, NULL, FALSE);
                                 return 0;

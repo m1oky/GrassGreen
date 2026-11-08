@@ -1345,6 +1345,18 @@ public:
                     else if (fn == "fs_list" && argc >= 1) {
                         push(GrassValue::Str(GrassFsys::list(args[0].toString())));
                     }
+                    else if (fn == "fs_read" && argc >= 1) {
+                        push(GrassValue::Str(GrassFsys::read(args[0].toString())));
+                    }
+                    else if (fn == "fs_write" && argc >= 2) {
+                        push(GrassValue::Num(GrassFsys::write(args[0].toString(), args[1].toString()) ? 1.0 : 0.0));
+                    }
+                    else if (fn == "fs_exists" && argc >= 1) {
+                        push(GrassValue::Num(GrassFsys::exists(args[0].toString()) ? 1.0 : 0.0));
+                    }
+                    else if (fn == "fs_remove" && argc >= 1) {
+                        push(GrassValue::Num(GrassFsys::remove(args[0].toString()) ? 1.0 : 0.0));
+                    }
 
                     // ===== БИБЛИОТЕКА !proc! =====
                     else if ((fn == "proc_find" || fn == "find") && argc >= 1) {
