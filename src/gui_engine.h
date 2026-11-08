@@ -60,6 +60,11 @@ struct UIElement {
     std::wstring text;         // Текст элемента
     int x = 0, y = 0;          // Координаты (window-ob)
     int orig_y = 0;            // Исходный Y для анимации сдвига (slide-up)
+    int orig_design_x = -1;
+    int orig_design_y = -1;
+    int orig_design_w = -1;
+    int orig_design_h = -1;
+    int orig_design_f_size = 15;
     int w = 160, h = 38;       // Размеры (size, size-top)
     int align = 0;             // 0 - нет, 1 - middle, 2 - left, 3 - right
     

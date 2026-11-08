@@ -1048,6 +1048,70 @@ using namespace std;
         }
     }
 
+        int base_design_w = 1140;
+    int base_design_h = 760;
+
+    void apply_responsive_scaling(int new_w, int new_h) {
+        if (new_w <= 0 || new_h <= 0) return;
+        if (base_design_w <= 0 || base_design_h <= 0) return;
+
+        float scale_x = (float)new_w / (float)base_design_w;
+        float scale_y = (float)new_h / (float)base_design_h;
+        float scale_font = min(scale_x, scale_y);
+
+        for (auto& elem : elements) {
+            if (elem.orig_design_w < 0) {
+                elem.orig_design_x = elem.x;
+                elem.orig_design_y = elem.y;
+                elem.orig_design_w = elem.w;
+                elem.orig_design_h = elem.h;
+                elem.orig_design_f_size = elem.f_size;
+            }
+
+            // 1. Full-width bars (e.g. top status bar)
+            if (elem.orig_design_w >= base_design_w - 30) {
+                elem.x = 0;
+                elem.w = new_w;
+                elem.y = 0;
+                elem.h = max(34, (int)(elem.orig_design_h * scale_y));
+                continue;
+            }
+
+            // 2. Right-anchored status elements in top bar (wifi, volume, battery, user, clock)
+            if (elem.orig_design_y < 45 && elem.orig_design_x > base_design_w - 450) {
+                int dist_from_right = base_design_w - elem.orig_design_x;
+                elem.x = new_w - dist_from_right;
+                elem.y = elem.orig_design_y;
+                elem.w = elem.orig_design_w;
+                elem.h = elem.orig_design_h;
+                continue;
+            }
+
+            // 3. Top-right toast notification
+            if (elem.orig_design_y < 120 && elem.orig_design_x > base_design_w - 450) {
+                int dist_from_right = base_design_w - elem.orig_design_x;
+                elem.x = new_w - dist_from_right - 20;
+                elem.y = (int)(elem.orig_design_y * scale_y);
+                continue;
+            }
+
+            // 4. Bottom floating dock (anchored to bottom center)
+            if (elem.orig_design_y >= 650) {
+                int dock_center_offset = elem.orig_design_x - (base_design_w / 2);
+                elem.x = (new_w / 2) + dock_center_offset;
+                elem.y = new_h - (base_design_h - elem.orig_design_y) - 16;
+                continue;
+            }
+
+            // 5. Main cards and general elements: proportional scaling
+            elem.x = (int)(elem.orig_design_x * scale_x);
+            elem.y = (int)(elem.orig_design_y * scale_y);
+            elem.w = (int)(elem.orig_design_w * scale_x);
+            elem.h = (int)(elem.orig_design_h * scale_y);
+            elem.f_size = max(11, (int)(elem.orig_design_f_size * scale_font));
+        }
+    }
+
     // --- Обработчик оконных сообщений Win32 ---
 
     LRESULT CALLBACK MainWndProc(HWND hwnd, UINT uMsg, WPARAM wp, LPARAM lp) {
@@ -1196,6 +1260,7 @@ using namespace std;
 
                     win_w = new_w;
                     win_h = new_h;
+                    apply_responsive_scaling(new_w, new_h);
 
                     for (auto& elem : elements) {
                         if (elem.align == 1 || (window_auto_center_elements && elem.align != 2 && elem.align != 3)) {
@@ -2239,8 +2304,13 @@ using namespace std;
             if (inline_arg.find(',') != string::npos) {
                 int w = 640, h = 480;
                 parse_two_args_fixed(inline_arg, w, h);
-                if (last_idx != -1) { elements[last_idx].w = w; elements[last_idx].h = h; }
-                else { win_w = w; win_h = h; }
+                if (last_idx != -1) {
+                    elements[last_idx].w = w; elements[last_idx].h = h;
+                    elements[last_idx].orig_design_w = w; elements[last_idx].orig_design_h = h;
+                } else {
+                    win_w = w; win_h = h;
+                    base_design_w = w; base_design_h = h;
+                }
             } else {
                 try {
                     int val = stoi(inline_arg);
@@ -2336,6 +2406,8 @@ using namespace std;
                 elements[last_idx].x = arg1;
                 elements[last_idx].y = arg2;
                 elements[last_idx].orig_y = arg2;
+                elements[last_idx].orig_design_x = arg1;
+                elements[last_idx].orig_design_y = arg2;
             }
         }
         else if (command == "middle" || command == "center") {
@@ -2698,6 +2770,13 @@ using namespace std;
 
         if (start_in_fullscreen) {
             ShowWindow(hwndMain, SW_MAXIMIZE);
+            RECT rc;
+            GetClientRect(hwndMain, &rc);
+            if (rc.right > 0 && rc.bottom > 0) {
+                win_w = rc.right;
+                win_h = rc.bottom;
+                apply_responsive_scaling(win_w, win_h);
+            }
         } else {
             ShowWindow(hwndMain, SW_SHOWNORMAL);
         }

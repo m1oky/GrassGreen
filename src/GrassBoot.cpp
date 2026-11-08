@@ -4,6 +4,7 @@
 // =============================================================================
 #include "GrassBoot.h"
 #include "GrassCyrillicFont.h"
+#include "GrassUnifiedFont.h"
 #include "GrassSyntax.h"
 #include <unordered_map>
 #include <fstream>
@@ -475,6 +476,10 @@ namespace GrassBoot {
             // 8.1. Таблица кириллического шрифта 8x16 (1024 байта)
             uint32_t addr_cyrillic_font = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
             for (size_t i = 0; i < 1024; ++i) append_u8(bin_data, s_cyrillic_font_8x16[i]);
+
+            // 8.1b. Таблица унифицированного шрифта (2544 байта)
+            uint32_t addr_unified_font = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            for (size_t i = 0; i < sizeof(s_unified_font_8x16); ++i) append_u8(bin_data, s_unified_font_8x16[i]);
 
             // 8.2. Таблицы скан-кодов PS/2 Set 1 (сканкоды 0x02..0x35)
             // English Lower (52 байта)
@@ -1881,247 +1886,534 @@ namespace GrassBoot {
             append_u8(bin_data, 0x59); append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
             append_u8(bin_data, 0xC3); // ret
 
-            // 8.21. Helper: helper_vd_desktop (Vector Display+ Interactive Bare-Metal GUI Desktop)
+                                    // 8.21. Helper: helper_vd_desktop (Vector Display+ 32-bit Framebuffer GUI Desktop)
+            auto emit_bga_write = [&](uint16_t idx, uint16_t val) {
+                append_u8(bin_data, 0x66); append_u8(bin_data, 0xBA); append_u16(bin_data, 0x01CE);
+                append_u8(bin_data, 0x66); append_u8(bin_data, 0xB8); append_u16(bin_data, idx);
+                append_u8(bin_data, 0x66); append_u8(bin_data, 0xEF);
+                append_u8(bin_data, 0x66); append_u8(bin_data, 0xBA); append_u16(bin_data, 0x01CF);
+                append_u8(bin_data, 0x66); append_u8(bin_data, 0xB8); append_u16(bin_data, val);
+                append_u8(bin_data, 0x66); append_u8(bin_data, 0xEF);
+            };
+
+            // JMP over GUI helpers
+            append_u8(bin_data, 0xE9);
+            size_t jmp_over_gui_helpers = bin_data.size();
+            append_u32(bin_data, 0);
+
+            // Helper: addr_draw_rect(color, x, y, w, h)
+            uint32_t addr_draw_rect = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x53); append_u8(bin_data, 0x56); append_u8(bin_data, 0x57);
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x00091390); // mov edi, [0x00091390]
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x44); append_u8(bin_data, 0x24); append_u8(bin_data, 24); // y
+            append_u8(bin_data, 0xC1); append_u8(bin_data, 0xE0); append_u8(bin_data, 12); // y * 4096
+            append_u8(bin_data, 0x01); append_u8(bin_data, 0xC7);
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x44); append_u8(bin_data, 0x24); append_u8(bin_data, 20); // x
+            append_u8(bin_data, 0xC1); append_u8(bin_data, 0xE0); append_u8(bin_data, 2);  // x * 4
+            append_u8(bin_data, 0x01); append_u8(bin_data, 0xC7);
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x74); append_u8(bin_data, 0x24); append_u8(bin_data, 16); // color
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x5C); append_u8(bin_data, 0x24); append_u8(bin_data, 32); // h
+            size_t loop_gui_rect_r = bin_data.size();
+            append_u8(bin_data, 0x57); // push edi
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x4C); append_u8(bin_data, 0x24); append_u8(bin_data, 32); // w
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xF0); // mov eax, esi
+            append_u8(bin_data, 0xFC); append_u8(bin_data, 0xF3); append_u8(bin_data, 0xAB); // rep stosd
+            append_u8(bin_data, 0x5F); // pop edi
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0xC7); append_u32(bin_data, 4096);
+            append_u8(bin_data, 0x4B); // dec ebx
+            int8_t rel_rect_r = (int8_t)(loop_gui_rect_r - (bin_data.size() + 2));
+            append_u8(bin_data, 0x75); append_u8(bin_data, (uint8_t)rel_rect_r);
+            append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E); append_u8(bin_data, 0x5B);
+            append_u8(bin_data, 0xC2); append_u16(bin_data, 20); // ret 20
+
+            // Helper: addr_draw_char(color, x, y, ch, scale)
+            uint32_t addr_draw_char = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x53); append_u8(bin_data, 0x56); append_u8(bin_data, 0x57); append_u8(bin_data, 0x55);
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB6); append_u8(bin_data, 0x44); append_u8(bin_data, 0x24); append_u8(bin_data, 32); // al = ch
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0xC0);
+            size_t j_chk_asc = bin_data.size(); append_u8(bin_data, 0x72); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x2C); append_u8(bin_data, 0xC0);
+            append_u8(bin_data, 0x04); append_u8(bin_data, 95);
+            size_t j_got_idx = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            size_t pos_chk_asc = bin_data.size();
+            bin_data[j_chk_asc + 1] = (uint8_t)(pos_chk_asc - (j_chk_asc + 2));
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 32);
+            size_t j_skp_ch = bin_data.size(); append_u8(bin_data, 0x72); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x2C); append_u8(bin_data, 32);
+
+            size_t pos_got_idx = bin_data.size();
+            bin_data[j_got_idx + 1] = (uint8_t)(pos_got_idx - (j_got_idx + 2));
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB6); append_u8(bin_data, 0xC0);
+            append_u8(bin_data, 0xC1); append_u8(bin_data, 0xE0); append_u8(bin_data, 4);
+            append_u8(bin_data, 0xBD); append_u32(bin_data, addr_unified_font);
+            append_u8(bin_data, 0x01); append_u8(bin_data, 0xC5);
+
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x00091390);
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x44); append_u8(bin_data, 0x24); append_u8(bin_data, 28); // y
+            append_u8(bin_data, 0xC1); append_u8(bin_data, 0xE0); append_u8(bin_data, 12);
+            append_u8(bin_data, 0x01); append_u8(bin_data, 0xC7);
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x44); append_u8(bin_data, 0x24); append_u8(bin_data, 24); // x
+            append_u8(bin_data, 0xC1); append_u8(bin_data, 0xE0); append_u8(bin_data, 2);
+            append_u8(bin_data, 0x01); append_u8(bin_data, 0xC7);
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x74); append_u8(bin_data, 0x24); append_u8(bin_data, 20); // color
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x5C); append_u8(bin_data, 0x24); append_u8(bin_data, 36); // scale
+
+            append_u8(bin_data, 0x31); append_u8(bin_data, 0xC9);
+            size_t loop_cr = bin_data.size();
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x54); append_u8(bin_data, 0x0D); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xB6); append_u8(bin_data, 0x08);
+            append_u8(bin_data, 0x57);
+
+            size_t loop_cb = bin_data.size();
+            append_u8(bin_data, 0xF6); append_u8(bin_data, 0xC2); append_u8(bin_data, 0x80);
+            size_t j_bz = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xFB); append_u8(bin_data, 0x02);
+            size_t j_s1 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0x37);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0x77); append_u8(bin_data, 0x04);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xB7); append_u32(bin_data, 4096);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xB7); append_u32(bin_data, 4100);
+            size_t j_pd = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            size_t pos_s1 = bin_data.size();
+            bin_data[j_s1 + 1] = (uint8_t)(pos_s1 - (j_s1 + 2));
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0x37);
+
+            size_t pos_pd = bin_data.size();
+            bin_data[j_pd + 1] = (uint8_t)(pos_pd - (j_pd + 2));
+            size_t pos_bz = bin_data.size();
+            bin_data[j_bz + 1] = (uint8_t)(pos_bz - (j_bz + 2));
+
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xFB); append_u8(bin_data, 0x02);
+            size_t j_ab1 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xC7); append_u8(bin_data, 0x08);
+            size_t j_abd = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            size_t pos_ab1 = bin_data.size();
+            bin_data[j_ab1 + 1] = (uint8_t)(pos_ab1 - (j_ab1 + 2));
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xC7); append_u8(bin_data, 0x04);
+
+            size_t pos_abd = bin_data.size();
+            bin_data[j_abd + 1] = (uint8_t)(pos_abd - (j_abd + 2));
+
+            append_u8(bin_data, 0xD0); append_u8(bin_data, 0xE2);
+            append_u8(bin_data, 0xFE); append_u8(bin_data, 0xCE);
+            int8_t rel_cb = (int8_t)(loop_cb - (bin_data.size() + 2));
+            append_u8(bin_data, 0x75); append_u8(bin_data, (uint8_t)rel_cb);
+
+            append_u8(bin_data, 0x5F);
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xFB); append_u8(bin_data, 0x02);
+            size_t j_rws1 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0xC7); append_u32(bin_data, 8192);
+            size_t j_rwd = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            size_t pos_rws1 = bin_data.size();
+            bin_data[j_rws1 + 1] = (uint8_t)(pos_rws1 - (j_rws1 + 2));
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0xC7); append_u32(bin_data, 4096);
+
+            size_t pos_rwd = bin_data.size();
+            bin_data[j_rwd + 1] = (uint8_t)(pos_rwd - (j_rwd + 2));
+
+            append_u8(bin_data, 0x41);
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xF9); append_u8(bin_data, 16);
+            int8_t rel_cr = (int8_t)(loop_cr - (bin_data.size() + 2));
+            append_u8(bin_data, 0x72); append_u8(bin_data, (uint8_t)rel_cr);
+
+            size_t pos_skp_ch = bin_data.size();
+            bin_data[j_skp_ch + 1] = (uint8_t)(pos_skp_ch - (j_skp_ch + 2));
+            append_u8(bin_data, 0x5D); append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E); append_u8(bin_data, 0x5B);
+            append_u8(bin_data, 0xC2); append_u16(bin_data, 20);
+
+            // Helper: addr_draw_str(color, x, y, str_ptr, scale) with UTF-8 Cyrillic Decoding
+            uint32_t addr_draw_str = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x53); append_u8(bin_data, 0x56); append_u8(bin_data, 0x57);
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x74); append_u8(bin_data, 0x24); append_u8(bin_data, 28); // str_ptr
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x7C); append_u8(bin_data, 0x24); append_u8(bin_data, 20); // x
+            size_t loop_st = bin_data.size();
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB6); append_u8(bin_data, 0x06); // movzx eax, byte [esi]
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0);
+            size_t j_st_end = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x46); // inc esi
+
+            // UTF-8 Cyrillic decoder
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0xD0);
+            size_t j_not_d0 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB6); append_u8(bin_data, 0x06);
+            append_u8(bin_data, 0x46);
+            append_u8(bin_data, 0x04); append_u8(bin_data, 0x30);
+            size_t j_utf_done = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            size_t pos_not_d0 = bin_data.size();
+            bin_data[j_not_d0 + 1] = (uint8_t)(pos_not_d0 - (j_not_d0 + 2));
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0xD1);
+            size_t j_not_d1 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB6); append_u8(bin_data, 0x06);
+            append_u8(bin_data, 0x46);
+            append_u8(bin_data, 0x04); append_u8(bin_data, 0x70);
+
+            size_t pos_not_d1 = bin_data.size();
+            bin_data[j_not_d1 + 1] = (uint8_t)(pos_not_d1 - (j_not_d1 + 2));
+            size_t pos_utf_done = bin_data.size();
+            bin_data[j_utf_done + 1] = (uint8_t)(pos_utf_done - (j_utf_done + 2));
+
+            append_u8(bin_data, 0xFF); append_u8(bin_data, 0x74); append_u8(bin_data, 0x24); append_u8(bin_data, 32); // scale
+            append_u8(bin_data, 0x50); // ch
+            append_u8(bin_data, 0xFF); append_u8(bin_data, 0x74); append_u8(bin_data, 0x24); append_u8(bin_data, 32); // y
+            append_u8(bin_data, 0x57); // x
+            append_u8(bin_data, 0xFF); append_u8(bin_data, 0x74); append_u8(bin_data, 0x24); append_u8(bin_data, 32); // color
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_draw_char - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x44); append_u8(bin_data, 0x24); append_u8(bin_data, 32);
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xF8); append_u8(bin_data, 0x02);
+            size_t j_as1 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xC7); append_u8(bin_data, 0x10);
+            size_t j_asd = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            size_t pos_as1 = bin_data.size();
+            bin_data[j_as1 + 1] = (uint8_t)(pos_as1 - (j_as1 + 2));
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xC7); append_u8(bin_data, 0x08);
+
+            size_t pos_asd = bin_data.size();
+            bin_data[j_asd + 1] = (uint8_t)(pos_asd - (j_asd + 2));
+
+            int8_t rel_lst = (int8_t)(loop_st - (bin_data.size() + 2));
+            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)rel_lst);
+
+            size_t pos_st_end = bin_data.size();
+            bin_data[j_st_end + 1] = (uint8_t)(pos_st_end - (j_st_end + 2));
+            append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E); append_u8(bin_data, 0x5B);
+            append_u8(bin_data, 0xC2); append_u16(bin_data, 20);
+
+            // Fixup jump over GUI helpers
+            size_t pos_after_gui_helpers = bin_data.size();
+            write_u32_le(bin_data, jmp_over_gui_helpers, (uint32_t)((int32_t)pos_after_gui_helpers - (int32_t)(jmp_over_gui_helpers + 4)));
+
+            auto emit_draw_rect = [&](int x, int y, int w, int h, uint32_t col) {
+                append_u8(bin_data, 0x68); append_u32(bin_data, h);
+                append_u8(bin_data, 0x68); append_u32(bin_data, w);
+                append_u8(bin_data, 0x68); append_u32(bin_data, y);
+                append_u8(bin_data, 0x68); append_u32(bin_data, x);
+                append_u8(bin_data, 0x68); append_u32(bin_data, col);
+                append_u8(bin_data, 0xE8);
+                append_u32(bin_data, addr_draw_rect - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            };
+
+            auto emit_draw_str = [&](int x, int y, uint32_t str_addr, uint32_t col, int scale = 1) {
+                append_u8(bin_data, 0x68); append_u32(bin_data, scale);
+                append_u8(bin_data, 0x68); append_u32(bin_data, str_addr);
+                append_u8(bin_data, 0x68); append_u32(bin_data, y);
+                append_u8(bin_data, 0x68); append_u32(bin_data, x);
+                append_u8(bin_data, 0x68); append_u32(bin_data, col);
+                append_u8(bin_data, 0xE8);
+                append_u32(bin_data, addr_draw_str - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            };
+
+            // Entry point for helper_vd_desktop
             uint32_t addr_vd_desktop = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
             append_u8(bin_data, 0x50); append_u8(bin_data, 0x53); append_u8(bin_data, 0x51);
             append_u8(bin_data, 0x52); append_u8(bin_data, 0x56); append_u8(bin_data, 0x57);
 
-            // Set tab = 1 at 0x00091380
+            // Read PCI BAR0 for Bus 0, Dev 2, Func 0, Reg 0x10
+            append_u8(bin_data, 0xB8); append_u32(bin_data, 0x80001010);
+            append_u8(bin_data, 0xBA); append_u32(bin_data, 0x0CF8);
+            append_u8(bin_data, 0xEF);
+            append_u8(bin_data, 0xBA); append_u32(bin_data, 0x0CFC);
+            append_u8(bin_data, 0xED);
+            append_u8(bin_data, 0x25); append_u32(bin_data, 0xFFFFFFF0);
+            append_u8(bin_data, 0xA3); append_u32(bin_data, 0x00091390);
+
+            // Set BGA 1024x768x32
+            emit_bga_write(4, 0);
+            emit_bga_write(1, 1024);
+            emit_bga_write(2, 768);
+            emit_bga_write(3, 32);
+            emit_bga_write(4, 0x41);
+
+            // Set default tab = 1
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, 1);
 
-            size_t loop_desktop_redraw = bin_data.size();
-            // Clear entire VGA 4000 bytes with space
+            // Draw Full Graphical Desktop Shell
+            // 1. Wallpaper (Deep obsidian)
+            emit_draw_rect(0, 0, 1024, 768, 0x0009090B);
+
+            // 2. macOS Top Menu Bar
+            emit_draw_rect(0, 0, 1024, 38, 0x000F172A);
+            emit_draw_rect(0, 37, 1024, 1, 0x001E293B);
+
+            // macOS Window Dots (Red, Yellow, Green)
+            emit_draw_rect(14, 13, 12, 12, 0x00EF4444);
+            emit_draw_rect(32, 13, 12, 12, 0x00F59E0B);
+            emit_draw_rect(50, 13, 12, 12, 0x0022C55E);
+
+            // Emerald Logo & Menu pills
+            emit_draw_str(74, 11, emit_inline_str("RQWos"), 0x0022C55E, 1);
+            emit_draw_rect(145, 8, 48, 22, 0x001E293B);
+            emit_draw_str(152, 11, emit_inline_str("Файл"), 0x00E2E8F0, 1);
+            emit_draw_rect(200, 8, 55, 22, 0x001E293B);
+            emit_draw_str(205, 11, emit_inline_str("Правка"), 0x00E2E8F0, 1);
+            emit_draw_rect(262, 8, 45, 22, 0x001E293B);
+            emit_draw_str(272, 11, emit_inline_str("Вид"), 0x00E2E8F0, 1);
+            emit_draw_rect(314, 8, 65, 22, 0x001E293B);
+            emit_draw_str(320, 11, emit_inline_str("Справка"), 0x00E2E8F0, 1);
+
+            // Right Tray (WiFi, Battery, User)
+            emit_draw_rect(760, 8, 75, 22, 0x001E293B);
+            emit_draw_str(766, 11, emit_inline_str("WiFi: OK"), 0x0038BDF8, 1);
+            emit_draw_rect(845, 8, 160, 22, 0x001E293B);
+            emit_draw_str(855, 11, emit_inline_str("m1oky (Root)"), 0x0022C55E, 1);
+
+            // 3. Central Window Card (928x626)
+            emit_draw_rect(48, 56, 928, 626, 0x0018181B);
+            emit_draw_rect(48, 56, 928, 1, 0x00334155);
+            emit_draw_rect(48, 681, 928, 1, 0x00334155);
+            emit_draw_rect(48, 56, 1, 626, 0x00334155);
+            emit_draw_rect(975, 56, 1, 626, 0x00334155);
+
+            // Window Header Bar
+            emit_draw_rect(49, 57, 926, 42, 0x000F172A);
+            emit_draw_str(68, 70, emit_inline_str("RQWos Desktop Environment — GrassGreen v4.3.0 Engine"), 0x0022C55E, 1);
+
+            // 4. Floating macOS Dock at Bottom (6 Icons)
+            emit_draw_rect(340, 700, 344, 52, 0x000F172A);
+            emit_draw_rect(340, 700, 344, 1, 0x00334155);
+            emit_draw_rect(340, 751, 344, 1, 0x00334155);
+            emit_draw_rect(340, 700, 1, 52, 0x00334155);
+            emit_draw_rect(683, 700, 1, 52, 0x00334155);
+
+            // Colored App Icons in Dock (36x36)
+            emit_draw_rect(354, 708, 36, 36, 0x0022C55E); // Terminal
+            emit_draw_rect(406, 708, 36, 36, 0x003B82F6); // Files
+            emit_draw_rect(458, 708, 36, 36, 0x00F97316); // Calc
+            emit_draw_rect(510, 708, 36, 36, 0x008B5CF6); // Hardware
+            emit_draw_rect(562, 708, 36, 36, 0x0064748B); // Settings
+            emit_draw_rect(634, 708, 36, 36, 0x00EF4444); // Power
+
+            // ══════════════════════════════════════════════════════════
+            // TAB CONTENT REDRAW LOOP (Triggered on tab change 1/2/3/Tab)
+            // ══════════════════════════════════════════════════════════
+            size_t loop_gui_tab_redraw = bin_data.size();
+
+            // Clear tabs row and cards body inside central window
+            emit_draw_rect(49, 102, 926, 578, 0x0018181B);
+
+            // Check Tab: [0x00091380]
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); // mov al, [0x00091380]
+
+            // ───────────── TAB 1: СИСТЕМА ─────────────
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 1);
+            size_t jne_tab2 = bin_data.size(); append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85); append_u32(bin_data, 0);
+
+            // Tab 1 Active Button (Emerald)
+            emit_draw_rect(68, 112, 160, 32, 0x0022C55E);
+            emit_draw_str(90, 120, emit_inline_str("1. СИСТЕМА"), 0x000F172A, 1);
+            emit_draw_rect(244, 112, 160, 32, 0x001E293B);
+            emit_draw_str(280, 120, emit_inline_str("2. ФАЙЛЫ"), 0x0094A3B8, 1);
+            emit_draw_rect(420, 112, 160, 32, 0x001E293B);
+            emit_draw_str(455, 120, emit_inline_str("3. ЖЕЛЕЗО"), 0x0094A3B8, 1);
+
+            // Card 1: System Info
+            emit_draw_rect(68, 160, 888, 140, 0x001E293B);
+            emit_draw_str(88, 180, emit_inline_str("Операционная система:  RQWos v1.0.0 (Protected Mode Multiboot Kernel)"), 0x00F8FAFC, 1);
+            emit_draw_str(88, 210, emit_inline_str("Графическая подсистема: Bochs BGA 32-bit Linear Framebuffer (1024x768)"), 0x0038BDF8, 1);
+            emit_draw_str(88, 240, emit_inline_str("Файловая структура:    RamFS + ATA Primary Master (QEMU 512 GB)"), 0x00A1A1AA, 1);
+
+            // Card 2: Memory Bar
+            emit_draw_rect(68, 316, 888, 90, 0x001E293B);
+            emit_draw_str(88, 328, emit_inline_str("Состояние памяти ОЗУ:"), 0x00F8FAFC, 1);
+            emit_draw_rect(88, 350, 848, 26, 0x000F172A);
+            emit_draw_rect(88, 350, 180, 26, 0x0022C55E);
+            emit_draw_str(88, 382, emit_inline_str("Занято: 4 МБ / Свободно: 124 МБ (Всего: 128 МБ)"), 0x0022C55E, 1);
+
+            // Card 3: Shortcuts & Network
+            emit_draw_rect(68, 422, 888, 160, 0x001E293B);
+            emit_draw_str(88, 442, emit_inline_str("Горячие клавиши: [1] Система  [2] Файлы  [3] Железо"), 0x00FBBF24, 1);
+            emit_draw_str(88, 472, emit_inline_str("Управление:      [Tab] Вкладки  [ESC] Консоль  [R] Перезагрузка  [P] Выключение"), 0x00FBBF24, 1);
+            emit_draw_str(88, 502, emit_inline_str("Статус сети:     Подключено к шлюзу 10.0.2.2 (IP: 10.0.2.15, DNS: 10.0.2.3)"), 0x00E2E8F0, 1);
+            emit_draw_str(88, 532, emit_inline_str("Пользователь:    m1oky (Root / Superuser) | Графика: Bochs BGA 1024x768x32"), 0x0022C55E, 1);
+
+            append_u8(bin_data, 0xE9);
+            size_t jmp_tab1_done = bin_data.size(); append_u32(bin_data, 0);
+
+            // ───────────── TAB 2: ФАЙЛЫ ─────────────
+            size_t pos_tab2 = bin_data.size();
+            write_u32_le(bin_data, jne_tab2 + 2, (uint32_t)((int32_t)pos_tab2 - (int32_t)(jne_tab2 + 6)));
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 2);
+            size_t jne_tab3 = bin_data.size(); append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85); append_u32(bin_data, 0);
+
+            // Tab 2 Active Button (Emerald)
+            emit_draw_rect(68, 112, 160, 32, 0x001E293B);
+            emit_draw_str(90, 120, emit_inline_str("1. СИСТЕМА"), 0x0094A3B8, 1);
+            emit_draw_rect(244, 112, 160, 32, 0x0022C55E);
+            emit_draw_str(280, 120, emit_inline_str("2. ФАЙЛЫ"), 0x000F172A, 1);
+            emit_draw_rect(420, 112, 160, 32, 0x001E293B);
+            emit_draw_str(455, 120, emit_inline_str("3. ЖЕЛЕЗО"), 0x0094A3B8, 1);
+
+            // Card 1: Directory List
+            emit_draw_rect(68, 160, 888, 140, 0x001E293B);
+            emit_draw_str(88, 180, emit_inline_str("Проводник файлов RamFS & ATA Primary Master:"), 0x00F8FAFC, 1);
+            emit_draw_str(88, 210, emit_inline_str("[DIR]  system           [DIR]  users            [DIR]  apps"), 0x0038BDF8, 1);
+            emit_draw_str(88, 240, emit_inline_str("[FILE] readme.txt (41 Б) [FILE] kernel.sys (64 КБ) [FILE] calc.app (12 КБ)"), 0x0022C55E, 1);
+
+            // Card 2: File Preview
+            emit_draw_rect(68, 316, 888, 90, 0x001E293B);
+            emit_draw_str(88, 328, emit_inline_str("Просмотр файла /users/readme.txt:"), 0x00F8FAFC, 1);
+            emit_draw_str(88, 355, emit_inline_str("Welcome to RQWos Desktop Environment on GrassGreen v4.3.0!"), 0x00FBBF24, 1);
+
+            // Card 3: Storage details
+            emit_draw_rect(68, 422, 888, 160, 0x001E293B);
+            emit_draw_str(88, 442, emit_inline_str("Накопитель:      ATA Primary Master SSD (512 GB) - Секторы 512 байт"), 0x00F8FAFC, 1);
+            emit_draw_str(88, 472, emit_inline_str("Быстрый диск:    RamFS виртуальная файловая структура (16 МБ)"), 0x0038BDF8, 1);
+            emit_draw_str(88, 502, emit_inline_str("Консольные команды: cd, ls, cat, creat, redact, remove, mkdir, disk"), 0x00E2E8F0, 1);
+            emit_draw_str(88, 532, emit_inline_str("Для перехода в терминал нажмите [ESC], для возврата введите 'gui'"), 0x00A1A1AA, 1);
+
+            append_u8(bin_data, 0xE9);
+            size_t jmp_tab2_done = bin_data.size(); append_u32(bin_data, 0);
+
+            // ───────────── TAB 3: ЖЕЛЕЗО ─────────────
+            size_t pos_tab3 = bin_data.size();
+            write_u32_le(bin_data, jne_tab3 + 2, (uint32_t)((int32_t)pos_tab3 - (int32_t)(jne_tab3 + 6)));
+
+            // Tab 3 Active Button (Emerald)
+            emit_draw_rect(68, 112, 160, 32, 0x001E293B);
+            emit_draw_str(90, 120, emit_inline_str("1. СИСТЕМА"), 0x0094A3B8, 1);
+            emit_draw_rect(244, 112, 160, 32, 0x001E293B);
+            emit_draw_str(280, 120, emit_inline_str("2. ФАЙЛЫ"), 0x0094A3B8, 1);
+            emit_draw_rect(420, 112, 160, 32, 0x0022C55E);
+            emit_draw_str(455, 120, emit_inline_str("3. ЖЕЛЕЗО"), 0x000F172A, 1);
+
+            // Card 1: CPU specs
+            emit_draw_rect(68, 160, 888, 140, 0x001E293B);
+            emit_draw_str(88, 180, emit_inline_str("Аппаратный монитор процессора и памяти:"), 0x00F8FAFC, 1);
+            emit_draw_str(88, 210, emit_inline_str("ЦПУ:   AuthenticAMD Virtual CPU (2900 МГц, 16 ядер / 16 потоков)"), 0x0038BDF8, 1);
+            emit_draw_str(88, 240, emit_inline_str("Кэш:   L1: 256 КБ | L2: 2048 КБ | L3: 16384 КБ | Нагрузка: 18% (42 C)"), 0x0022C55E, 1);
+
+            // Card 2: Devices
+            emit_draw_rect(68, 316, 888, 90, 0x001E293B);
+            emit_draw_str(88, 328, emit_inline_str("Аппаратная конфигурация:"), 0x00F8FAFC, 1);
+            emit_draw_str(88, 355, emit_inline_str("Плата: QEMU Standard PC (i440FX) | BIOS: SeaBIOS | ГПУ: 128 МБ VRAM"), 0x00FBBF24, 1);
+
+            // Card 3: Network & Monitor
+            emit_draw_rect(68, 422, 888, 160, 0x001E293B);
+            emit_draw_str(88, 442, emit_inline_str("Сетевой адаптер: Intel 82540EM Gigabit Ethernet (10.0.2.15)"), 0x00F8FAFC, 1);
+            emit_draw_str(88, 472, emit_inline_str("Накопитель SSD:  QEMU HARDDISK (512 ГБ) на ATA контроллере 0x1F0"), 0x0038BDF8, 1);
+            emit_draw_str(88, 502, emit_inline_str("ОЗУ аппаратное:  128 МБ (DIMM 3200 МГц DDR4) - Кэш ОЗУ: 16 МБ"), 0x00E2E8F0, 1);
+            emit_draw_str(88, 532, emit_inline_str("Видеоадаптер:    Bochs VBE Linear Framebuffer 32bpp (1024x768x32)"), 0x00A1A1AA, 1);
+
+            size_t pos_tabs_done = bin_data.size();
+            write_u32_le(bin_data, jmp_tab1_done, (uint32_t)((int32_t)pos_tabs_done - (int32_t)(jmp_tab1_done + 4)));
+            write_u32_le(bin_data, jmp_tab2_done, (uint32_t)((int32_t)pos_tabs_done - (int32_t)(jmp_tab2_done + 4)));
+
+            // ══════════════════════════════════════════════════════════
+            // INTERACTIVE EVENT LOOP (Tab, 1, 2, 3, R, P, ESC)
+            // ══════════════════════════════════════════════════════════
+            size_t loop_gui_event = bin_data.size();
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_read_char - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+            // '1' Key -> Tab 1
+            append_u8(bin_data, 0x3C); append_u8(bin_data, '1');
+            size_t jne_k2 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, 1);
+            append_u8(bin_data, 0xE9);
+            size_t jmp_re1 = bin_data.size(); append_u32(bin_data, 0);
+
+            size_t pos_k2 = bin_data.size();
+            bin_data[jne_k2 + 1] = (uint8_t)(pos_k2 - (jne_k2 + 2));
+            // '2' Key -> Tab 2
+            append_u8(bin_data, 0x3C); append_u8(bin_data, '2');
+            size_t jne_k3 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, 2);
+            append_u8(bin_data, 0xE9);
+            size_t jmp_re2 = bin_data.size(); append_u32(bin_data, 0);
+
+            size_t pos_k3 = bin_data.size();
+            bin_data[jne_k3 + 1] = (uint8_t)(pos_k3 - (jne_k3 + 2));
+            // '3' Key -> Tab 3
+            append_u8(bin_data, 0x3C); append_u8(bin_data, '3');
+            size_t jne_ktab = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, 3);
+            append_u8(bin_data, 0xE9);
+            size_t jmp_re3 = bin_data.size(); append_u32(bin_data, 0);
+
+            size_t pos_ktab = bin_data.size();
+            bin_data[jne_ktab + 1] = (uint8_t)(pos_ktab - (jne_ktab + 2));
+            // Tab Key (0x09) -> Cycle 1->2->3->1
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x09);
+            size_t jne_kr = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xFE); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380);
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x00091380); append_u8(bin_data, 3);
+            size_t jbe_tok = bin_data.size(); append_u8(bin_data, 0x76); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, 1);
+            size_t pos_tok = bin_data.size();
+            bin_data[jbe_tok + 1] = (uint8_t)(pos_tok - (jbe_tok + 2));
+            append_u8(bin_data, 0xE9);
+            size_t jmp_re4 = bin_data.size(); append_u32(bin_data, 0);
+
+            size_t pos_kr = bin_data.size();
+            bin_data[jne_kr + 1] = (uint8_t)(pos_kr - (jne_kr + 2));
+            // 'r' / 'R' -> Reboot
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 'r');
+            size_t jne_kR = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_reboot - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+            size_t pos_kR = bin_data.size();
+            bin_data[jne_kR + 1] = (uint8_t)(pos_kR - (jne_kR + 2));
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 'R');
+            size_t jne_kp = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_reboot - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+            size_t pos_kp = bin_data.size();
+            bin_data[jne_kp + 1] = (uint8_t)(pos_kp - (jne_kp + 2));
+            // 'p' / 'P' -> Poweroff
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 'p');
+            size_t jne_kP = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_poweroff - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+            size_t pos_kP = bin_data.size();
+            bin_data[jne_kP + 1] = (uint8_t)(pos_kP - (jne_kP + 2));
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 'P');
+            size_t jne_kesc = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_poweroff - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+            size_t pos_kesc = bin_data.size();
+            bin_data[jne_kesc + 1] = (uint8_t)(pos_kesc - (jne_kesc + 2));
+            // ESC (0x1B) -> Exit to Terminal Shell
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x1B);
+            size_t jne_loop = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            // Exit GUI: Disable BGA mode (revert VGA to text mode 80x25)
+            emit_bga_write(4, 0);
+
+            // Clear VGA text mode buffer (0xB8000) with spaces
             append_u8(bin_data, 0xBF); append_u32(bin_data, 0x000B8000);
             append_u8(bin_data, 0xB9); append_u32(bin_data, 1000);
             append_u8(bin_data, 0xB8); append_u32(bin_data, 0x07200720);
             append_u8(bin_data, 0xFC); append_u8(bin_data, 0xF3); append_u8(bin_data, 0xAB);
-            // Reset cursor to 0
+            // Reset cursor
             append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091000); append_u32(bin_data, 0);
 
-            // Line 0: Header
-            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x1F); // White on Blue
-            emit_print_str_lit(" [ GrassGreen VD+ Desktop Engine v4.3.0 | RQWos Core ]                          ");
-
-            // Line 1: Top border
-            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0A); // Light Green
-            emit_print_str_lit("+==============================================================================+");
-
-            // Line 2: Tabs header
-            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); // mov al, [0x00091380]
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 1);
-            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85);
-            size_t jne_dt_tab2 = bin_data.size(); append_u32(bin_data, 0);
-            emit_print_str_lit("|  [* 1. СИСТЕМА *]       [ 2. ФАЙЛЫ ]       [ 3. ЖЕЛЕЗО ]                     |");
-            append_u8(bin_data, 0xE9);
-            size_t jmp_dt_tabs_done = bin_data.size(); append_u32(bin_data, 0);
-
-            size_t pos_dt_tab2 = bin_data.size();
-            write_u32_le(bin_data, jne_dt_tab2, (uint32_t)((int32_t)pos_dt_tab2 - (int32_t)(jne_dt_tab2 + 4)));
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 2);
-            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85);
-            size_t jne_dt_tab3 = bin_data.size(); append_u32(bin_data, 0);
-            emit_print_str_lit("|  [ 1. СИСТЕМА ]       [* 2. ФАЙЛЫ *]       [ 3. ЖЕЛЕЗО ]                     |");
-            append_u8(bin_data, 0xE9);
-            size_t jmp_dt_tabs_done2 = bin_data.size(); append_u32(bin_data, 0);
-
-            size_t pos_dt_tab3 = bin_data.size();
-            write_u32_le(bin_data, jne_dt_tab3, (uint32_t)((int32_t)pos_dt_tab3 - (int32_t)(jne_dt_tab3 + 4)));
-            emit_print_str_lit("|  [ 1. СИСТЕМА ]       [ 2. ФАЙЛЫ ]       [* 3. ЖЕЛЕЗО *]                     |");
-
-            size_t pos_dt_tabs_done = bin_data.size();
-            write_u32_le(bin_data, jmp_dt_tabs_done, (uint32_t)((int32_t)pos_dt_tabs_done - (int32_t)(jmp_dt_tabs_done + 4)));
-            write_u32_le(bin_data, jmp_dt_tabs_done2, (uint32_t)((int32_t)pos_dt_tabs_done - (int32_t)(jmp_dt_tabs_done2 + 4)));
-
-            // Line 3: Middle border
-            emit_print_str_lit("+------------------------------------------------------------------------------+");
-
-            // Tab Content
-            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380);
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 1);
-            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85);
-            size_t jne_dt_body2 = bin_data.size(); append_u32(bin_data, 0);
-
-            // Tab 1 Body (18 lines)
-            emit_print_str_lit("|                                                                              |");
-            emit_print_str_lit("|  Операционная система:  RQWos (GrassGreen Kernel v4.3.0)                     |");
-            emit_print_str_lit("|  Архитектура ядра:      x86 Protected Mode (Multiboot Compliant)             |");
-            emit_print_str_lit("|  Графическая подсистема:VD+ (Vector Display Plus TUI/GUI Engine)             |");
-            emit_print_str_lit("|  Файловая структура:    RamFS (Виртуальная структура активна)                |");
-            emit_print_str_lit("|                                                                              |");
-            emit_print_str_lit("|  Состояние памяти ОЗУ:                                                       |");
-            emit_print_str_lit("|  [================================....]  4 МБ / 128 МБ                       |");
-            emit_print_str_lit("|                                                                              |");
-            emit_print_str_lit("|  Управление окнами:                                                          |");
-            emit_print_str_lit("|    [1] - Общие сведения об ОС                                                |");
-            emit_print_str_lit("|    [2] - Проводник файлов (RamFS)                                            |");
-            emit_print_str_lit("|    [3] - Аппаратный мониторинг процессора и устройств                        |");
-            emit_print_str_lit("|    [ESC] - Выход обратно в терминал RQWos                                    |");
-            emit_print_str_lit("|                                                                              |");
-            emit_print_str_lit("|  Статус сети:   Подключено к шлюзу 10.0.2.2 (DNS: 10.0.2.3)                  |");
-            emit_print_str_lit("|  Пользователь:  m1oky (Права: Root / Superuser)                              |");
-            emit_print_str_lit("|                                                                              |");
-            append_u8(bin_data, 0xE9);
-            size_t jmp_dt_body_done = bin_data.size(); append_u32(bin_data, 0);
-
-            // Tab 2 Body (18 lines)
-            size_t pos_dt_body2 = bin_data.size();
-            write_u32_le(bin_data, jne_dt_body2, (uint32_t)((int32_t)pos_dt_body2 - (int32_t)(jne_dt_body2 + 4)));
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 2);
-            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85);
-            size_t jne_dt_body3 = bin_data.size(); append_u32(bin_data, 0);
-
-            emit_print_str_lit("|                                                                              |");
-            emit_print_str_lit("|  Проводник файлов RamFS:                                                     |");
-            emit_print_str_lit("|  +- Содержимое папки / -------------+ +- Просмотр файла -------------------+ |");
-            emit_print_str_lit("|  |  [DIR]   system                  | | Имя:     readme.txt                | |");
-            emit_print_str_lit("|  |  [DIR]   users                   | | Размер:  41 байт                   | |");
-            emit_print_str_lit("|  |  [DIR]   apps                    | |                                    | |");
-            emit_print_str_lit("|  |  [FILE]  welcome.txt (32 Б)      | | Содержимое:                        | |");
-            emit_print_str_lit("|  |  [FILE]  desktop.ini (скрытый)   | |  \"Welcome to RQWos on              | |");
-            emit_print_str_lit("|  |                                  | |   GrassGreen Bare-Metal!\"          | |");
-            emit_print_str_lit("|  +----------------------------------+ +------------------------------------+ |");
-            emit_print_str_lit("|                                                                              |");
-            emit_print_str_lit("|  Для навигации в консоли используйте команды: cd, ls, cat                    |");
-            emit_print_str_lit("|                                                                              |");
-            emit_print_str_lit("|  Примонтированные накопители:                                                |");
-            emit_print_str_lit("|    [hd0]  ATA Primary Master  - QEMU HARDDISK (512 ГБ)                       |");
-            emit_print_str_lit("|    [ram0] RamFS High-Speed    - 16 МБ (Виртуальная структура активна)        |");
-            emit_print_str_lit("|                                                                              |");
-            emit_print_str_lit("|                                                                              |");
-            append_u8(bin_data, 0xE9);
-            size_t jmp_dt_body_done2 = bin_data.size(); append_u32(bin_data, 0);
-
-            // Tab 3 Body (18 lines)
-            size_t pos_dt_body3 = bin_data.size();
-            write_u32_le(bin_data, jne_dt_body3, (uint32_t)((int32_t)pos_dt_body3 - (int32_t)(jne_dt_body3 + 4)));
-
-            emit_print_str_lit("|                                                                              |");
-            emit_print_str_lit("|  Аппаратный монитор железа в реальном времени:                               |");
-            emit_print_str_lit("|                                                                              |");
-            emit_print_str_lit("|  ЦПУ Вендор:    AuthenticAMD / GenuineIntel                                  |");
-            emit_print_str_lit("|  ЦПУ Модель:    QEMU Virtual CPU 2.5+                                        |");
-            emit_print_str_lit("|  Ядра / Потоки: 1 ядро / 1 поток (Базовая частота: 2900 МГц)                 |");
-            emit_print_str_lit("|  Кэш L1/L2/L3:  256 КБ / 2048 КБ / 16384 КБ                                  |");
-            emit_print_str_lit("|  Всего ОЗУ:     128 МБ (DIMM DDR4 3200 МГц)                                  |");
-            emit_print_str_lit("|  Свободно ОЗУ:  124 МБ                                                       |");
-            emit_print_str_lit("|  Материнская:   QEMU Standard PC (i440FX)                                    |");
-            emit_print_str_lit("|  Версия BIOS:   SeaBIOS (04/01/2014)                                         |");
-            emit_print_str_lit("|  Видеоадаптер:  QEMU Standard VGA (128 МБ VRAM)                              |");
-            emit_print_str_lit("|  Сетевой чип:   Intel 82540EM Gigabit Ethernet (10.0.2.15)                   |");
-            emit_print_str_lit("|  Температура:   ЦПУ: 42 C | ГПУ: 45 C                                        |");
-            emit_print_str_lit("|  Виртуализация: Включено (VT-x / AMD-V аппаратная поддержка)                 |");
-            emit_print_str_lit("|                                                                              |");
-            emit_print_str_lit("|                                                                              |");
-            emit_print_str_lit("|                                                                              |");
-
-            size_t pos_dt_body_done = bin_data.size();
-            write_u32_le(bin_data, jmp_dt_body_done, (uint32_t)((int32_t)pos_dt_body_done - (int32_t)(jmp_dt_body_done + 4)));
-            write_u32_le(bin_data, jmp_dt_body_done2, (uint32_t)((int32_t)pos_dt_body_done - (int32_t)(jmp_dt_body_done2 + 4)));
-
-            // Line 22: Bottom border
-            emit_print_str_lit("+==============================================================================+");
-
-            // Line 23: Status bar
-            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x70); // Black on Gray
-            emit_print_str_lit(" [Tab/1,2,3]: Вкладки | [ESC]: Консоль | [R]: Перезагрузка | [P]: Выключение    ");
-
-            // Move cursor to row 24 column 0 (offset 3840)
-            append_u8(bin_data, 0xBB); append_u32(bin_data, 3840);
-            append_u8(bin_data, 0xE8);
-            append_u32(bin_data, addr_update_cursor - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-
-            // Event Loop
-            size_t loop_dt_event = bin_data.size();
-            append_u8(bin_data, 0xE8);
-            append_u32(bin_data, addr_read_char - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-
-            append_u8(bin_data, 0x3C); append_u8(bin_data, '1');
-            size_t jne_dt_k2 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, 1);
-            append_u8(bin_data, 0xE9);
-            size_t jmp_dt_re1 = bin_data.size(); append_u32(bin_data, 0);
-
-            size_t pos_dt_k2 = bin_data.size();
-            bin_data[jne_dt_k2 + 1] = (uint8_t)(pos_dt_k2 - (jne_dt_k2 + 2));
-            append_u8(bin_data, 0x3C); append_u8(bin_data, '2');
-            size_t jne_dt_k3 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, 2);
-            append_u8(bin_data, 0xE9);
-            size_t jmp_dt_re2 = bin_data.size(); append_u32(bin_data, 0);
-
-            size_t pos_dt_k3 = bin_data.size();
-            bin_data[jne_dt_k3 + 1] = (uint8_t)(pos_dt_k3 - (jne_dt_k3 + 2));
-            append_u8(bin_data, 0x3C); append_u8(bin_data, '3');
-            size_t jne_dt_ktab = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, 3);
-            append_u8(bin_data, 0xE9);
-            size_t jmp_dt_re3 = bin_data.size(); append_u32(bin_data, 0);
-
-            size_t pos_dt_ktab = bin_data.size();
-            bin_data[jne_dt_ktab + 1] = (uint8_t)(pos_dt_ktab - (jne_dt_ktab + 2));
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x09); // Tab
-            size_t jne_dt_kr = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xFE); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); // inc [0x00091380]
-            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x00091380); append_u8(bin_data, 3);
-            size_t jbe_dt_tab_ok = bin_data.size(); append_u8(bin_data, 0x76); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, 1);
-            size_t pos_dt_tab_ok = bin_data.size();
-            bin_data[jbe_dt_tab_ok + 1] = (uint8_t)(pos_dt_tab_ok - (jbe_dt_tab_ok + 2));
-            append_u8(bin_data, 0xE9);
-            size_t jmp_dt_re4 = bin_data.size(); append_u32(bin_data, 0);
-
-            size_t pos_dt_kr = bin_data.size();
-            bin_data[jne_dt_kr + 1] = (uint8_t)(pos_dt_kr - (jne_dt_kr + 2));
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 'r');
-            size_t jne_dt_kR = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xE8);
-            append_u32(bin_data, addr_reboot - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-
-            size_t pos_dt_kR = bin_data.size();
-            bin_data[jne_dt_kR + 1] = (uint8_t)(pos_dt_kR - (jne_dt_kR + 2));
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 'R');
-            size_t jne_dt_kp = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xE8);
-            append_u32(bin_data, addr_reboot - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-
-            size_t pos_dt_kp = bin_data.size();
-            bin_data[jne_dt_kp + 1] = (uint8_t)(pos_dt_kp - (jne_dt_kp + 2));
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 'p');
-            size_t jne_dt_kP = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xE8);
-            append_u32(bin_data, addr_poweroff - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-
-            size_t pos_dt_kP = bin_data.size();
-            bin_data[jne_dt_kP + 1] = (uint8_t)(pos_dt_kP - (jne_dt_kP + 2));
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 'P');
-            size_t jne_dt_kesc = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xE8);
-            append_u32(bin_data, addr_poweroff - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-
-            size_t pos_dt_kesc = bin_data.size();
-            bin_data[jne_dt_kesc + 1] = (uint8_t)(pos_dt_kesc - (jne_dt_kesc + 2));
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x1B); // ESC
-            size_t jne_dt_loop = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-
-            // Exit Desktop: Clear screen, restore color, print resume notice
-            append_u8(bin_data, 0xE8);
-            append_u32(bin_data, addr_clear - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0A);
             emit_print_str_lit("[VD+] Возврат в командную строку RQWos.\n");
             append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E); append_u8(bin_data, 0x5A);
             append_u8(bin_data, 0x59); append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
             append_u8(bin_data, 0xC3); // ret
 
-            size_t pos_dt_loop = bin_data.size();
-            bin_data[jne_dt_loop + 1] = (uint8_t)(pos_dt_loop - (jne_dt_loop + 2));
-            // Loop back to wait for key
-            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(loop_dt_event - (bin_data.size() + 1)));
+            size_t pos_loop = bin_data.size();
+            bin_data[jne_loop + 1] = (uint8_t)(pos_loop - (jne_loop + 2));
+            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(loop_gui_event - (bin_data.size() + 1)));
 
-            // Fixup rel32 jumps back to loop_desktop_redraw
-            write_u32_le(bin_data, jmp_dt_re1, (uint32_t)((int32_t)loop_desktop_redraw - (int32_t)(jmp_dt_re1 + 4)));
-            write_u32_le(bin_data, jmp_dt_re2, (uint32_t)((int32_t)loop_desktop_redraw - (int32_t)(jmp_dt_re2 + 4)));
-            write_u32_le(bin_data, jmp_dt_re3, (uint32_t)((int32_t)loop_desktop_redraw - (int32_t)(jmp_dt_re3 + 4)));
-            write_u32_le(bin_data, jmp_dt_re4, (uint32_t)((int32_t)loop_desktop_redraw - (int32_t)(jmp_dt_re4 + 4)));
+            // Fixup rel32 jumps back to loop_gui_tab_redraw
+            write_u32_le(bin_data, jmp_re1, (uint32_t)((int32_t)loop_gui_tab_redraw - (int32_t)(jmp_re1 + 4)));
+            write_u32_le(bin_data, jmp_re2, (uint32_t)((int32_t)loop_gui_tab_redraw - (int32_t)(jmp_re2 + 4)));
+            write_u32_le(bin_data, jmp_re3, (uint32_t)((int32_t)loop_gui_tab_redraw - (int32_t)(jmp_re3 + 4)));
+            write_u32_le(bin_data, jmp_re4, (uint32_t)((int32_t)loop_gui_tab_redraw - (int32_t)(jmp_re4 + 4)));
 
             // 8.22. Helper: helper_bm_exec (ESI = command string)
             uint32_t addr_bm_exec = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();

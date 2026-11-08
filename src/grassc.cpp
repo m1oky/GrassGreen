@@ -3381,6 +3381,7 @@ int main(int argc, char* argv[]) {
             } else if (arg == "-o") {
                 if (i + 1 < argc) {
                     opt.output_file = argv[++i];
+                    if (!opt.explicit_run) opt.run_after_build = false;
                 } else {
                     cerr << (opt.lang_ru ? "[GrassError]: Пропущен аргумент для -o\n" : "[GrassError]: Missing argument for -o\n");
                     return 1;
