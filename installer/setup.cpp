@@ -362,9 +362,9 @@ DWORD WINAPI InstallWorkerThread(LPVOID lpParam) {
     writeTextFile(iconsDir + L"\\logo.svg", G_PAYLOAD_LOGO_SVG);
     writeTextFile(iconsDir + L"\\gdb_logo.svg", G_PAYLOAD_GDB_LOGO_SVG);
     if (G_PAYLOAD_VSIX_SIZE > 0) {
-        std::wstring vsixPath = binDir + L"\\grassgreen-4.2.0.vsix";
+        std::wstring vsixPath = binDir + L"\\grassgreen-4.2.1.vsix";
         writeBinaryFile(vsixPath, G_PAYLOAD_VSIX, G_PAYLOAD_VSIX_SIZE);
-        AddLogMessage(g_hListLog, L"  -> Распаковано расширение VS Code grassgreen-4.2.0.vsix...");
+        AddLogMessage(g_hListLog, L"  -> Распаковано расширение VS Code grassgreen-4.2.1.vsix...");
         _wsystem((L"code --install-extension \"" + vsixPath + L"\" --force >nul 2>&1").c_str());
     }
     AddLogMessage(g_hListLog, L"[3/6] Распакованы иконки grass.ico, gdb.ico и логотипы logo.svg, gdb_logo.svg...");

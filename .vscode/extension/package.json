@@ -2,7 +2,7 @@
   "name": "grassgreen",
   "displayName": "GrassGreen (G&G) Language Support",
   "description": "Официальная поддержка системного языка программирования GrassGreen 4.2: синтаксис, TextMate подсветка gout/gin, диагностика железа !hardware!, векторный GUI VD+, аудио-движок, ассемблер ядра !asm!, контроллер клавиатуры !keyboard!, флаги Multiboot/Kernel/ISO, IntelliSense, сборка по Ctrl+Shift+B, иконки файлов и сниппеты.",
-  "version": "4.2.0",
+  "version": "4.2.1",
   "publisher": "m1oky",
   "repository": {
     "type": "git",

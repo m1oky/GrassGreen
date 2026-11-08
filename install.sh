@@ -258,10 +258,10 @@ fi
 # ------------------------------------------------------------------------------
 echo -e "${CYAN}[*] Setting up VS Code / VSCodium GrassGreen extensions...${NC}"
 "$INSTALL_DIR/grassc" --install >/dev/null 2>&1 || true
-if command -v code >/dev/null 2>&1 && [ -f "$WORK_DIR/bin/grassgreen-4.2.0.vsix" ]; then
-    code --install-extension "$WORK_DIR/bin/grassgreen-4.2.0.vsix" --force >/dev/null 2>&1 || true
-elif command -v codium >/dev/null 2>&1 && [ -f "$WORK_DIR/bin/grassgreen-4.2.0.vsix" ]; then
-    codium --install-extension "$WORK_DIR/bin/grassgreen-4.2.0.vsix" --force >/dev/null 2>&1 || true
+if command -v code >/dev/null 2>&1 && [ -f "$WORK_DIR/bin/grassgreen-4.2.1.vsix" ]; then
+    code --install-extension "$WORK_DIR/bin/grassgreen-4.2.1.vsix" --force >/dev/null 2>&1 || true
+elif command -v codium >/dev/null 2>&1 && [ -f "$WORK_DIR/bin/grassgreen-4.2.1.vsix" ]; then
+    codium --install-extension "$WORK_DIR/bin/grassgreen-4.2.1.vsix" --force >/dev/null 2>&1 || true
 fi
 
 # ------------------------------------------------------------------------------
