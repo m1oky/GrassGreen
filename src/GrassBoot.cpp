@@ -396,11 +396,14 @@ namespace GrassBoot {
         append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100A); append_u8(bin_data, 0);   // shift_state = 0
         append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100B); append_u8(bin_data, 0);   // alt_state = 0
         append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100C); append_u8(bin_data, 0);   // layout = 0 (EN)
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0A); // vga_attr = 0x0A (GrassGreen light green on black)
         append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091010); append_u32(bin_data, 0);   // not_clear_flag = 0
         append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091014); append_u32(bin_data, 160); // not_clear_boundary = 160 (banner line 0 protected)
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091300); append_u8(bin_data, '/');  // vfs_cwd[0] = '/'
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091301); append_u8(bin_data, 0);    // vfs_cwd[1] = 0
 
         // --- 5. Вывод приветственного баннера GrassGreen в строку 0 ---
-        const char* banner = "GrassGreen OS v4.2.0 Kernel [Multiboot Online]";
+        const char* banner = "GrassGreen OS v4.3.0 Kernel [Multiboot Online]";
         size_t banner_len = strlen(banner);
         for (size_t i = 0; i < banner_len; ++i) {
             uint32_t vga_offset = 0x000B8000 + (uint32_t)(i * 2);
@@ -445,7 +448,7 @@ namespace GrassBoot {
         append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0B);
         append_u8(bin_data, 0xEE);
 
-        const char* com_msg = "\r\n[GrassGreen OS v4.2.0]: Booted successfully via Multiboot!\r\n";
+        const char* com_msg = "\r\n[GrassGreen OS v4.3.0]: Booted successfully via Multiboot!\r\n";
         for (size_t i = 0; i < strlen(com_msg); ++i) {
             append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03F8); append_u16(bin_data, 0x0000);
             append_u8(bin_data, 0xB0); append_u8(bin_data, (uint8_t)com_msg[i]);
@@ -710,8 +713,8 @@ namespace GrassBoot {
 
             append_u8(bin_data, 0x8B); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091000);
             append_u8(bin_data, 0x88); append_u8(bin_data, 0xA3); append_u32(bin_data, 0x000B8000);
-            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x83); append_u32(bin_data, 0x000B8001);
-            append_u8(bin_data, 0x0A); // GrassGreen bright green
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x15); append_u32(bin_data, 0x0009100D); // mov dl, [0x0009100D]
+            append_u8(bin_data, 0x88); append_u8(bin_data, 0x93); append_u32(bin_data, 0x000B8001); // mov [ebx + 0x000B8001], dl
             append_u8(bin_data, 0x83); append_u8(bin_data, 0xC3); append_u8(bin_data, 0x02);
 
             // Check Screen Scroll (>= 4000)
@@ -1723,9 +1726,55 @@ namespace GrassBoot {
     for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
     append_u8(bin_data, 0x0F); append_u8(bin_data, 0x31);
     append_u8(bin_data, 0x50);
-} else if (fn == "hw_reboot") {
+} else if (fn == "reboot" || fn == "hw_reboot") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
     append_u8(bin_data, 0xB0); append_u8(bin_data, 0xFE);
     append_u8(bin_data, 0xE6); append_u8(bin_data, 0x64);
+    append_u8(bin_data, 0xF4);
+    append_u8(bin_data, 0x6A); append_u8(bin_data, 1);
+} else if (fn == "poweroff") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    // ACPI shutdown ports (QEMU 0x604, Bochs 0xB004, VirtualBox 0x4004)
+    append_u8(bin_data, 0x66); append_u8(bin_data, 0xB8); append_u16(bin_data, 0x2000);
+    append_u8(bin_data, 0xBA); append_u16(bin_data, 0x0604); append_u16(bin_data, 0x0000);
+    append_u8(bin_data, 0x66); append_u8(bin_data, 0xEF);
+    append_u8(bin_data, 0xBA); append_u16(bin_data, 0xB004); append_u16(bin_data, 0x0000);
+    append_u8(bin_data, 0x66); append_u8(bin_data, 0xEF);
+    append_u8(bin_data, 0x66); append_u8(bin_data, 0xB8); append_u16(bin_data, 0x3400);
+    append_u8(bin_data, 0xBA); append_u16(bin_data, 0x4004); append_u16(bin_data, 0x0000);
+    append_u8(bin_data, 0x66); append_u8(bin_data, 0xEF);
+    append_u8(bin_data, 0xF4);
+    append_u8(bin_data, 0x6A); append_u8(bin_data, 1);
+} else if (fn == "color") {
+    if (argc >= 2) {
+        append_u8(bin_data, 0x5B); // pop ebx (bg)
+        append_u8(bin_data, 0x58); // pop eax (fg)
+        for (int i = 2; i < argc; ++i) append_u8(bin_data, 0x58);
+        append_u8(bin_data, 0x83); append_u8(bin_data, 0xE0); append_u8(bin_data, 0x0F);
+        append_u8(bin_data, 0x83); append_u8(bin_data, 0xE3); append_u8(bin_data, 0x0F);
+        append_u8(bin_data, 0xC1); append_u8(bin_data, 0xE3); append_u8(bin_data, 4);
+        append_u8(bin_data, 0x09); append_u8(bin_data, 0xD8);
+        append_u8(bin_data, 0xA2); append_u32(bin_data, 0x0009100D); // mov [0x0009100D], al
+    } else if (argc >= 1) {
+        append_u8(bin_data, 0x58); // pop eax
+        for (int i = 1; i < argc; ++i) append_u8(bin_data, 0x58);
+        append_u8(bin_data, 0x83); append_u8(bin_data, 0xE0); append_u8(bin_data, 0x0F);
+        append_u8(bin_data, 0xA2); append_u32(bin_data, 0x0009100D); // mov [0x0009100D], al
+    }
+    append_u8(bin_data, 0x6A); append_u8(bin_data, 1);
+} else if (fn == "read_key") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xE8);
+    append_u32(bin_data, addr_read_char - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+    append_u8(bin_data, 0x50); // push eax
+} else if (fn == "pwd") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091300); // push static root "/"
+} else if (fn == "ls" || fn == "virtual_struct" || fn == "physical_struct" || fn == "cd" ||
+           fn == "copy" || fn == "move" || fn == "delete" || fn == "cr_folder" || fn == "cr_file" ||
+           fn == "not_show" || fn == "specSign_show") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0x6A); append_u8(bin_data, 1);
 } else if (fn == "use_utf" || fn == "use_locale" || fn == "set_layout" || fn == "kbd_set_layout") {
                             for (int i = 0; i < argc; ++i) {
                                 append_u8(bin_data, 0x58); // pop eax

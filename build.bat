@@ -1,6 +1,6 @@
 @echo off
 setlocal
-echo [GrassCompiler] Building GrassGreen v4.2...
+echo [GrassCompiler] Building GrassGreen v4.3...
 if not exist "bin" mkdir bin
 
 g++ -std=c++20 -O3 -s ^
@@ -32,6 +32,7 @@ g++ -std=c++20 -O3 -s ^
   src/GrassTg.cpp ^
   src/Grass2DGraphics.cpp ^
   src/GrassHardware.cpp ^
+  src/GrassBaremetal.cpp ^
   -o bin/grassc.exe ^
   -lgdiplus -lgdi32 -lcomctl32 -lwinmm -lws2_32 -lwininet -lurlmon -lpsapi -liphlpapi -ldxgi
 

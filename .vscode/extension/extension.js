@@ -4,7 +4,10 @@ const vscode = require('vscode');
  * GrassGreen 4.2 Standard Library Reference & API Catalog
  */
 const MODULES = [
-    { name: "!GrassGreen!", doc: "Базовое ядро языка GrassGreen 4.2, потоковый ввод-вывод (gout/gin), типы данных и операторы." },
+    { name: "!GrassGreen!", doc: "Базовое ядро языка GrassGreen 4.3, потоковый ввод-вывод (gout/gin), типы данных и операторы." },
+    { name: "!baremetal!", doc: "Системная разработка и собственные ОС: 16 цветов VGA и HEX, плавный курсор 60+ FPS, read_key(), TUI-виджеты, перезапуск reboot() и выключение poweroff(), RamFS VFS (virtual_struct / physical_struct), команды терминала ls, pwd, cd, copy, move, delete, cr_folder, cr_file, not_show, specSign_show, очистка clear и не удаляемый текст not_clear." },
+    { name: "!bm!", doc: "Короткий алиас библиотеки прямого программирования на голом железе (!baremetal!)." },
+    { name: "!kernel!", doc: "Алиас библиотеки !baremetal! для ядер операционных систем." },
     { name: "!hardware!", doc: "Библиотека прямого низкоуровневого опроса оборудования ПК: RAM, CPU, Материнская плата, BIOS, PCI и аппаратная перезагрузка." },
     { name: "!hw!", doc: "Короткий алиас библиотеки прямого низкоуровневого опроса оборудования (!hardware!)." },
     { name: "!time!", doc: "Модуль профилирования, таймеров и работы с системным временем." },
@@ -30,6 +33,45 @@ const MODULES = [
 ];
 
 const FUNCTIONS = [
+    // ── Baremetal & RamFS / VFS API (!baremetal!) ──
+    { name: "color", signature: "void color(int fg, int bg = 0) / void color(string hex)", doc: "Установка цвета текста и фона по палитре 16 цветов VGA или по HEX (#RRGGBB).", snippet: "color(${1:GREEN});" },
+    { name: "read_key", signature: "string read_key()", doc: "Высокоуровневый ввод: считывает нажатие клавиши и возвращает её имя (ENTER, UP, DOWN, LEFT, RIGHT, ESC, SPACE, BACKSPACE, TAB или символ).", snippet: "read_key()" },
+    { name: "draw_box", signature: "void draw_box(int x, int y, int w, int h, string title = \"\", int fg = LIGHT_GREEN, int bg = BLACK)", doc: "Отрисовка TUI диалогового окна с рамкой и заголовком.", snippet: "draw_box(${1:x}, ${2:y}, ${3:w}, ${4:h}, \"${5:title}\", ${6:LIGHT_GREEN}, ${7:BLACK});" },
+    { name: "menu", signature: "int menu(string title, array options)", doc: "Интерактивное меню TUI с навигацией стрелками и подтверждением Enter. Возвращает индекс выбранного пункта.", snippet: "menu(\"${1:Title}\", [${2:\"Option 1\", \"Option 2\"}])" },
+    { name: "progress_bar", signature: "void progress_bar(int x, int y, int width, int percent, int fg = LIGHT_GREEN, int bg = BLACK)", doc: "Индикатор выполнения (Progress Bar) с процентами для загрузки ядра и проверки памяти.", snippet: "progress_bar(${1:x}, ${2:y}, ${3:width}, ${4:percent});" },
+    { name: "reboot", signature: "void reboot()", doc: "Мгновенный аппаратный перезапуск компьютера через контроллер материнской платы 8042.", snippet: "reboot();" },
+    { name: "poweroff", signature: "void poweroff()", doc: "Аппаратное отключение питания ПК через контроллер ACPI (QEMU, Bochs, VirtualBox).", snippet: "poweroff();" },
+    { name: "virtual_struct", signature: "virtual_struct { ... }", doc: "Декларативное описание дерева папок и файлов RamFS / VFS в коде ядра ОС.", snippet: "virtual_struct {\n\tfolder ${1:system} {\n\t\tfile \"${2:kernel.sys}\", \"${3:content}\";\n\t}\n}" },
+    { name: "physical_struct", signature: "void physical_struct(string host_path)", doc: "Автоматический перенос реальной папки хост-системы в образ диска операционной системы при сборке.", snippet: "physical_struct(\"${1:app}\");" },
+    { name: "ls", signature: "string ls(string flags = \"\")", doc: "Показывает структуру файлов и папок в текущем пути. Требует объявления virtual_struct или physical_struct.", snippet: "ls()" },
+    { name: "pwd", signature: "string pwd()", doc: "Возвращает текущий путь в файловой системе VFS.", snippet: "pwd()" },
+    { name: "cd", signature: "bool cd(string path)", doc: "Перемещение по каталогам VFS (поддерживает .. и абсолютные пути).", snippet: "cd(\"${1:..}\");" },
+    { name: "cr_folder", signature: "bool cr_folder(string name)", doc: "Создаёт новую папку в текущем каталоге VFS.", snippet: "cr_folder(\"${1:folder_name}\");" },
+    { name: "cr_file", signature: "bool cr_file(string name, string content = \"\")", doc: "Создаёт новый файл в текущем каталоге VFS с опциональным содержимым.", snippet: "cr_file(\"${1:file.txt}\", \"${2:content}\");" },
+    { name: "copy", signature: "bool copy(string src, string dst)", doc: "Копирует файл в файловой системе VFS.", snippet: "copy(\"${1:src}\", \"${2:dst}\");" },
+    { name: "move", signature: "bool move(string src, string dst)", doc: "Перемещает файл в файловой системе VFS.", snippet: "move(\"${1:src}\", \"${2:dst}\");" },
+    { name: "delete", signature: "bool delete(string path)", doc: "Удаляет файл или каталог в файловой системе VFS.", snippet: "delete(\"${1:path}\");" },
+    { name: "not_show", signature: "bool not_show(string name)", doc: "Скрывает файл или папку при стандартном выводе команды ls.", snippet: "not_show(\"${1:filename}\");" },
+    { name: "specSign_show", signature: "void specSign_show(string flag)", doc: "Управляет отображением скрытых файлов (например specSign_show(\"-a\")).", snippet: "specSign_show(\"-a\");" },
+    { name: "clear", signature: "clear;", doc: "Очищает терминал (требует библиотеки !baremetal!). Строки, защищённые not_clear, сохраняются.", snippet: "clear;" },
+    { name: "not_clear", signature: "not_clear { ... } / not_clear;", doc: "Делает блок вывода или функцию не удаляемой при очистке экрана clear.", snippet: "not_clear {\n\t${1:gout << \"Неудаляемый текст\" << endl;}\n}" },
+    // 16 VGA Цветов
+    { name: "BLACK", signature: "int BLACK = 0", doc: "Черный цвет VGA (0)", snippet: "BLACK" },
+    { name: "BLUE", signature: "int BLUE = 1", doc: "Синий цвет VGA (1)", snippet: "BLUE" },
+    { name: "GREEN", signature: "int GREEN = 2", doc: "Зеленый цвет VGA (2)", snippet: "GREEN" },
+    { name: "CYAN", signature: "int CYAN = 3", doc: "Голубой / Циан цвет VGA (3)", snippet: "CYAN" },
+    { name: "RED", signature: "int RED = 4", doc: "Красный цвет VGA (4)", snippet: "RED" },
+    { name: "MAGENTA", signature: "int MAGENTA = 5", doc: "Пурпурный / Маджента цвет VGA (5)", snippet: "MAGENTA" },
+    { name: "BROWN", signature: "int BROWN = 6", doc: "Коричневый цвет VGA (6)", snippet: "BROWN" },
+    { name: "LIGHT_GRAY", signature: "int LIGHT_GRAY = 7", doc: "Светло-серый цвет VGA (7)", snippet: "LIGHT_GRAY" },
+    { name: "DARK_GRAY", signature: "int DARK_GRAY = 8", doc: "Темно-серый цвет VGA (8)", snippet: "DARK_GRAY" },
+    { name: "LIGHT_BLUE", signature: "int LIGHT_BLUE = 9", doc: "Светло-синий цвет VGA (9)", snippet: "LIGHT_BLUE" },
+    { name: "LIGHT_GREEN", signature: "int LIGHT_GREEN = 10", doc: "Светло-зеленый фирменный цвет GrassGreen (10)", snippet: "LIGHT_GREEN" },
+    { name: "LIGHT_CYAN", signature: "int LIGHT_CYAN = 11", doc: "Светло-голубой цвет VGA (11)", snippet: "LIGHT_CYAN" },
+    { name: "LIGHT_RED", signature: "int LIGHT_RED = 12", doc: "Светло-красный цвет VGA (12)", snippet: "LIGHT_RED" },
+    { name: "LIGHT_MAGENTA", signature: "int LIGHT_MAGENTA = 13", doc: "Светло-пурпурный цвет VGA (13)", snippet: "LIGHT_MAGENTA" },
+    { name: "YELLOW", signature: "int YELLOW = 14", doc: "Желтый цвет VGA (14)", snippet: "YELLOW" },
+    { name: "WHITE", signature: "int WHITE = 15", doc: "Белый цвет VGA (15)", snippet: "WHITE" },
     // Hardware Inspection API (!hardware!)
     // CPU
     { name: "hw_cpu_vendor", signature: "string hw_cpu_vendor()", doc: "Производитель процессора (GenuineIntel, AuthenticAMD).", snippet: "hw_cpu_vendor()" },

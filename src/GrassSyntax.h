@@ -431,10 +431,13 @@ class BytecodeCompiler {
     void parseStepStatement();
     void parseStatement();
     void parseStructDefinition();
+    void parseVirtualStruct();
+    void parseVFSBody();
 
 public:
     std::vector<uint8_t> code;
     bool has_error = false;
+    bool has_filesystem_struct = false;
 
     BytecodeCompiler(const std::vector<GrassToken>& toks, const std::string& fname);
     void compileProgram();

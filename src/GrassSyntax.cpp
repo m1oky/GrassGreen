@@ -435,6 +435,17 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
              fn == "pci_count" || fn == "rdtsc") {
         requireLib("hardware", "!hardware!", fn + "()", line);
     }
+    // 21. Проверка библиотеки !baremetal!
+    else if (fn == "clear" || fn == "cls" || fn == "not_clear" || fn == "not_clear_on" || fn == "not_clear_off" ||
+             fn == "clearable" || fn == "color" || fn == "read_key" ||
+             fn == "draw_box" || fn == "menu" || fn == "progress_bar" ||
+             fn == "reboot" || fn == "poweroff" ||
+             fn == "ls" || fn == "pwd" || fn == "cd" || fn == "copy" || fn == "move" ||
+             fn == "delete" || fn == "cr_folder" || fn == "cr_file" ||
+             fn == "not_show" || fn == "specSign_show" ||
+             fn == "virtual_struct" || fn == "physical_struct") {
+        requireLib("baremetal", "!baremetal!", fn + "()", line);
+    }
 }
 
 bool BytecodeCompiler::isTypeOrFuncKeyword(const string& s) {
@@ -581,6 +592,24 @@ void BytecodeCompiler::parsePrimary() {
         if (name == "false") { emitByte(OP_CONST_NUM); emitDouble(0.0); return; }
         if (name == "endl")  { emitByte(OP_CONST_STR); emitString("\n"); return; }
 
+        // 16 цветов VGA для библиотеки !baremetal!
+        if (name == "BLACK")         { emitByte(OP_CONST_NUM); emitDouble(0.0); return; }
+        if (name == "BLUE")          { emitByte(OP_CONST_NUM); emitDouble(1.0); return; }
+        if (name == "GREEN")         { emitByte(OP_CONST_NUM); emitDouble(2.0); return; }
+        if (name == "CYAN")          { emitByte(OP_CONST_NUM); emitDouble(3.0); return; }
+        if (name == "RED")           { emitByte(OP_CONST_NUM); emitDouble(4.0); return; }
+        if (name == "MAGENTA")       { emitByte(OP_CONST_NUM); emitDouble(5.0); return; }
+        if (name == "BROWN")         { emitByte(OP_CONST_NUM); emitDouble(6.0); return; }
+        if (name == "LIGHT_GRAY")    { emitByte(OP_CONST_NUM); emitDouble(7.0); return; }
+        if (name == "DARK_GRAY")     { emitByte(OP_CONST_NUM); emitDouble(8.0); return; }
+        if (name == "LIGHT_BLUE")    { emitByte(OP_CONST_NUM); emitDouble(9.0); return; }
+        if (name == "LIGHT_GREEN")   { emitByte(OP_CONST_NUM); emitDouble(10.0); return; }
+        if (name == "LIGHT_CYAN")    { emitByte(OP_CONST_NUM); emitDouble(11.0); return; }
+        if (name == "LIGHT_RED")     { emitByte(OP_CONST_NUM); emitDouble(12.0); return; }
+        if (name == "LIGHT_MAGENTA") { emitByte(OP_CONST_NUM); emitDouble(13.0); return; }
+        if (name == "YELLOW")        { emitByte(OP_CONST_NUM); emitDouble(14.0); return; }
+        if (name == "WHITE")         { emitByte(OP_CONST_NUM); emitDouble(15.0); return; }
+
         // Индексация массива: myArray[1]
         if (match(TOK_LBRACKET)) {
             parseExpression();
@@ -695,6 +724,9 @@ void BytecodeCompiler::parsePrimary() {
                 return;
             }
 
+            if (name == "ls" && !has_filesystem_struct) {
+                reportError(tok_line, "Ошибка компиляции: вызов 'ls()' требует предварительного объявления файловой структуры через virtual_struct { ... } или physical_struct('путь')!");
+            }
             checkBuiltinLibraryRequirement(name, tok_line);
             emitByte(OP_CALL_BUILTIN);
             emitString(name);
@@ -1072,6 +1104,8 @@ void BytecodeCompiler::parseStatement() {
             included_libs.insert("thread");
         } else if (lib == "!hardware!" || lib == "!hw!" || lib == "!sysinfo!" || lib == "!device!") {
             included_libs.insert("hardware");
+        } else if (lib == "!baremetal!" || lib == "!bm!" || lib == "!kernel!" || lib == "!BareMetal!") {
+            included_libs.insert("baremetal");
         } else if (lib == "!mmio!" || lib == "!io!") {
             included_libs.insert("mmio");
         } else if (lib == "!database!" || lib == "!gdb!") {
@@ -1157,7 +1191,9 @@ void BytecodeCompiler::parseStatement() {
 
     // 0.2 ОЧИСТКА ЭКРАНА И ФИКСИРОВАННЫЙ ТЕКСТ: clear; clear(); not_clear { ... }; not_clear; clearable;
     if (peek().kind == TOK_IDENT && (peek().text == "clear" || peek().text == "cls")) {
+        int clr_line = peek().line;
         advance();
+        requireLib("baremetal", "!baremetal!", "clear", clr_line);
         if (match(TOK_LPAREN)) match(TOK_RPAREN);
         match(TOK_SEMI);
         emitByte(OP_CALL_BUILTIN);
@@ -1168,7 +1204,9 @@ void BytecodeCompiler::parseStatement() {
     }
 
     if (peek().kind == TOK_IDENT && peek().text == "not_clear") {
+        int nc_line = peek().line;
         advance();
+        requireLib("baremetal", "!baremetal!", "not_clear", nc_line);
         if (peek().kind == TOK_LBRACE) {
             emitByte(OP_CALL_BUILTIN); emitString("not_clear_on"); emitByte(0); emitByte(OP_POP);
             parseBlock();
@@ -1191,10 +1229,185 @@ void BytecodeCompiler::parseStatement() {
     }
 
     if (peek().kind == TOK_IDENT && (peek().text == "clearable" || peek().text == "not_clear_off")) {
+        int co_line = peek().line;
         advance();
+        requireLib("baremetal", "!baremetal!", "clearable", co_line);
         if (match(TOK_LPAREN)) match(TOK_RPAREN);
         match(TOK_SEMI);
         emitByte(OP_CALL_BUILTIN); emitString("not_clear_off"); emitByte(0); emitByte(OP_POP);
+        return;
+    }
+
+    // 0.3 КОМАНДЫ BAREMETAL И VFS (virtual_struct, physical_struct, ls, pwd, cd, reboot, poweroff, etc.)
+    if (peek().kind == TOK_IDENT && peek().text == "virtual_struct") {
+        parseVirtualStruct();
+        return;
+    }
+    if (peek().kind == TOK_IDENT && peek().text == "physical_struct") {
+        int ps_line = peek().line;
+        advance();
+        requireLib("baremetal", "!baremetal!", "physical_struct", ps_line);
+        has_filesystem_struct = true;
+        match(TOK_LPAREN);
+        string path = "";
+        if (peek().kind == TOK_STRING) path = advance().text;
+        match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CONST_STR); emitString(path);
+        emitByte(OP_CALL_BUILTIN); emitString("physical_struct"); emitByte(1); emitByte(OP_POP);
+        return;
+    }
+    if (peek().kind == TOK_IDENT && peek().text == "reboot") {
+        int rb_line = peek().line;
+        advance();
+        requireLib("baremetal", "!baremetal!", "reboot", rb_line);
+        if (match(TOK_LPAREN)) match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("reboot"); emitByte(0); emitByte(OP_POP);
+        return;
+    }
+    if (peek().kind == TOK_IDENT && peek().text == "poweroff") {
+        int po_line = peek().line;
+        advance();
+        requireLib("baremetal", "!baremetal!", "poweroff", po_line);
+        if (match(TOK_LPAREN)) match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("poweroff"); emitByte(0); emitByte(OP_POP);
+        return;
+    }
+    if (peek().kind == TOK_IDENT && peek().text == "pwd") {
+        int pwd_line = peek().line;
+        advance();
+        requireLib("baremetal", "!baremetal!", "pwd", pwd_line);
+        if (match(TOK_LPAREN)) match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("pwd"); emitByte(0); emitByte(OP_POP);
+        return;
+    }
+    if (peek().kind == TOK_IDENT && peek().text == "ls") {
+        int ls_line = peek().line;
+        advance();
+        requireLib("baremetal", "!baremetal!", "ls()", ls_line);
+        if (!has_filesystem_struct) {
+            reportError(ls_line, "Ошибка компиляции: вызов 'ls()' требует предварительного объявления файловой структуры через virtual_struct { ... } или physical_struct('путь')!");
+            return;
+        }
+        uint8_t argc = 0;
+        if (match(TOK_LPAREN)) {
+            if (!match(TOK_RPAREN)) {
+                parseExpression();
+                argc = 1;
+                match(TOK_RPAREN);
+            }
+        }
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("ls"); emitByte(argc); emitByte(OP_POP);
+        return;
+    }
+    if (peek().kind == TOK_IDENT && peek().text == "cd") {
+        int cd_line = peek().line;
+        advance();
+        requireLib("baremetal", "!baremetal!", "cd", cd_line);
+        if (match(TOK_LPAREN)) {
+            parseExpression();
+            match(TOK_RPAREN);
+        } else if (peek().kind == TOK_STRING || peek().kind == TOK_IDENT || peek().kind == TOK_DOT) {
+            string p = advance().text;
+            while (peek().kind == TOK_DOT || peek().kind == TOK_SLASH || peek().kind == TOK_IDENT) {
+                p += advance().text;
+            }
+            emitByte(OP_CONST_STR); emitString(p);
+        } else {
+            emitByte(OP_CONST_STR); emitString("/");
+        }
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("cd"); emitByte(1); emitByte(OP_POP);
+        return;
+    }
+    if (peek().kind == TOK_IDENT && peek().text == "cr_folder") {
+        int cf_line = peek().line;
+        advance();
+        requireLib("baremetal", "!baremetal!", "cr_folder", cf_line);
+        match(TOK_LPAREN);
+        parseExpression();
+        match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("cr_folder"); emitByte(1); emitByte(OP_POP);
+        return;
+    }
+    if (peek().kind == TOK_IDENT && peek().text == "cr_file") {
+        int cf_line = peek().line;
+        advance();
+        requireLib("baremetal", "!baremetal!", "cr_file", cf_line);
+        match(TOK_LPAREN);
+        parseExpression();
+        uint8_t argc = 1;
+        if (match(TOK_COMMA)) {
+            parseExpression();
+            argc = 2;
+        }
+        match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("cr_file"); emitByte(argc); emitByte(OP_POP);
+        return;
+    }
+    if (peek().kind == TOK_IDENT && peek().text == "delete") {
+        int del_line = peek().line;
+        advance();
+        requireLib("baremetal", "!baremetal!", "delete", del_line);
+        match(TOK_LPAREN);
+        parseExpression();
+        match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("delete"); emitByte(1); emitByte(OP_POP);
+        return;
+    }
+    if (peek().kind == TOK_IDENT && peek().text == "copy") {
+        int cp_line = peek().line;
+        advance();
+        requireLib("baremetal", "!baremetal!", "copy", cp_line);
+        match(TOK_LPAREN);
+        parseExpression();
+        match(TOK_COMMA);
+        parseExpression();
+        match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("copy"); emitByte(2); emitByte(OP_POP);
+        return;
+    }
+    if (peek().kind == TOK_IDENT && peek().text == "move") {
+        int mv_line = peek().line;
+        advance();
+        requireLib("baremetal", "!baremetal!", "move", mv_line);
+        match(TOK_LPAREN);
+        parseExpression();
+        match(TOK_COMMA);
+        parseExpression();
+        match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("move"); emitByte(2); emitByte(OP_POP);
+        return;
+    }
+    if (peek().kind == TOK_IDENT && peek().text == "not_show") {
+        int ns_line = peek().line;
+        advance();
+        requireLib("baremetal", "!baremetal!", "not_show", ns_line);
+        match(TOK_LPAREN);
+        parseExpression();
+        match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("not_show"); emitByte(1); emitByte(OP_POP);
+        return;
+    }
+    if (peek().kind == TOK_IDENT && peek().text == "specSign_show") {
+        int ss_line = peek().line;
+        advance();
+        requireLib("baremetal", "!baremetal!", "specSign_show", ss_line);
+        match(TOK_LPAREN);
+        parseExpression();
+        match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("specSign_show"); emitByte(1); emitByte(OP_POP);
         return;
     }
 
@@ -1650,10 +1863,13 @@ void BytecodeCompiler::parseStatement() {
             if (matchIdent("endl")) {
                 emitByte(OP_LOG_EMPTY);
             } else if (matchIdent("not_clear")) {
+                requireLib("baremetal", "!baremetal!", "not_clear", peek(-1).line);
                 emitByte(OP_CALL_BUILTIN); emitString("not_clear_on"); emitByte(0); emitByte(OP_POP);
             } else if (matchIdent("clearable")) {
+                requireLib("baremetal", "!baremetal!", "clearable", peek(-1).line);
                 emitByte(OP_CALL_BUILTIN); emitString("not_clear_off"); emitByte(0); emitByte(OP_POP);
             } else if (matchIdent("clear") || matchIdent("cls")) {
+                requireLib("baremetal", "!baremetal!", "clear", peek(-1).line);
                 emitByte(OP_CALL_BUILTIN); emitString("clear"); emitByte(0); emitByte(OP_POP);
             } else {
                 parseExpression();
@@ -2213,4 +2429,75 @@ void BytecodeCompiler::parseStructDefinition() {
     if (def.total_size == 0) def.total_size = 1;
 
     g_struct_registry[sname] = def;
+}
+
+void BytecodeCompiler::parseVFSBody() {
+    while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
+        if (matchIdent("folder") || matchIdent("dir")) {
+            string name;
+            if (peek().kind == TOK_STRING || peek().kind == TOK_IDENT) {
+                name = advance().text;
+            }
+            emitByte(OP_CONST_STR); emitString(name);
+            emitByte(OP_CALL_BUILTIN); emitString("cr_folder"); emitByte(1); emitByte(OP_POP);
+
+            if (peek().kind == TOK_LBRACE) {
+                advance(); // {
+                emitByte(OP_CONST_STR); emitString(name);
+                emitByte(OP_CALL_BUILTIN); emitString("cd"); emitByte(1); emitByte(OP_POP);
+
+                parseVFSBody();
+                match(TOK_RBRACE);
+
+                emitByte(OP_CONST_STR); emitString("..");
+                emitByte(OP_CALL_BUILTIN); emitString("cd"); emitByte(1); emitByte(OP_POP);
+            }
+            match(TOK_SEMI);
+        } else if (matchIdent("file")) {
+            string name;
+            string fcontent = "";
+            if (peek().kind == TOK_STRING || peek().kind == TOK_IDENT) {
+                name = advance().text;
+            }
+            if (match(TOK_COMMA)) {
+                if (peek().kind == TOK_STRING || peek().kind == TOK_IDENT) {
+                    fcontent = advance().text;
+                }
+            }
+            emitByte(OP_CONST_STR); emitString(name);
+            emitByte(OP_CONST_STR); emitString(fcontent);
+            emitByte(OP_CALL_BUILTIN); emitString("cr_file"); emitByte(2); emitByte(OP_POP);
+            match(TOK_SEMI);
+        } else if (match(TOK_SEMI)) {
+            continue;
+        } else {
+            bool saved = inside_function;
+            inside_function = true;
+            parseStatement();
+            inside_function = saved;
+        }
+    }
+}
+
+void BytecodeCompiler::parseVirtualStruct() {
+    has_filesystem_struct = true;
+    int vs_line = peek().line;
+    advance(); // virtual_struct
+    requireLib("baremetal", "!baremetal!", "virtual_struct", vs_line);
+
+    emitByte(OP_CALL_BUILTIN);
+    emitString("virtual_struct");
+    emitByte(0);
+    emitByte(OP_POP);
+
+    if (match(TOK_LPAREN)) {
+        match(TOK_RPAREN);
+        match(TOK_SEMI);
+        return;
+    }
+
+    if (match(TOK_LBRACE)) {
+        parseVFSBody();
+        match(TOK_RBRACE);
+    }
 }

@@ -26,6 +26,7 @@
 #include "GrassKeyboard.h"
 #include "GrassHardware.h"
 #include "GrassBoot.h"
+#include "GrassBaremetal.h"
 #include "CoreMath.h"
 #include "GrassWeb.h"
 #include "GrassMemory.h"
@@ -1029,12 +1030,9 @@ public:
                     else if (fn == "typeof" && argc >= 1) {
                         push(GrassValue::Str(args[0].is_str() ? "string" : "number"));
                     }
+                    // ===== БИБЛИОТЕКА !baremetal! =====
                     else if (fn == "clear" || fn == "cls") {
-#if defined(_WIN32)
-                        system("cls");
-#else
-                        std::cout << "\033[2J\033[H";
-#endif
+                        GrassBaremetal::clear();
                         for (const auto& line : g_protected_console_lines) {
                             if (!line.empty()) {
                                 GrassIO::write_stdout(line.data(), line.size());
@@ -1045,51 +1043,139 @@ public:
                     }
                     else if (fn == "clear_all" || fn == "cls_all") {
                         g_protected_console_lines.clear();
-#if defined(_WIN32)
-                        system("cls");
-#else
-                        std::cout << "\033[2J\033[H";
-#endif
+                        GrassBaremetal::clear();
                         push(GrassValue::Num(1.0));
                     }
                     else if (fn == "not_clear_on") {
                         g_not_clear_active = true;
+                        GrassBaremetal::not_clear_on();
                         push(GrassValue::Num(1.0));
                     }
                     else if (fn == "not_clear_off") {
                         g_not_clear_active = false;
+                        GrassBaremetal::not_clear_off();
                         push(GrassValue::Num(1.0));
                     }
                     else if (fn == "not_clear") {
-                        if (argc >= 1) g_not_clear_active = (args[0].toNumber() != 0.0);
-                        else g_not_clear_active = true;
+                        if (argc >= 1) {
+                            bool on = (args[0].toNumber() != 0.0);
+                            g_not_clear_active = on;
+                            if (on) GrassBaremetal::not_clear_on(); else GrassBaremetal::not_clear_off();
+                        } else {
+                            g_not_clear_active = true;
+                            GrassBaremetal::not_clear_on();
+                        }
                         push(GrassValue::Num(1.0));
                     }
-                    else if (fn == "color" && argc >= 1) {
-                        string c = args[0].toString();
-#if defined(_WIN32)
-                        WORD attr = 7;
-                        if (c == "green" || c == "2") attr = 10;
-                        else if (c == "cyan" || c == "aqua" || c == "3") attr = 11;
-                        else if (c == "red" || c == "4") attr = 12;
-                        else if (c == "purple" || c == "magenta" || c == "5") attr = 13;
-                        else if (c == "yellow" || c == "6") attr = 14;
-                        else if (c == "white" || c == "7") attr = 15;
-                        else if (c == "blue" || c == "1") attr = 9;
-                        else if (c == "gray" || c == "8") attr = 8;
-                        else attr = (WORD)args[0].toNumber();
-                        SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), attr);
-#else
-                        if (c == "green" || c == "2") cout << "\033[92m";
-                        else if (c == "cyan" || c == "aqua" || c == "3") cout << "\033[96m";
-                        else if (c == "red" || c == "4") cout << "\033[91m";
-                        else if (c == "purple" || c == "magenta" || c == "5") cout << "\033[95m";
-                        else if (c == "yellow" || c == "6") cout << "\033[93m";
-                        else if (c == "white" || c == "7") cout << "\033[97m";
-                        else if (c == "blue" || c == "1") cout << "\033[94m";
-                        else if (c == "gray" || c == "8") cout << "\033[90m";
-                        else cout << "\033[0m";
-#endif
+                    else if (fn == "color") {
+                        if (argc >= 2) {
+                            uint8_t fg = GrassBaremetal::parse_color(args[0].toString());
+                            uint8_t bg = GrassBaremetal::parse_color(args[1].toString());
+                            GrassBaremetal::set_color(fg, bg);
+                        } else if (argc >= 1) {
+                            string c = args[0].toString();
+                            if (!c.empty() && c[0] == '#') {
+                                GrassBaremetal::set_color_hex(c);
+                            } else {
+                                GrassBaremetal::set_color(GrassBaremetal::parse_color(c));
+                            }
+                        }
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "read_key") {
+                        push(GrassValue::Str(GrassBaremetal::read_key()));
+                    }
+                    else if (fn == "draw_box" && argc >= 4) {
+                        int bx = (int)args[0].toNumber();
+                        int by = (int)args[1].toNumber();
+                        int bw = (int)args[2].toNumber();
+                        int bh = (int)args[3].toNumber();
+                        string btitle = (argc >= 5) ? args[4].toString() : "";
+                        int bfg = (argc >= 6) ? (int)GrassBaremetal::parse_color(args[5].toString()) : GrassBaremetal::COLOR_LIGHT_GREEN;
+                        int bbg = (argc >= 7) ? (int)GrassBaremetal::parse_color(args[6].toString()) : GrassBaremetal::COLOR_BLACK;
+                        GrassBaremetal::draw_box(bx, by, bw, bh, btitle, bfg, bbg);
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "menu" && argc >= 2) {
+                        string mtitle = args[0].toString();
+                        vector<string> mopts;
+                        if (args[1].is_array() && args[1].asArray()) {
+                            for (const auto& it : args[1].asArray()->elements) mopts.push_back(it.toString());
+                        } else {
+                            mopts.push_back(args[1].toString());
+                        }
+                        int sel = GrassBaremetal::menu(mtitle, mopts);
+                        push(GrassValue::Num((double)sel));
+                    }
+                    else if (fn == "progress_bar" && argc >= 4) {
+                        int px = (int)args[0].toNumber();
+                        int py = (int)args[1].toNumber();
+                        int pw = (int)args[2].toNumber();
+                        int ppct = (int)args[3].toNumber();
+                        int pfg = (argc >= 5) ? (int)GrassBaremetal::parse_color(args[4].toString()) : GrassBaremetal::COLOR_LIGHT_GREEN;
+                        int pbg = (argc >= 6) ? (int)GrassBaremetal::parse_color(args[5].toString()) : GrassBaremetal::COLOR_BLACK;
+                        GrassBaremetal::progress_bar(px, py, pw, ppct, pfg, pbg);
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "reboot") {
+                        GrassBaremetal::reboot();
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "poweroff") {
+                        GrassBaremetal::poweroff();
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "virtual_struct") {
+                        GrassBaremetal::vfs_set_has_struct(true);
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "physical_struct" && argc >= 1) {
+                        bool ok = GrassBaremetal::vfs_physical_struct(args[0].toString());
+                        push(GrassValue::Num(ok ? 1.0 : 0.0));
+                    }
+                    else if (fn == "ls") {
+                        string flags = (argc >= 1) ? args[0].toString() : "";
+                        string listing = GrassBaremetal::vfs_ls(flags);
+                        cout << listing << "\n";
+                        push(GrassValue::Str(listing));
+                    }
+                    else if (fn == "pwd") {
+                        string p = GrassBaremetal::vfs_pwd();
+                        cout << p << "\n";
+                        push(GrassValue::Str(p));
+                    }
+                    else if (fn == "cd") {
+                        string p = (argc >= 1) ? args[0].toString() : "/";
+                        bool ok = GrassBaremetal::vfs_cd(p);
+                        push(GrassValue::Num(ok ? 1.0 : 0.0));
+                    }
+                    else if (fn == "copy" && argc >= 2) {
+                        bool ok = GrassBaremetal::vfs_copy(args[0].toString(), args[1].toString());
+                        push(GrassValue::Num(ok ? 1.0 : 0.0));
+                    }
+                    else if (fn == "move" && argc >= 2) {
+                        bool ok = GrassBaremetal::vfs_move(args[0].toString(), args[1].toString());
+                        push(GrassValue::Num(ok ? 1.0 : 0.0));
+                    }
+                    else if (fn == "delete" && argc >= 1) {
+                        bool ok = GrassBaremetal::vfs_delete(args[0].toString());
+                        push(GrassValue::Num(ok ? 1.0 : 0.0));
+                    }
+                    else if (fn == "cr_folder" && argc >= 1) {
+                        bool ok = GrassBaremetal::vfs_cr_folder(args[0].toString());
+                        push(GrassValue::Num(ok ? 1.0 : 0.0));
+                    }
+                    else if (fn == "cr_file" && argc >= 1) {
+                        string cnt = (argc >= 2) ? args[1].toString() : "";
+                        bool ok = GrassBaremetal::vfs_cr_file(args[0].toString(), cnt);
+                        push(GrassValue::Num(ok ? 1.0 : 0.0));
+                    }
+                    else if (fn == "not_show" && argc >= 1) {
+                        bool ok = GrassBaremetal::vfs_not_show(args[0].toString());
+                        push(GrassValue::Num(ok ? 1.0 : 0.0));
+                    }
+                    else if (fn == "specSign_show" && argc >= 1) {
+                        GrassBaremetal::vfs_specSign_show(args[0].toString());
                         push(GrassValue::Num(1.0));
                     }
                     // ===== БИБЛИОТЕКА !time! =====

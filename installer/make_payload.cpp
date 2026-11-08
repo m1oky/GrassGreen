@@ -1,5 +1,5 @@
 // =============================================================================
-//  GrassGreen 4.2.0 — Sovereign C++ Installer Payload Generator
+//  GrassGreen 4.3.0 — Sovereign C++ Installer Payload Generator
 //  Генерирует payload_data.h напрямую из C++ без использования Python
 // =============================================================================
 
@@ -76,8 +76,8 @@ int main() {
     fs::path logoSvgPath = rootDir / "logo.svg";
     fs::path gdbSvgPath = rootDir / "gdb_logo.svg";
     fs::path testGrassPath = rootDir / "examples" / "io_test.grass";
-    fs::path vsixPath = rootDir / "bin" / "grassgreen-4.2.2.vsix";
-    if (!fs::exists(vsixPath)) vsixPath = rootDir / ".vscode" / "extension" / "grassgreen-4.2.2.vsix";
+    fs::path vsixPath = rootDir / "bin" / "grassgreen-4.3.0.vsix";
+    if (!fs::exists(vsixPath)) vsixPath = rootDir / ".vscode" / "extension" / "grassgreen-4.3.0.vsix";
     fs::path outHPath = installerDir / "payload_data.h";
 
     std::cout << "[GrassGreen Payload Builder] Reading binary assets...\n";
@@ -102,7 +102,7 @@ int main() {
     }
 
     out << "// =============================================================================\n";
-    out << "//  Auto-generated payload for GrassGreen 4.2.0 setup.exe\n";
+    out << "//  Auto-generated payload for GrassGreen 4.3.0 setup.exe\n";
     out << "//  Generated directly by sovereign C++ tool (make_payload.cpp)\n";
     out << "// =============================================================================\n";
     out << "#ifndef GRASS_PAYLOAD_DATA_H\n";
