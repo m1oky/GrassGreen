@@ -1,0 +1,17 @@
+!GrassGreen!
+
+int main() {
+    not_clear {
+        gout << "=== Fixed Header (Protected by not_clear) ===" << endl;
+        gout << "System: GrassGreen Sovereign OS" << endl;
+    }
+
+    gout << "Temporary line 1: User data" << endl;
+    gout << "Temporary line 2: Some calculations" << endl;
+
+    gout << "Clearing temporary text..." << endl;
+    clear;
+
+    gout << "Prompt: / " << endl;
+    return 0;
+}

@@ -396,6 +396,8 @@ namespace GrassBoot {
         append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100A); append_u8(bin_data, 0);   // shift_state = 0
         append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100B); append_u8(bin_data, 0);   // alt_state = 0
         append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100C); append_u8(bin_data, 0);   // layout = 0 (EN)
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091010); append_u32(bin_data, 0);   // not_clear_flag = 0
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091014); append_u32(bin_data, 160); // not_clear_boundary = 160 (banner line 0 protected)
 
         // --- 5. Вывод приветственного баннера GrassGreen в строку 0 ---
         const char* banner = "GrassGreen OS v4.2.0 Kernel [Multiboot Online]";
@@ -653,6 +655,18 @@ namespace GrassBoot {
             append_u8(bin_data, 0x40);
             append_u8(bin_data, 0xF7); append_u8(bin_data, 0xE1);
             append_u8(bin_data, 0x89); append_u8(bin_data, 0xC3);
+
+            // If not_clear active ([0x00091010] == 1): update [0x00091014] = max([0x00091014], ebx)
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x00091010); append_u8(bin_data, 1);
+            size_t jne_skip_nl_bound = bin_data.size();
+            append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x3B); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091014);
+            size_t jbe_skip_nl_bound = bin_data.size();
+            append_u8(bin_data, 0x76); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091014);
+            bin_data[jne_skip_nl_bound + 1] = (uint8_t)(bin_data.size() - (jne_skip_nl_bound + 2));
+            bin_data[jbe_skip_nl_bound + 1] = (uint8_t)(bin_data.size() - (jbe_skip_nl_bound + 2));
+
             size_t jmp_check_scroll1 = bin_data.size();
             append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
 
@@ -1444,17 +1458,96 @@ namespace GrassBoot {
                             append_u8(bin_data, 0xE8); // call read_line
                             append_u32(bin_data, addr_read_line - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
                             append_u8(bin_data, 0x68); append_u32(bin_data, 0x00092000); // push 0x00092000
-                        } else if (fn == "clear") {
-                            // Очистка экрана VGA и сброс курсора
+                        } else if (fn == "clear" || fn == "cls") {
+                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+                            // 1. EDI = [0x00091014] (boundary)
+                            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x00091014);
+                            append_u8(bin_data, 0x81); append_u8(bin_data, 0xFF); append_u32(bin_data, 4000);
+                            size_t jb_b_ok = bin_data.size();
+                            append_u8(bin_data, 0x72); append_u8(bin_data, 0x00);
+                            append_u8(bin_data, 0xBF); append_u32(bin_data, 160);
+                            bin_data[jb_b_ok + 1] = (uint8_t)(bin_data.size() - (jb_b_ok + 2));
+
+                            // 2. ECX = (4000 - EDI) / 4
+                            append_u8(bin_data, 0xB9); append_u32(bin_data, 4000);
+                            append_u8(bin_data, 0x29); append_u8(bin_data, 0xF9); // sub ecx, edi
+                            size_t jbe_c_none = bin_data.size();
+                            append_u8(bin_data, 0x76); append_u8(bin_data, 0x00); // jbe
+                            append_u8(bin_data, 0xC1); append_u8(bin_data, 0xE9); append_u8(bin_data, 2); // shr ecx, 2
+
+                            // 3. Clear VGA memory from 0x000B8000 + EDI
+                            append_u8(bin_data, 0x81); append_u8(bin_data, 0xC7); append_u32(bin_data, 0x000B8000);
+                            append_u8(bin_data, 0xFC); // cld
+                            append_u8(bin_data, 0xB8); append_u32(bin_data, 0x07200720); // space
+                            append_u8(bin_data, 0xF3); append_u8(bin_data, 0xAB); // rep stosd
+                            bin_data[jbe_c_none + 1] = (uint8_t)(bin_data.size() - (jbe_c_none + 2));
+
+                            // 4. Cursor to boundary
+                            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091014);
+                            append_u8(bin_data, 0x81); append_u8(bin_data, 0xFB); append_u32(bin_data, 4000);
+                            size_t jb_c_ok = bin_data.size();
+                            append_u8(bin_data, 0x72); append_u8(bin_data, 0x00);
+                            append_u8(bin_data, 0xBB); append_u32(bin_data, 160);
+                            bin_data[jb_c_ok + 1] = (uint8_t)(bin_data.size() - (jb_c_ok + 2));
+                            append_u8(bin_data, 0x89); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091000);
+                            append_u8(bin_data, 0xE8);
+                            append_u32(bin_data, addr_update_cursor - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+                            // 5. push 1
+                            append_u8(bin_data, 0x6A); append_u8(bin_data, 1);
+                        } else if (fn == "clear_all" || fn == "cls_all") {
+                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+                            append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091014); append_u32(bin_data, 160);
                             append_u8(bin_data, 0xFC);
-                            append_u8(bin_data, 0xBF); append_u32(bin_data, 0x000B8000);
-                            append_u8(bin_data, 0xB9); append_u32(bin_data, 1000);
+                            append_u8(bin_data, 0xBF); append_u32(bin_data, 0x000B80A0);
+                            append_u8(bin_data, 0xB9); append_u32(bin_data, 960);
                             append_u8(bin_data, 0xB8); append_u32(bin_data, 0x07200720);
                             append_u8(bin_data, 0xF3); append_u8(bin_data, 0xAB);
-                            append_u8(bin_data, 0x31); append_u8(bin_data, 0xDB);
+                            append_u8(bin_data, 0xBB); append_u32(bin_data, 160);
                             append_u8(bin_data, 0x89); append_u8(bin_data, 0x1D); append_u32(bin_data, 0x00091000);
-                            append_u8(bin_data, 0xE8); // call update_cursor
+                            append_u8(bin_data, 0xE8);
                             append_u32(bin_data, addr_update_cursor - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+                            append_u8(bin_data, 0x6A); append_u8(bin_data, 1);
+                        } else if (fn == "not_clear_on") {
+                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+                            append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091010); append_u32(bin_data, 1);
+                            append_u8(bin_data, 0x6A); append_u8(bin_data, 1);
+                        } else if (fn == "not_clear_off") {
+                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+                            append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091010); append_u32(bin_data, 0);
+                            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091000);
+                            append_u8(bin_data, 0x31); append_u8(bin_data, 0xD2);
+                            append_u8(bin_data, 0xB9); append_u32(bin_data, 160);
+                            append_u8(bin_data, 0xF7); append_u8(bin_data, 0xF1);
+                            append_u8(bin_data, 0x85); append_u8(bin_data, 0xD2);
+                            size_t jz_col0 = bin_data.size();
+                            append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+                            append_u8(bin_data, 0x40);
+                            bin_data[jz_col0 + 1] = (uint8_t)(bin_data.size() - (jz_col0 + 2));
+                            append_u8(bin_data, 0xF7); append_u8(bin_data, 0xE1);
+                            append_u8(bin_data, 0x3B); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091014);
+                            size_t jbe_skip_off = bin_data.size();
+                            append_u8(bin_data, 0x76); append_u8(bin_data, 0x00);
+                            append_u8(bin_data, 0xA3); append_u32(bin_data, 0x00091014);
+                            bin_data[jbe_skip_off + 1] = (uint8_t)(bin_data.size() - (jbe_skip_off + 2));
+                            append_u8(bin_data, 0x6A); append_u8(bin_data, 1);
+                        } else if (fn == "not_clear") {
+                            if (argc >= 1) {
+                                append_u8(bin_data, 0x58);
+                                for (int i = 1; i < argc; ++i) append_u8(bin_data, 0x58);
+                                append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0);
+                                size_t jz_nc_off = bin_data.size();
+                                append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+                                append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091010); append_u32(bin_data, 1);
+                                size_t jmp_nc_done = bin_data.size();
+                                append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+                                bin_data[jz_nc_off + 1] = (uint8_t)(bin_data.size() - (jz_nc_off + 2));
+                                append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091010); append_u32(bin_data, 0);
+                                bin_data[jmp_nc_done + 1] = (uint8_t)(bin_data.size() - (jmp_nc_done + 2));
+                            } else {
+                                append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091010); append_u32(bin_data, 1);
+                            }
+                            append_u8(bin_data, 0x6A); append_u8(bin_data, 1);
                                                 } else if (fn == "hw_ram_total" || fn == "ram_total") {
     for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
     append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091020);

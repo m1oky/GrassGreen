@@ -55,6 +55,8 @@ namespace fs = std::filesystem;
 // Глобальная арена для строк VM (4 МБ)
 GrassArena g_vm_arena(4 * 1024 * 1024);
 unordered_map<string, GrassStructDef> g_struct_registry;
+static bool g_not_clear_active = false;
+static std::vector<std::string> g_protected_console_lines;
 
 static string wstring_to_utf8_helper(const wstring& wstr) {
     if (wstr.empty()) return "";
@@ -663,12 +665,19 @@ public:
         {
             string s = pop().toString();
             GrassIO::write_stdout(s.data(), s.size());
+            if (g_not_clear_active) {
+                if (g_protected_console_lines.empty()) g_protected_console_lines.push_back("");
+                g_protected_console_lines.back() += s;
+            }
         }
         DISPATCH_STEP();
     }
 
     do_log_empty: {
         GrassIO::write_stdout("\n", 1);
+        if (g_not_clear_active) {
+            g_protected_console_lines.push_back("");
+        }
         DISPATCH_STEP();
     }
 
@@ -1021,7 +1030,39 @@ public:
                         push(GrassValue::Str(args[0].is_str() ? "string" : "number"));
                     }
                     else if (fn == "clear" || fn == "cls") {
+#if defined(_WIN32)
                         system("cls");
+#else
+                        std::cout << "\033[2J\033[H";
+#endif
+                        for (const auto& line : g_protected_console_lines) {
+                            if (!line.empty()) {
+                                GrassIO::write_stdout(line.data(), line.size());
+                                GrassIO::write_stdout("\n", 1);
+                            }
+                        }
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "clear_all" || fn == "cls_all") {
+                        g_protected_console_lines.clear();
+#if defined(_WIN32)
+                        system("cls");
+#else
+                        std::cout << "\033[2J\033[H";
+#endif
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "not_clear_on") {
+                        g_not_clear_active = true;
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "not_clear_off") {
+                        g_not_clear_active = false;
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "not_clear") {
+                        if (argc >= 1) g_not_clear_active = (args[0].toNumber() != 0.0);
+                        else g_not_clear_active = true;
                         push(GrassValue::Num(1.0));
                     }
                     else if (fn == "color" && argc >= 1) {

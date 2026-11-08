@@ -1155,6 +1155,49 @@ void BytecodeCompiler::parseStatement() {
         }
     }
 
+    // 0.2 ОЧИСТКА ЭКРАНА И ФИКСИРОВАННЫЙ ТЕКСТ: clear; clear(); not_clear { ... }; not_clear; clearable;
+    if (peek().kind == TOK_IDENT && (peek().text == "clear" || peek().text == "cls")) {
+        advance();
+        if (match(TOK_LPAREN)) match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN);
+        emitString("clear");
+        emitByte(0);
+        emitByte(OP_POP);
+        return;
+    }
+
+    if (peek().kind == TOK_IDENT && peek().text == "not_clear") {
+        advance();
+        if (peek().kind == TOK_LBRACE) {
+            emitByte(OP_CALL_BUILTIN); emitString("not_clear_on"); emitByte(0); emitByte(OP_POP);
+            parseBlock();
+            emitByte(OP_CALL_BUILTIN); emitString("not_clear_off"); emitByte(0); emitByte(OP_POP);
+            return;
+        }
+        if (match(TOK_LPAREN)) {
+            if (match(TOK_RPAREN)) {
+                emitByte(OP_CALL_BUILTIN); emitString("not_clear_on"); emitByte(0); emitByte(OP_POP);
+            } else {
+                parseExpression();
+                match(TOK_RPAREN);
+                emitByte(OP_CALL_BUILTIN); emitString("not_clear"); emitByte(1); emitByte(OP_POP);
+            }
+        } else {
+            emitByte(OP_CALL_BUILTIN); emitString("not_clear_on"); emitByte(0); emitByte(OP_POP);
+        }
+        match(TOK_SEMI);
+        return;
+    }
+
+    if (peek().kind == TOK_IDENT && (peek().text == "clearable" || peek().text == "not_clear_off")) {
+        advance();
+        if (match(TOK_LPAREN)) match(TOK_RPAREN);
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("not_clear_off"); emitByte(0); emitByte(OP_POP);
+        return;
+    }
+
     // 1. ОБЪЯВЛЕНИЕ ФУНКЦИЙ (int main() {}, take my_func() {}, void my_func() {})
     if (peek().kind == TOK_IDENT && isTypeOrFuncKeyword(peek().text) &&
         peek(1).kind == TOK_IDENT && peek(2).kind == TOK_LPAREN) {
@@ -1606,6 +1649,12 @@ void BytecodeCompiler::parseStatement() {
         while (match(TOK_SHL)) {
             if (matchIdent("endl")) {
                 emitByte(OP_LOG_EMPTY);
+            } else if (matchIdent("not_clear")) {
+                emitByte(OP_CALL_BUILTIN); emitString("not_clear_on"); emitByte(0); emitByte(OP_POP);
+            } else if (matchIdent("clearable")) {
+                emitByte(OP_CALL_BUILTIN); emitString("not_clear_off"); emitByte(0); emitByte(OP_POP);
+            } else if (matchIdent("clear") || matchIdent("cls")) {
+                emitByte(OP_CALL_BUILTIN); emitString("clear"); emitByte(0); emitByte(OP_POP);
             } else {
                 parseExpression();
                 emitByte(OP_PRINT_RAW);

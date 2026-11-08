@@ -520,5 +520,21 @@
       "}"
     ],
     "description": "Сводная панель мониторинга всей системы (Task Manager style)"
+  },
+  "Protected Not Clear Block": {
+    "prefix": "not_clear",
+    "body": [
+      "not_clear {",
+      "\tgout << \"${1:Protected Header / Welcome}\" << endl;",
+      "}"
+    ],
+    "description": "Блок текста или команд, защищенный от стирания функцией clear;"
+  },
+  "Screen Clear": {
+    "prefix": "clear",
+    "body": [
+      "clear;"
+    ],
+    "description": "Очистка экрана/консоли (с сохранением областей not_clear)"
   }
 }
