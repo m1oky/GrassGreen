@@ -161,7 +161,7 @@
       "patterns": [
         {
           "name": "support.function.hardware.grassgreen",
-          "match": "\\b(hw_ram_total|hw_ram_used|hw_ram_free|proc_mem|hw_cpu_vendor|hw_cpu_brand|hw_cpu_cores|hw_cpu_family|hw_cpu_freq|hw_rdtsc|hw_board_vendor|hw_board_model|hw_bios_vendor|hw_bios_date|hw_pci_count|hw_reboot)\\b"
+          "match": "\\b(hw_ram_total|hw_ram_used|hw_ram_free|proc_mem|hw_ram_cached|hw_ram_speed|hw_ram_temp|hw_ram_model|hw_ram_form|hw_cpu_vendor|hw_cpu_brand|hw_cpu_cores|hw_cpu_threads|hw_cpu_logical|hw_cpu_sockets|hw_cpu_family|hw_cpu_freq|hw_cpu_base_freq|hw_cpu_usage|hw_cpu_temp|hw_cpu_cache_l1|hw_cpu_cache_l2|hw_cpu_cache_l3|hw_cpu_virt|hw_uptime_sec|hw_uptime_str|hw_disk_size|hw_disk_free|hw_disk_format|hw_disk_model|hw_disk_type|hw_disk_temp|hw_disk_read_speed|hw_disk_write_speed|hw_disk_resp_time|hw_disk_usage|hw_disk_active|hw_disk_is_system|hw_pagefile_total|hw_pagefile_used|hw_net_adapter|hw_net_type|hw_net_ipv4|hw_net_ipv6|hw_net_recv_speed|hw_net_send_speed|hw_net_recv_total|hw_net_send_total|hw_gpu_name|hw_gpu_usage|hw_gpu_temp|hw_gpu_vram_total|hw_gpu_vram_used|hw_gpu_vram_shared|hw_board_vendor|hw_board_model|hw_bios_vendor|hw_bios_date|hw_bios_version|hw_pci_count|hw_rdtsc|hw_reboot)\\b"
         },
         {
           "name": "support.function.keyboard.grassgreen",

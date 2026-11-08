@@ -76,8 +76,8 @@ int main() {
     fs::path logoSvgPath = rootDir / "logo.svg";
     fs::path gdbSvgPath = rootDir / "gdb_logo.svg";
     fs::path testGrassPath = rootDir / "examples" / "io_test.grass";
-    fs::path vsixPath = rootDir / "bin" / "grassgreen-4.2.1.vsix";
-    if (!fs::exists(vsixPath)) vsixPath = rootDir / ".vscode" / "extension" / "grassgreen-4.2.1.vsix";
+    fs::path vsixPath = rootDir / "bin" / "grassgreen-4.2.2.vsix";
+    if (!fs::exists(vsixPath)) vsixPath = rootDir / ".vscode" / "extension" / "grassgreen-4.2.2.vsix";
     fs::path outHPath = installerDir / "payload_data.h";
 
     std::cout << "[GrassGreen Payload Builder] Reading binary assets...\n";

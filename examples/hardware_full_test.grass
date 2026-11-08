@@ -1,0 +1,77 @@
+!GrassGreen!
+!hardware!
+
+int main() {
+    gout << "=== GrassGreen Hardware Inspection Test ===" << endl;
+
+    // CPU
+    gout << "[CPU]" << endl;
+    gout << "  Vendor:        " << hw_cpu_vendor() << endl;
+    gout << "  Brand:         " << hw_cpu_brand() << endl;
+    gout << "  Cores:         " << hw_cpu_cores() << endl;
+    gout << "  Threads:       " << hw_cpu_threads() << endl;
+    gout << "  Sockets:       " << hw_cpu_sockets() << endl;
+    gout << "  Base Speed:    " << hw_cpu_base_freq() << " MHz" << endl;
+    gout << "  Current Speed: " << hw_cpu_freq() << " MHz" << endl;
+    gout << "  Usage:         " << hw_cpu_usage() << " %" << endl;
+    gout << "  Temp:          " << hw_cpu_temp() << " C" << endl;
+    gout << "  L1 Cache:      " << hw_cpu_cache_l1() << " KB" << endl;
+    gout << "  L2 Cache:      " << hw_cpu_cache_l2() << " KB" << endl;
+    gout << "  L3 Cache:      " << hw_cpu_cache_l3() << " KB" << endl;
+    gout << "  Virtualization:" << hw_cpu_virt() << endl;
+    gout << "  Uptime:        " << hw_uptime_str() << endl;
+
+    // RAM
+    gout << "[RAM]" << endl;
+    gout << "  Total:         " << hw_ram_total() << " MB" << endl;
+    gout << "  Used:          " << hw_ram_used() << " MB (proc_mem: " << proc_mem << " MB)" << endl;
+    gout << "  Free:          " << hw_ram_free() << " MB" << endl;
+    gout << "  Cached:        " << hw_ram_cached() << " MB" << endl;
+    gout << "  Speed:         " << hw_ram_speed() << " MHz" << endl;
+    gout << "  Temp:          " << hw_ram_temp() << " C" << endl;
+    gout << "  Model:         " << hw_ram_model() << endl;
+    gout << "  Form Factor:   " << hw_ram_form() << endl;
+
+    // DISK
+    gout << "[DISK]" << endl;
+    gout << "  Model:         " << hw_disk_model() << endl;
+    gout << "  Type:          " << hw_disk_type() << endl;
+    gout << "  Capacity:      " << hw_disk_size() << " GB" << endl;
+    gout << "  Free:          " << hw_disk_free() << " GB" << endl;
+    gout << "  Format:        " << hw_disk_format() << endl;
+    gout << "  Temp:          " << hw_disk_temp() << " C" << endl;
+    gout << "  Read Speed:    " << hw_disk_read_speed() << " MB/s" << endl;
+    gout << "  Write Speed:   " << hw_disk_write_speed() << " MB/s" << endl;
+    gout << "  Resp Time:     " << hw_disk_resp_time() << " ms" << endl;
+    gout << "  Active Time:   " << hw_disk_usage() << " %" << endl;
+    gout << "  System Drive:  " << hw_disk_is_system() << endl;
+    gout << "  Pagefile:      " << hw_pagefile_used() << " / " << hw_pagefile_total() << " MB" << endl;
+
+    // NETWORK
+    gout << "[NETWORK]" << endl;
+    gout << "  Adapter:       " << hw_net_adapter() << endl;
+    gout << "  Type:          " << hw_net_type() << endl;
+    gout << "  IPv4:          " << hw_net_ipv4() << endl;
+    gout << "  IPv6:          " << hw_net_ipv6() << endl;
+    gout << "  Recv Speed:    " << hw_net_recv_speed() << " KB/s" << endl;
+    gout << "  Send Speed:    " << hw_net_send_speed() << " KB/s" << endl;
+
+    // GPU
+    gout << "[GPU]" << endl;
+    gout << "  Model:         " << hw_gpu_name() << endl;
+    gout << "  Usage:         " << hw_gpu_usage() << " %" << endl;
+    gout << "  Temp:          " << hw_gpu_temp() << " C" << endl;
+    gout << "  VRAM Total:    " << hw_gpu_vram_total() << " MB" << endl;
+    gout << "  VRAM Used:     " << hw_gpu_vram_used() << " MB" << endl;
+    gout << "  VRAM Shared:   " << hw_gpu_vram_shared() << " MB" << endl;
+
+    // MOTHERBOARD & BIOS
+    gout << "[BOARD & BIOS]" << endl;
+    gout << "  Board Vendor:  " << hw_board_vendor() << endl;
+    gout << "  Board Model:   " << hw_board_model() << endl;
+    gout << "  BIOS Vendor:   " << hw_bios_vendor() << endl;
+    gout << "  BIOS Date:     " << hw_bios_date() << endl;
+    gout << "  PCI Devices:   " << hw_pci_count() << endl;
+
+    return 0;
+}

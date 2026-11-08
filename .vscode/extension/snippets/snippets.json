@@ -399,5 +399,126 @@
       "}"
     ],
     "description": "Шаблон bare-metal ядра операционной системы Multiboot с интерактивным CLI"
+  },
+  "Hardware CPU Monitor": {
+    "prefix": "hw_cpu_monitor",
+    "body": [
+      "!GrassGreen!",
+      "!hardware!",
+      "",
+      "int main() {",
+      "\tgout << \"=== ЦПУ (CPU) ===\" << endl;",
+      "\tgout << \"Модель:      \" << hw_cpu_brand() << endl;",
+      "\tgout << \"Ядра/Потоки: \" << hw_cpu_cores() << \" / \" << hw_cpu_threads() << endl;",
+      "\tgout << \"Частота:     \" << hw_cpu_freq() << \" МГц (базовая: \" << hw_cpu_base_freq() << \" МГц)\" << endl;",
+      "\tgout << \"Загрузка:    \" << hw_cpu_usage() << \" %\" << endl;",
+      "\tgout << \"Температура: \" << hw_cpu_temp() << \" C\" << endl;",
+      "\tgout << \"Кэш L1/L2/L3:\" << hw_cpu_cache_l1() << \"K / \" << hw_cpu_cache_l2() << \"K / \" << hw_cpu_cache_l3() << \"K\" << endl;",
+      "\tgout << \"Время работы:\" << hw_uptime_str() << endl;",
+      "\treturn 0;",
+      "}"
+    ],
+    "description": "Полный мониторинг процессора (CPU) через !hardware!"
+  },
+  "Hardware RAM Monitor": {
+    "prefix": "hw_ram_monitor",
+    "body": [
+      "!GrassGreen!",
+      "!hardware!",
+      "",
+      "int main() {",
+      "\tgout << \"=== ОЗУ (RAM) ===\" << endl;",
+      "\tgout << \"Всего:       \" << hw_ram_total() << \" МБ\" << endl;",
+      "\tgout << \"Занято:      \" << hw_ram_used() << \" МБ\" << endl;",
+      "\tgout << \"Свободно:    \" << hw_ram_free() << \" МБ\" << endl;",
+      "\tgout << \"Кэшировано:  \" << hw_ram_cached() << \" МБ\" << endl;",
+      "\tgout << \"Частота:     \" << hw_ram_speed() << \" МГц\" << endl;",
+      "\tgout << \"Модель:      \" << hw_ram_model() << endl;",
+      "\tgout << \"Форм-фактор: \" << hw_ram_form() << endl;",
+      "\treturn 0;",
+      "}"
+    ],
+    "description": "Полный мониторинг оперативной памяти через !hardware!"
+  },
+  "Hardware Disk Monitor": {
+    "prefix": "hw_disk_monitor",
+    "body": [
+      "!GrassGreen!",
+      "!hardware!",
+      "",
+      "int main() {",
+      "\tgout << \"=== ДИСК (DISK) ===\" << endl;",
+      "\tgout << \"Модель:      \" << hw_disk_model() << endl;",
+      "\tgout << \"Тип:         \" << hw_disk_type() << endl;",
+      "\tgout << \"Ёмкость:     \" << hw_disk_size() << \" МБ\" << endl;",
+      "\tgout << \"ФС:          \" << hw_disk_format() << endl;",
+      "\tgout << \"Чтение:      \" << hw_disk_read_speed() << \" КБ/с\" << endl;",
+      "\tgout << \"Запись:      \" << hw_disk_write_speed() << \" КБ/с\" << endl;",
+      "\tgout << \"Активность:  \" << hw_disk_usage() << \" %\" << endl;",
+      "\tgout << \"Ответ:       \" << hw_disk_resp_time() << \" мс\" << endl;",
+      "\treturn 0;",
+      "}"
+    ],
+    "description": "Полный мониторинг накопителей через !hardware!"
+  },
+  "Hardware Network Monitor": {
+    "prefix": "hw_net_monitor",
+    "body": [
+      "!GrassGreen!",
+      "!hardware!",
+      "",
+      "int main() {",
+      "\tgout << \"=== СЕТЬ (NETWORK) ===\" << endl;",
+      "\tgout << \"Адаптер:     \" << hw_net_adapter() << endl;",
+      "\tgout << \"Тип:         \" << hw_net_type() << endl;",
+      "\tgout << \"IPv4:        \" << hw_net_ipv4() << endl;",
+      "\tgout << \"IPv6:        \" << hw_net_ipv6() << endl;",
+      "\tgout << \"Приём:       \" << hw_net_recv_speed() << \" КБ/с (Всего: \" << hw_net_recv_total() << \" МБ)\" << endl;",
+      "\tgout << \"Отдача:      \" << hw_net_send_speed() << \" КБ/с (Всего: \" << hw_net_send_total() << \" МБ)\" << endl;",
+      "\treturn 0;",
+      "}"
+    ],
+    "description": "Полный мониторинг сети и интернета через !hardware!"
+  },
+  "Hardware GPU Monitor": {
+    "prefix": "hw_gpu_monitor",
+    "body": [
+      "!GrassGreen!",
+      "!hardware!",
+      "",
+      "int main() {",
+      "\tgout << \"=== ВИДЕОКАРТА (GPU) ===\" << endl;",
+      "\tgout << \"Модель:      \" << hw_gpu_name() << endl;",
+      "\tgout << \"Загрузка:    \" << hw_gpu_usage() << \" %\" << endl;",
+      "\tgout << \"Температура: \" << hw_gpu_temp() << \" C\" << endl;",
+      "\tgout << \"VRAM Всего:  \" << hw_gpu_vram_total() << \" МБ\" << endl;",
+      "\tgout << \"VRAM Занято: \" << hw_gpu_vram_used() << \" МБ\" << endl;",
+      "\treturn 0;",
+      "}"
+    ],
+    "description": "Полный мониторинг видеокарты через !hardware!"
+  },
+  "Hardware Full Dashboard": {
+    "prefix": "hw_dashboard",
+    "body": [
+      "!GrassGreen!",
+      "!hardware!",
+      "",
+      "int main() {",
+      "\tgout << \"==============================================\" << endl;",
+      "\tgout << \"         GrassGreen System Monitor            \" << endl;",
+      "\tgout << \"==============================================\" << endl;",
+      "\tgout << \"ЦПУ:   \" << hw_cpu_brand() << \" [\" << hw_cpu_usage() << \"% | \" << hw_cpu_temp() << \" C]\" << endl;",
+      "\tgout << \"ОЗУ:   \" << hw_ram_used() << \" / \" << hw_ram_total() << \" МБ (\" << hw_ram_speed() << \" МГц)\" << endl;",
+      "\tgout << \"ДИСК:  \" << hw_disk_model() << \" [\" << hw_disk_type() << \" \" << hw_disk_size() << \" МБ]\" << endl;",
+      "\tgout << \"СЕТЬ:  \" << hw_net_adapter() << \" (\" << hw_net_ipv4() << \")\" << endl;",
+      "\tgout << \"ГПУ:   \" << hw_gpu_name() << \" [\" << hw_gpu_vram_total() << \" МБ]\" << endl;",
+      "\tgout << \"ПЛАТА: \" << hw_board_vendor() << \" \" << hw_board_model() << endl;",
+      "\tgout << \"BIOS:  \" << hw_bios_vendor() << \" (\" << hw_bios_date() << \")\" << endl;",
+      "\tgout << \"==============================================\" << endl;",
+      "\treturn 0;",
+      "}"
+    ],
+    "description": "Сводная панель мониторинга всей системы (Task Manager style)"
   }
 }

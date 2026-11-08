@@ -33,7 +33,7 @@ g++ -std=c++20 -O3 -s ^
   src/Grass2DGraphics.cpp ^
   src/GrassHardware.cpp ^
   -o bin/grassc.exe ^
-  -lgdiplus -lgdi32 -lcomctl32 -lwinmm -lws2_32 -lwininet -lurlmon -lpsapi
+  -lgdiplus -lgdi32 -lcomctl32 -lwinmm -lws2_32 -lwininet -lurlmon -lpsapi -liphlpapi -ldxgi
 
 if %ERRORLEVEL% equ 0 (
     copy /Y bin\grassc.exe bin\grg.exe >nul

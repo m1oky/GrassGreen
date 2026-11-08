@@ -493,6 +493,12 @@ public:
             }
             if (found) {
                 push(val);
+            } else if (name == "proc_mem" || name == "ram_used") {
+                push(GrassValue::Num((double)GrassHardware::ram_used_mb()));
+            } else if (name == "ram_total") {
+                push(GrassValue::Num((double)GrassHardware::ram_total_mb()));
+            } else if (name == "ram_free") {
+                push(GrassValue::Num((double)GrassHardware::ram_free_mb()));
             } else if (GrassDB::has(name)) {
                 push(GrassValue::Str(GrassDB::get(name)));
             } else {
@@ -765,6 +771,22 @@ public:
                     else if (fn == "hw_ram_free" || fn == "ram_free") {
                         push(GrassValue::Num((double)GrassHardware::ram_free_mb()));
                     }
+                    else if (fn == "hw_ram_cached") {
+                        push(GrassValue::Num((double)GrassHardware::ram_cached_mb()));
+                    }
+                    else if (fn == "hw_ram_speed") {
+                        push(GrassValue::Num((double)GrassHardware::ram_speed_mhz()));
+                    }
+                    else if (fn == "hw_ram_temp") {
+                        push(GrassValue::Num((double)GrassHardware::ram_temp()));
+                    }
+                    else if (fn == "hw_ram_model") {
+                        push(GrassValue::Str(GrassHardware::ram_model()));
+                    }
+                    else if (fn == "hw_ram_form") {
+                        push(GrassValue::Str(GrassHardware::ram_form()));
+                    }
+                    // ── CPU ──
                     else if (fn == "hw_cpu_vendor" || fn == "cpu_vendor") {
                         push(GrassValue::Str(GrassHardware::cpu_vendor()));
                     }
@@ -774,12 +796,130 @@ public:
                     else if (fn == "hw_cpu_cores" || fn == "cpu_cores") {
                         push(GrassValue::Num((double)GrassHardware::cpu_cores()));
                     }
+                    else if (fn == "hw_cpu_threads" || fn == "hw_cpu_logical") {
+                        push(GrassValue::Num((double)GrassHardware::cpu_threads()));
+                    }
+                    else if (fn == "hw_cpu_sockets") {
+                        push(GrassValue::Num((double)GrassHardware::cpu_sockets()));
+                    }
                     else if (fn == "hw_cpu_family" || fn == "cpu_family") {
                         push(GrassValue::Num((double)GrassHardware::cpu_family()));
                     }
                     else if (fn == "hw_cpu_freq" || fn == "cpu_freq") {
                         push(GrassValue::Num((double)GrassHardware::cpu_freq_mhz()));
                     }
+                    else if (fn == "hw_cpu_base_freq") {
+                        push(GrassValue::Num((double)GrassHardware::cpu_base_freq_mhz()));
+                    }
+                    else if (fn == "hw_cpu_usage") {
+                        push(GrassValue::Num((double)GrassHardware::cpu_usage_percent()));
+                    }
+                    else if (fn == "hw_cpu_temp") {
+                        push(GrassValue::Num((double)GrassHardware::cpu_temp()));
+                    }
+                    else if (fn == "hw_cpu_cache_l1") {
+                        push(GrassValue::Num((double)GrassHardware::cpu_cache_l1_kb()));
+                    }
+                    else if (fn == "hw_cpu_cache_l2") {
+                        push(GrassValue::Num((double)GrassHardware::cpu_cache_l2_kb()));
+                    }
+                    else if (fn == "hw_cpu_cache_l3") {
+                        push(GrassValue::Num((double)GrassHardware::cpu_cache_l3_kb()));
+                    }
+                    else if (fn == "hw_cpu_virt") {
+                        push(GrassValue::Str(GrassHardware::cpu_virt()));
+                    }
+                    else if (fn == "hw_uptime_sec") {
+                        push(GrassValue::Num((double)GrassHardware::uptime_sec()));
+                    }
+                    else if (fn == "hw_uptime_str") {
+                        push(GrassValue::Str(GrassHardware::uptime_str()));
+                    }
+                    // ── DISK ──
+                    else if (fn == "hw_disk_size") {
+                        push(GrassValue::Num((double)GrassHardware::disk_size_gb()));
+                    }
+                    else if (fn == "hw_disk_free") {
+                        push(GrassValue::Num((double)GrassHardware::disk_free_gb()));
+                    }
+                    else if (fn == "hw_disk_format") {
+                        push(GrassValue::Str(GrassHardware::disk_format()));
+                    }
+                    else if (fn == "hw_disk_model") {
+                        push(GrassValue::Str(GrassHardware::disk_model()));
+                    }
+                    else if (fn == "hw_disk_type") {
+                        push(GrassValue::Str(GrassHardware::disk_type()));
+                    }
+                    else if (fn == "hw_disk_temp") {
+                        push(GrassValue::Num((double)GrassHardware::disk_temp()));
+                    }
+                    else if (fn == "hw_disk_read_speed") {
+                        push(GrassValue::Num((double)GrassHardware::disk_read_speed()));
+                    }
+                    else if (fn == "hw_disk_write_speed") {
+                        push(GrassValue::Num((double)GrassHardware::disk_write_speed()));
+                    }
+                    else if (fn == "hw_disk_resp_time") {
+                        push(GrassValue::Num((double)GrassHardware::disk_resp_time()));
+                    }
+                    else if (fn == "hw_disk_usage" || fn == "hw_disk_active") {
+                        push(GrassValue::Num((double)GrassHardware::disk_usage_percent()));
+                    }
+                    else if (fn == "hw_disk_is_system") {
+                        push(GrassValue::Num((double)GrassHardware::disk_is_system()));
+                    }
+                    else if (fn == "hw_pagefile_total") {
+                        push(GrassValue::Num((double)GrassHardware::pagefile_total_mb()));
+                    }
+                    else if (fn == "hw_pagefile_used") {
+                        push(GrassValue::Num((double)GrassHardware::pagefile_used_mb()));
+                    }
+                    // ── NETWORK ──
+                    else if (fn == "hw_net_adapter") {
+                        push(GrassValue::Str(GrassHardware::net_adapter()));
+                    }
+                    else if (fn == "hw_net_type") {
+                        push(GrassValue::Str(GrassHardware::net_type()));
+                    }
+                    else if (fn == "hw_net_ipv4") {
+                        push(GrassValue::Str(GrassHardware::net_ipv4()));
+                    }
+                    else if (fn == "hw_net_ipv6") {
+                        push(GrassValue::Str(GrassHardware::net_ipv6()));
+                    }
+                    else if (fn == "hw_net_recv_speed") {
+                        push(GrassValue::Num((double)GrassHardware::net_recv_speed_kb()));
+                    }
+                    else if (fn == "hw_net_send_speed") {
+                        push(GrassValue::Num((double)GrassHardware::net_send_speed_kb()));
+                    }
+                    else if (fn == "hw_net_recv_total") {
+                        push(GrassValue::Num((double)GrassHardware::net_recv_total_mb()));
+                    }
+                    else if (fn == "hw_net_send_total") {
+                        push(GrassValue::Num((double)GrassHardware::net_send_total_mb()));
+                    }
+                    // ── GPU ──
+                    else if (fn == "hw_gpu_name") {
+                        push(GrassValue::Str(GrassHardware::gpu_name()));
+                    }
+                    else if (fn == "hw_gpu_usage") {
+                        push(GrassValue::Num((double)GrassHardware::gpu_usage_percent()));
+                    }
+                    else if (fn == "hw_gpu_temp") {
+                        push(GrassValue::Num((double)GrassHardware::gpu_temp()));
+                    }
+                    else if (fn == "hw_gpu_vram_total") {
+                        push(GrassValue::Num((double)GrassHardware::gpu_vram_total_mb()));
+                    }
+                    else if (fn == "hw_gpu_vram_used") {
+                        push(GrassValue::Num((double)GrassHardware::gpu_vram_used_mb()));
+                    }
+                    else if (fn == "hw_gpu_vram_shared") {
+                        push(GrassValue::Num((double)GrassHardware::gpu_vram_shared_mb()));
+                    }
+                    // ── MOTHERBOARD & BIOS ──
                     else if (fn == "hw_board_vendor" || fn == "board_vendor") {
                         push(GrassValue::Str(GrassHardware::board_vendor()));
                     }
@@ -791,6 +931,9 @@ public:
                     }
                     else if (fn == "hw_bios_date" || fn == "bios_date") {
                         push(GrassValue::Str(GrassHardware::bios_date()));
+                    }
+                    else if (fn == "hw_bios_version") {
+                        push(GrassValue::Str(GrassHardware::bios_version()));
                     }
                     else if (fn == "hw_pci_count" || fn == "pci_count") {
                         push(GrassValue::Num((double)GrassHardware::pci_count()));

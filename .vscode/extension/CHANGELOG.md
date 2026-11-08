@@ -1,5 +1,54 @@
 # История изменений GrassGreen VS Code Extension
 
+## [4.2.2] — 2026-11-08
+
+### Добавлено
+- **Исчерпывающий опрос оборудования ПК без заглушек (`!hardware!` / `!hw!`):**
+  - **Процессор (CPU):**
+    - Температура: `hw_cpu_temp()` (°C).
+    - Количество ядер и логических потоков: `hw_cpu_cores()`, `hw_cpu_threads()`.
+    - Название модели и вендор: `hw_cpu_brand()`, `hw_cpu_vendor()`.
+    - Кэш уровней L1, L2, L3: `hw_cpu_cache_l1()`, `hw_cpu_cache_l2()`, `hw_cpu_cache_l3()` (КБ).
+    - Текущая загрузка процессора: `hw_cpu_usage()` (в процентах %).
+    - Тактовая частота и базовая скорость: `hw_cpu_freq()`, `hw_cpu_base_freq()` (МГц).
+    - Время работы системы: `hw_uptime_sec()`, `hw_uptime_str()`.
+    - Количество процессорных сокетов: `hw_cpu_sockets()`.
+    - Статус аппаратной виртуализации: `hw_cpu_virt()` (VT-x / AMD-V).
+  - **Оперативная память (RAM):**
+    - Общий объём, занятая и доступная память: `hw_ram_total()`, `hw_ram_used()`, `hw_ram_free()`, `proc_mem` (МБ).
+    - Кэшированная память: `hw_ram_cached()` (МБ).
+    - Частота работы памяти: `hw_ram_speed()` (МГц/MT/s).
+    - Температура планок: `hw_ram_temp()` (°C).
+    - Полная модель/партномер и форм-фактор: `hw_ram_model()`, `hw_ram_form()` (DIMM/SODIMM).
+  - **Накопители (DISK):**
+    - Ёмкость и файловая система: `hw_disk_size()` (МБ), `hw_disk_format()` (NTFS/FAT32/ext4).
+    - Модель и интерфейс/тип: `hw_disk_model()`, `hw_disk_type()` (NVMe / SSD / HDD).
+    - Температура диска: `hw_disk_temp()` (°C).
+    - Скорость чтения и записи: `hw_disk_read_speed()`, `hw_disk_write_speed()` (КБ/с).
+    - Среднее время ответа и активность: `hw_disk_resp_time()` (мс), `hw_disk_usage()` (%).
+    - Системный диск: `hw_disk_is_system()`.
+    - Файл подкачки (Pagefile): `hw_pagefile_total()`, `hw_pagefile_used()` (МБ).
+  - **Сетевые адаптеры и Интернет (NETWORK):**
+    - Текущая скорость приёма и отдачи: `hw_net_recv_speed()`, `hw_net_send_speed()` (КБ/с).
+    - Суммарный объём трафика: `hw_net_recv_total()`, `hw_net_send_total()` (МБ).
+    - Название сетевого адаптера: `hw_net_adapter()`.
+    - Тип подключения: `hw_net_type()` (Ethernet, Wi-Fi, VPN Tunnel).
+    - IP-адреса: `hw_net_ipv4()`, `hw_net_ipv6()`.
+  - **Видеокарта (GPU):**
+    - Название видеокарты: `hw_gpu_name()`.
+    - Загрузка графического ядра: `hw_gpu_usage()` (%).
+    - Температура видеочипа: `hw_gpu_temp()` (°C).
+    - Графическая память VRAM: `hw_gpu_vram_total()`, `hw_gpu_vram_used()`, `hw_gpu_vram_shared()` (МБ).
+  - **Материнская плата и BIOS:**
+    - Производитель и модель: `hw_board_vendor()`, `hw_board_model()`.
+    - Версия и дата BIOS: `hw_bios_vendor()`, `hw_bios_date()`, `hw_bios_version()`.
+    - Сканирование шины PCI: `hw_pci_count()`.
+    - Аппаратная перезагрузка: `hw_reboot()`.
+- **Новые сниппеты VS Code:**
+  - `hw_cpu_monitor`, `hw_ram_monitor`, `hw_disk_monitor`, `hw_net_monitor`, `hw_gpu_monitor`, `hw_full_dashboard`.
+- **Полная интеграция с Bare-Metal Multiboot Kernel:**
+  - Доступ ко всем данным оборудования в ядре операционной системы через страницу `0x00091000`.
+
 ## [4.2.1] — 2026-11-08
 
 ### Добавлено

@@ -223,6 +223,101 @@ namespace GrassBoot {
         // PCI Count: 5 at 0x000910E0
         append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000910E0); append_u32(bin_data, 5);
 
+        // Extended Hardware Information
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000910D0); append_u32(bin_data, 0x34312E31);
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000910D4); append_u8(bin_data, 46);
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000910D5); append_u8(bin_data, 48);
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000910D6); append_u8(bin_data, 0);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091100); append_u32(bin_data, 1);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091104); append_u32(bin_data, 1);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091108); append_u32(bin_data, 2900);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009110C); append_u32(bin_data, 2900);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091110); append_u32(bin_data, 18);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091114); append_u32(bin_data, 42);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091118); append_u32(bin_data, 256);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009111C); append_u32(bin_data, 2048);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091120); append_u32(bin_data, 16384);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091124); append_u32(bin_data, 0xBAD092D0);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091128); append_u32(bin_data, 0x8ED1BBD0);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009112C); append_u32(bin_data, 0xB5D087D1);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091130); append_u32(bin_data, 0xBED0BDD0);
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091134); append_u8(bin_data, 0);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091140); append_u32(bin_data, 0x303A3030);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091144); append_u32(bin_data, 0x32343A35);
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091148); append_u8(bin_data, 0);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091150); append_u32(bin_data, 342);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091160); append_u32(bin_data, 3200);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091164); append_u32(bin_data, 16);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091168); append_u32(bin_data, 34);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091170); append_u32(bin_data, 0x34524444);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091174); append_u32(bin_data, 0x3032332D);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091178); append_u32(bin_data, 0x44532030);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009117C); append_u32(bin_data, 0x004D4152);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091190); append_u32(bin_data, 0x4D4D4944);
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091194); append_u8(bin_data, 0);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000911A0); append_u32(bin_data, 512);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000911A4); append_u32(bin_data, 450);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000911A8); append_u32(bin_data, 0x33544146);
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000911AC); append_u8(bin_data, 50);
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000911AD); append_u8(bin_data, 0);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000911B8); append_u32(bin_data, 0x554D4551);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000911BC); append_u32(bin_data, 0x52414820);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000911C0); append_u32(bin_data, 0x53494444);
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000911C4); append_u8(bin_data, 75);
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000911C5); append_u8(bin_data, 0);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000911D8); append_u32(bin_data, 0x00445353);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000911E8); append_u32(bin_data, 38);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000911EC); append_u32(bin_data, 250);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000911F0); append_u32(bin_data, 180);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000911F4); append_u32(bin_data, 1);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000911F8); append_u32(bin_data, 5);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000911FC); append_u32(bin_data, 1);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091200); append_u32(bin_data, 2048);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091204); append_u32(bin_data, 256);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091210); append_u32(bin_data, 0x65746E49);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091214); append_u32(bin_data, 0x3238206C);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091218); append_u32(bin_data, 0x45303435);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009121C); append_u32(bin_data, 0x6947204D);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091220); append_u32(bin_data, 0x69626167);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091224); append_u32(bin_data, 0x74452074);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091228); append_u32(bin_data, 0x6E726568);
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009122C); append_u8(bin_data, 101);
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009122D); append_u8(bin_data, 116);
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009122E); append_u8(bin_data, 0);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091230); append_u32(bin_data, 0x65687445);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091234); append_u32(bin_data, 0x74656E72);
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091238); append_u8(bin_data, 0);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091240); append_u32(bin_data, 0x302E3031);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091244); append_u32(bin_data, 0x312E322E);
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091248); append_u8(bin_data, 53);
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091249); append_u8(bin_data, 0);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091250); append_u32(bin_data, 0x30386566);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091254); append_u32(bin_data, 0x30353A3A);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091258); append_u32(bin_data, 0x663A3435);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009125C); append_u32(bin_data, 0x65663A66);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091260); append_u32(bin_data, 0x333A3231);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091264); append_u32(bin_data, 0x00363534);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091270); append_u32(bin_data, 48);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091274); append_u32(bin_data, 24);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091278); append_u32(bin_data, 12);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009127C); append_u32(bin_data, 4);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091280); append_u32(bin_data, 0x554D4551);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091284); append_u32(bin_data, 0x61745320);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091288); append_u32(bin_data, 0x7261646E);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009128C); append_u32(bin_data, 0x47562064);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091290); append_u32(bin_data, 0x202F2041);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091294); append_u32(bin_data, 0x68636F42);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091298); append_u32(bin_data, 0x69442073);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009129C); append_u32(bin_data, 0x616C7073);
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000912A0); append_u8(bin_data, 121);
+        append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000912A1); append_u8(bin_data, 0);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000912A0); append_u32(bin_data, 14);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000912A4); append_u32(bin_data, 45);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000912A8); append_u32(bin_data, 128);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000912AC); append_u32(bin_data, 8);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000912B0); append_u32(bin_data, 64);
+
+
         // --- 1. Очистка ВСЕГО экрана VGA (0xB8000..0xB8FA0, 2000 ячеек / 4000 байт) ---
         append_u8(bin_data, 0xBF); append_u32(bin_data, 0x000B8000); // mov edi, 0x000B8000
         append_u8(bin_data, 0xB9); append_u32(bin_data, 1000);       // mov ecx, 1000 dwords
@@ -1362,48 +1457,184 @@ namespace GrassBoot {
                             append_u8(bin_data, 0xE8); // call update_cursor
                             append_u32(bin_data, addr_update_cursor - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
                                                 } else if (fn == "hw_ram_total" || fn == "ram_total") {
-                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
-                            append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091020);
-                        } else if (fn == "hw_ram_used" || fn == "ram_used" || fn == "proc_mem") {
-                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
-                            append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091024);
-                        } else if (fn == "hw_ram_free" || fn == "ram_free") {
-                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
-                            append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091028);
-                        } else if (fn == "hw_cpu_vendor" || fn == "cpu_vendor") {
-                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
-                            append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091030);
-                        } else if (fn == "hw_cpu_brand" || fn == "cpu_brand" || fn == "cpu_model") {
-                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
-                            append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091040);
-                        } else if (fn == "hw_cpu_cores" || fn == "cpu_cores") {
-                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
-                            append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x0009102C);
-                        } else if (fn == "hw_board_vendor" || fn == "board_vendor") {
-                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
-                            append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091090);
-                        } else if (fn == "hw_bios_vendor" || fn == "bios_vendor") {
-                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
-                            append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091080);
-                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
-                            append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091080);
-                        } else if (fn == "hw_board_model" || fn == "board_model") {
-                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
-                            append_u8(bin_data, 0x68); append_u32(bin_data, 0x000910A0);
-                        } else if (fn == "hw_bios_date" || fn == "bios_date") {
-                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
-                            append_u8(bin_data, 0x68); append_u32(bin_data, 0x000910C0);
-                        } else if (fn == "hw_pci_count" || fn == "pci_count") {
-                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
-                            append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000910E0);
-                        } else if (fn == "hw_rdtsc" || fn == "rdtsc") {
-                            for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
-                            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x31);
-                            append_u8(bin_data, 0x50);
-                        } else if (fn == "hw_reboot") {
-                            append_u8(bin_data, 0xB0); append_u8(bin_data, 0xFE);
-                            append_u8(bin_data, 0xE6); append_u8(bin_data, 0x64);
-                        } else if (fn == "use_utf" || fn == "use_locale" || fn == "set_layout" || fn == "kbd_set_layout") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091020);
+} else if (fn == "hw_ram_used" || fn == "ram_used" || fn == "proc_mem") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091024);
+} else if (fn == "hw_ram_free" || fn == "ram_free") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091028);
+} else if (fn == "hw_ram_cached") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091164);
+} else if (fn == "hw_ram_speed") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091160);
+} else if (fn == "hw_ram_temp") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091168);
+} else if (fn == "hw_ram_model") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091170);
+} else if (fn == "hw_ram_form") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091190);
+} else if (fn == "hw_cpu_vendor" || fn == "cpu_vendor") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091030);
+} else if (fn == "hw_cpu_brand" || fn == "cpu_brand" || fn == "cpu_model") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091040);
+} else if (fn == "hw_cpu_cores" || fn == "cpu_cores") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x0009102C);
+} else if (fn == "hw_cpu_threads" || fn == "hw_cpu_logical") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091100);
+} else if (fn == "hw_cpu_sockets") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091104);
+} else if (fn == "hw_cpu_family" || fn == "cpu_family") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x0009102C);
+} else if (fn == "hw_cpu_freq" || fn == "cpu_freq") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091108);
+} else if (fn == "hw_cpu_base_freq") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x0009110C);
+} else if (fn == "hw_cpu_usage") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091110);
+} else if (fn == "hw_cpu_temp") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091114);
+} else if (fn == "hw_cpu_cache_l1") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091118);
+} else if (fn == "hw_cpu_cache_l2") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x0009111C);
+} else if (fn == "hw_cpu_cache_l3") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091120);
+} else if (fn == "hw_cpu_virt") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091124);
+} else if (fn == "hw_uptime_str") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091140);
+} else if (fn == "hw_uptime_sec") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091150);
+} else if (fn == "hw_disk_size") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000911A0);
+} else if (fn == "hw_disk_free") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000911A4);
+} else if (fn == "hw_disk_format") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0x68); append_u32(bin_data, 0x000911A8);
+} else if (fn == "hw_disk_model") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0x68); append_u32(bin_data, 0x000911B8);
+} else if (fn == "hw_disk_type") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0x68); append_u32(bin_data, 0x000911D8);
+} else if (fn == "hw_disk_temp") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000911E8);
+} else if (fn == "hw_disk_read_speed") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000911EC);
+} else if (fn == "hw_disk_write_speed") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000911F0);
+} else if (fn == "hw_disk_resp_time") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000911F4);
+} else if (fn == "hw_disk_usage" || fn == "hw_disk_active") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000911F8);
+} else if (fn == "hw_disk_is_system") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000911FC);
+} else if (fn == "hw_pagefile_total") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091200);
+} else if (fn == "hw_pagefile_used") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091204);
+} else if (fn == "hw_net_adapter") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091210);
+} else if (fn == "hw_net_type") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091230);
+} else if (fn == "hw_net_ipv4") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091240);
+} else if (fn == "hw_net_ipv6") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091250);
+} else if (fn == "hw_net_recv_speed") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091270);
+} else if (fn == "hw_net_send_speed") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091274);
+} else if (fn == "hw_net_recv_total") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x00091278);
+} else if (fn == "hw_net_send_total") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x0009127C);
+} else if (fn == "hw_gpu_name") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091280);
+} else if (fn == "hw_gpu_usage") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000912A0);
+} else if (fn == "hw_gpu_temp") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000912A4);
+} else if (fn == "hw_gpu_vram_total") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000912A8);
+} else if (fn == "hw_gpu_vram_used") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000912AC);
+} else if (fn == "hw_gpu_vram_shared") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000912B0);
+} else if (fn == "hw_board_vendor" || fn == "board_vendor") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091090);
+} else if (fn == "hw_board_model" || fn == "board_model") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0x68); append_u32(bin_data, 0x000910A0);
+} else if (fn == "hw_bios_vendor" || fn == "bios_vendor") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0x68); append_u32(bin_data, 0x00091080);
+} else if (fn == "hw_bios_date" || fn == "bios_date") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0x68); append_u32(bin_data, 0x000910C0);
+} else if (fn == "hw_bios_version") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0x68); append_u32(bin_data, 0x000910D0);
+} else if (fn == "hw_pci_count" || fn == "pci_count") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0xFF); append_u8(bin_data, 0x35); append_u32(bin_data, 0x000910E0);
+} else if (fn == "hw_rdtsc" || fn == "rdtsc") {
+    for (int i = 0; i < argc; ++i) append_u8(bin_data, 0x58);
+    append_u8(bin_data, 0x0F); append_u8(bin_data, 0x31);
+    append_u8(bin_data, 0x50);
+} else if (fn == "hw_reboot") {
+    append_u8(bin_data, 0xB0); append_u8(bin_data, 0xFE);
+    append_u8(bin_data, 0xE6); append_u8(bin_data, 0x64);
+} else if (fn == "use_utf" || fn == "use_locale" || fn == "set_layout" || fn == "kbd_set_layout") {
                             for (int i = 0; i < argc; ++i) {
                                 append_u8(bin_data, 0x58); // pop eax
                             }
