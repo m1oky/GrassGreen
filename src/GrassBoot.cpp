@@ -958,6 +958,20 @@ namespace GrassBoot {
             append_u8(bin_data, 0x59); append_u8(bin_data, 0x5B); append_u8(bin_data, 0x5A); append_u8(bin_data, 0xC3); // direct return
             bin_data[jne_not_sp + 1] = (uint8_t)(bin_data.size() - (jne_not_sp + 2));
 
+            // ESC (0x01) -> 0x1B
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x01);
+            size_t jne_not_esc = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xB0); append_u8(bin_data, 0x1B);
+            append_u8(bin_data, 0x59); append_u8(bin_data, 0x5B); append_u8(bin_data, 0x5A); append_u8(bin_data, 0xC3); // direct return
+            bin_data[jne_not_esc + 1] = (uint8_t)(bin_data.size() - (jne_not_esc + 2));
+
+            // Tab (0x0F) -> 0x09
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x0F);
+            size_t jne_not_tab = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xB0); append_u8(bin_data, 0x09);
+            append_u8(bin_data, 0x59); append_u8(bin_data, 0x5B); append_u8(bin_data, 0x5A); append_u8(bin_data, 0xC3); // direct return
+            bin_data[jne_not_tab + 1] = (uint8_t)(bin_data.size() - (jne_not_tab + 2));
+
             // Range check 0x02..0x35
             append_u8(bin_data, 0x3C); append_u8(bin_data, 0x02);
             size_t jae_min = bin_data.size(); append_u8(bin_data, 0x73); append_u8(bin_data, 0x00);
@@ -1491,9 +1505,11 @@ namespace GrassBoot {
             append_u8(bin_data, 0x52); append_u8(bin_data, 0x56); append_u8(bin_data, 0x57);
 
             append_u8(bin_data, 0x85); append_u8(bin_data, 0xF6); // test esi, esi
-            size_t jz_cd_done1 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x84);
+            size_t jz_cd_done1 = bin_data.size(); append_u32(bin_data, 0);
             append_u8(bin_data, 0x80); append_u8(bin_data, 0x3E); append_u8(bin_data, 0); // cmp byte [esi], 0
-            size_t jz_cd_done2 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x84);
+            size_t jz_cd_done2 = bin_data.size(); append_u32(bin_data, 0);
 
             // Check if ESI == "/"
             append_u8(bin_data, 0x80); append_u8(bin_data, 0x3E); append_u8(bin_data, '/');
@@ -1503,7 +1519,8 @@ namespace GrassBoot {
             // Reset to "/"
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091300); append_u8(bin_data, '/');
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091301); append_u8(bin_data, 0);
-            size_t jmp_cd_done_slash = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE9);
+            size_t jmp_cd_done_slash = bin_data.size(); append_u32(bin_data, 0);
 
             // Check if ESI == ".."
             size_t pos_cd_chk_dotdot = bin_data.size();
@@ -1518,7 +1535,8 @@ namespace GrassBoot {
 
             // Go up one dir in 0x00091300
             append_u8(bin_data, 0x80); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x00091301); append_u8(bin_data, 0);
-            size_t jz_cd_already_root = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x84);
+            size_t jz_cd_already_root = bin_data.size(); append_u32(bin_data, 0);
 
             // Find end of cwd
             append_u8(bin_data, 0xBF); append_u32(bin_data, 0x00091300);
@@ -1543,19 +1561,22 @@ namespace GrassBoot {
             bin_data[jbe_cd_root + 1] = (uint8_t)(pos_cd_root - (jbe_cd_root + 2));
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091300); append_u8(bin_data, '/');
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091301); append_u8(bin_data, 0);
-            size_t jmp_cd_done_up = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE9);
+            size_t jmp_cd_done_up = bin_data.size(); append_u32(bin_data, 0);
 
             size_t pos_cd_cut = bin_data.size();
             bin_data[je_cd_cut + 1] = (uint8_t)(pos_cd_cut - (je_cd_cut + 2));
             append_u8(bin_data, 0x81); append_u8(bin_data, 0xFF); append_u32(bin_data, 0x00091300);
             size_t jne_cd_trunc = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091301); append_u8(bin_data, 0);
-            size_t jmp_cd_done_cut = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE9);
+            size_t jmp_cd_done_cut = bin_data.size(); append_u32(bin_data, 0);
 
             size_t pos_cd_trunc = bin_data.size();
             bin_data[jne_cd_trunc + 1] = (uint8_t)(pos_cd_trunc - (jne_cd_trunc + 2));
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x07); append_u8(bin_data, 0);
-            size_t jmp_cd_done_trunc = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE9);
+            size_t jmp_cd_done_trunc = bin_data.size(); append_u32(bin_data, 0);
 
             // Search folder in RamFS:
             size_t pos_cd_find_folder = bin_data.size();
@@ -1613,7 +1634,8 @@ namespace GrassBoot {
             append_u32(bin_data, addr_print_string - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
             emit_print_str_lit("\n");
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0A); // Light Green
-            size_t jmp_cd_done_fail = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE9);
+            size_t jmp_cd_done_fail = bin_data.size(); append_u32(bin_data, 0);
 
             // Match found! Update cwd
             size_t pos_cd_match = bin_data.size();
@@ -1639,7 +1661,8 @@ namespace GrassBoot {
             size_t jz_cd_cp_name1 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
             append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(loop_cd_cp_name1 - (bin_data.size() + 1)));
             bin_data[jz_cd_cp_name1 + 1] = (uint8_t)(bin_data.size() - (jz_cd_cp_name1 + 2));
-            size_t jmp_cd_done_ok1 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE9);
+            size_t jmp_cd_done_ok1 = bin_data.size(); append_u32(bin_data, 0);
 
             // Root slash: copy name to 0x00091301
             size_t pos_cd_append_to_slash = bin_data.size();
@@ -1653,15 +1676,15 @@ namespace GrassBoot {
 
             // Done CD
             size_t pos_cd_all_done = bin_data.size();
-            bin_data[jz_cd_done1 + 1] = (uint8_t)(pos_cd_all_done - (jz_cd_done1 + 2));
-            bin_data[jz_cd_done2 + 1] = (uint8_t)(pos_cd_all_done - (jz_cd_done2 + 2));
-            bin_data[jmp_cd_done_slash + 1] = (uint8_t)(pos_cd_all_done - (jmp_cd_done_slash + 2));
-            bin_data[jz_cd_already_root + 1] = (uint8_t)(pos_cd_all_done - (jz_cd_already_root + 2));
-            bin_data[jmp_cd_done_up + 1] = (uint8_t)(pos_cd_all_done - (jmp_cd_done_up + 2));
-            bin_data[jmp_cd_done_cut + 1] = (uint8_t)(pos_cd_all_done - (jmp_cd_done_cut + 2));
-            bin_data[jmp_cd_done_trunc + 1] = (uint8_t)(pos_cd_all_done - (jmp_cd_done_trunc + 2));
-            bin_data[jmp_cd_done_fail + 1] = (uint8_t)(pos_cd_all_done - (jmp_cd_done_fail + 2));
-            bin_data[jmp_cd_done_ok1 + 1] = (uint8_t)(pos_cd_all_done - (jmp_cd_done_ok1 + 2));
+            write_u32_le(bin_data, jz_cd_done1, (uint32_t)((int32_t)pos_cd_all_done - (int32_t)(jz_cd_done1 + 4)));
+            write_u32_le(bin_data, jz_cd_done2, (uint32_t)((int32_t)pos_cd_all_done - (int32_t)(jz_cd_done2 + 4)));
+            write_u32_le(bin_data, jmp_cd_done_slash, (uint32_t)((int32_t)pos_cd_all_done - (int32_t)(jmp_cd_done_slash + 4)));
+            write_u32_le(bin_data, jz_cd_already_root, (uint32_t)((int32_t)pos_cd_all_done - (int32_t)(jz_cd_already_root + 4)));
+            write_u32_le(bin_data, jmp_cd_done_up, (uint32_t)((int32_t)pos_cd_all_done - (int32_t)(jmp_cd_done_up + 4)));
+            write_u32_le(bin_data, jmp_cd_done_cut, (uint32_t)((int32_t)pos_cd_all_done - (int32_t)(jmp_cd_done_cut + 4)));
+            write_u32_le(bin_data, jmp_cd_done_trunc, (uint32_t)((int32_t)pos_cd_all_done - (int32_t)(jmp_cd_done_trunc + 4)));
+            write_u32_le(bin_data, jmp_cd_done_fail, (uint32_t)((int32_t)pos_cd_all_done - (int32_t)(jmp_cd_done_fail + 4)));
+            write_u32_le(bin_data, jmp_cd_done_ok1, (uint32_t)((int32_t)pos_cd_all_done - (int32_t)(jmp_cd_done_ok1 + 4)));
 
             append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E); append_u8(bin_data, 0x5A);
             append_u8(bin_data, 0x59); append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
@@ -1877,113 +1900,133 @@ namespace GrassBoot {
 
             // Line 0: Header
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x1F); // White on Blue
-            emit_print_str_lit(" [ GrassGreen VD+ Desktop Engine v4.3.0 | RQWos Core ]\n");
+            emit_print_str_lit(" [ GrassGreen VD+ Desktop Engine v4.3.0 | RQWos Core ]                          ");
 
             // Line 1: Top border
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0A); // Light Green
-            emit_print_str_lit("╔══════════════════════════════════════════════════════════════════════════════╗\n");
+            emit_print_str_lit("+==============================================================================+");
 
             // Line 2: Tabs header
             append_u8(bin_data, 0x8A); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); // mov al, [0x00091380]
             append_u8(bin_data, 0x3C); append_u8(bin_data, 1);
-            size_t jne_dt_tab2 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            emit_print_str_lit("║  [* 1. СИСТЕМА *]       [ 2. ФАЙЛЫ ]       [ 3. ЖЕЛЕЗО ]                     ║\n");
-            size_t jmp_dt_tabs_done = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85);
+            size_t jne_dt_tab2 = bin_data.size(); append_u32(bin_data, 0);
+            emit_print_str_lit("|  [* 1. СИСТЕМА *]       [ 2. ФАЙЛЫ ]       [ 3. ЖЕЛЕЗО ]                     |");
+            append_u8(bin_data, 0xE9);
+            size_t jmp_dt_tabs_done = bin_data.size(); append_u32(bin_data, 0);
 
             size_t pos_dt_tab2 = bin_data.size();
-            bin_data[jne_dt_tab2 + 1] = (uint8_t)(pos_dt_tab2 - (jne_dt_tab2 + 2));
+            write_u32_le(bin_data, jne_dt_tab2, (uint32_t)((int32_t)pos_dt_tab2 - (int32_t)(jne_dt_tab2 + 4)));
             append_u8(bin_data, 0x3C); append_u8(bin_data, 2);
-            size_t jne_dt_tab3 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            emit_print_str_lit("║  [ 1. СИСТЕМА ]       [* 2. ФАЙЛЫ *]       [ 3. ЖЕЛЕЗО ]                     ║\n");
-            size_t jmp_dt_tabs_done2 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85);
+            size_t jne_dt_tab3 = bin_data.size(); append_u32(bin_data, 0);
+            emit_print_str_lit("|  [ 1. СИСТЕМА ]       [* 2. ФАЙЛЫ *]       [ 3. ЖЕЛЕЗО ]                     |");
+            append_u8(bin_data, 0xE9);
+            size_t jmp_dt_tabs_done2 = bin_data.size(); append_u32(bin_data, 0);
 
             size_t pos_dt_tab3 = bin_data.size();
-            bin_data[jne_dt_tab3 + 1] = (uint8_t)(pos_dt_tab3 - (jne_dt_tab3 + 2));
-            emit_print_str_lit("║  [ 1. СИСТЕМА ]       [ 2. ФАЙЛЫ ]       [* 3. ЖЕЛЕЗО *]                     ║\n");
+            write_u32_le(bin_data, jne_dt_tab3, (uint32_t)((int32_t)pos_dt_tab3 - (int32_t)(jne_dt_tab3 + 4)));
+            emit_print_str_lit("|  [ 1. СИСТЕМА ]       [ 2. ФАЙЛЫ ]       [* 3. ЖЕЛЕЗО *]                     |");
 
             size_t pos_dt_tabs_done = bin_data.size();
-            bin_data[jmp_dt_tabs_done + 1] = (uint8_t)(pos_dt_tabs_done - (jmp_dt_tabs_done + 2));
-            bin_data[jmp_dt_tabs_done2 + 1] = (uint8_t)(pos_dt_tabs_done - (jmp_dt_tabs_done2 + 2));
+            write_u32_le(bin_data, jmp_dt_tabs_done, (uint32_t)((int32_t)pos_dt_tabs_done - (int32_t)(jmp_dt_tabs_done + 4)));
+            write_u32_le(bin_data, jmp_dt_tabs_done2, (uint32_t)((int32_t)pos_dt_tabs_done - (int32_t)(jmp_dt_tabs_done2 + 4)));
 
             // Line 3: Middle border
-            emit_print_str_lit("╠══════════════════════════════════════════════════════════════════════════════╣\n");
+            emit_print_str_lit("+------------------------------------------------------------------------------+");
 
             // Tab Content
             append_u8(bin_data, 0x8A); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380);
             append_u8(bin_data, 0x3C); append_u8(bin_data, 1);
-            size_t jne_dt_body2 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85);
+            size_t jne_dt_body2 = bin_data.size(); append_u32(bin_data, 0);
 
-            // Tab 1 Body
-            emit_print_str_lit("║                                                                              ║\n");
-            emit_print_str_lit("║  Операционная система:  RQWos (GrassGreen Kernel v4.3.0)                     ║\n");
-            emit_print_str_lit("║  Архитектура ядра:      x86 Protected Mode (Multiboot Compliant)             ║\n");
-            emit_print_str_lit("║  Графическая подсистема:VD+ (Vector Display Plus TUI/GUI Engine)             ║\n");
-            emit_print_str_lit("║  Файловая структура:    RamFS (Виртуальная структура активна)                ║\n");
-            emit_print_str_lit("║                                                                              ║\n");
-            emit_print_str_lit("║  Состояние памяти ОЗУ:                                                       ║\n");
-            emit_print_str_lit("║  [================================....]  4 МБ / 128 МБ                       ║\n");
-            emit_print_str_lit("║                                                                              ║\n");
-            emit_print_str_lit("║  Управление окнами:                                                          ║\n");
-            emit_print_str_lit("║    [1] - Общие сведения об ОС                                                ║\n");
-            emit_print_str_lit("║    [2] - Проводник файлов (RamFS)                                            ║\n");
-            emit_print_str_lit("║    [3] - Аппаратный мониторинг процессора и устройств                        ║\n");
-            emit_print_str_lit("║    [ESC] - Выход обратно в терминал RQWos                                    ║\n");
-            emit_print_str_lit("║                                                                              ║\n");
-            size_t jmp_dt_body_done = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            // Tab 1 Body (18 lines)
+            emit_print_str_lit("|                                                                              |");
+            emit_print_str_lit("|  Операционная система:  RQWos (GrassGreen Kernel v4.3.0)                     |");
+            emit_print_str_lit("|  Архитектура ядра:      x86 Protected Mode (Multiboot Compliant)             |");
+            emit_print_str_lit("|  Графическая подсистема:VD+ (Vector Display Plus TUI/GUI Engine)             |");
+            emit_print_str_lit("|  Файловая структура:    RamFS (Виртуальная структура активна)                |");
+            emit_print_str_lit("|                                                                              |");
+            emit_print_str_lit("|  Состояние памяти ОЗУ:                                                       |");
+            emit_print_str_lit("|  [================================....]  4 МБ / 128 МБ                       |");
+            emit_print_str_lit("|                                                                              |");
+            emit_print_str_lit("|  Управление окнами:                                                          |");
+            emit_print_str_lit("|    [1] - Общие сведения об ОС                                                |");
+            emit_print_str_lit("|    [2] - Проводник файлов (RamFS)                                            |");
+            emit_print_str_lit("|    [3] - Аппаратный мониторинг процессора и устройств                        |");
+            emit_print_str_lit("|    [ESC] - Выход обратно в терминал RQWos                                    |");
+            emit_print_str_lit("|                                                                              |");
+            emit_print_str_lit("|  Статус сети:   Подключено к шлюзу 10.0.2.2 (DNS: 10.0.2.3)                  |");
+            emit_print_str_lit("|  Пользователь:  m1oky (Права: Root / Superuser)                              |");
+            emit_print_str_lit("|                                                                              |");
+            append_u8(bin_data, 0xE9);
+            size_t jmp_dt_body_done = bin_data.size(); append_u32(bin_data, 0);
 
-            // Tab 2 Body
+            // Tab 2 Body (18 lines)
             size_t pos_dt_body2 = bin_data.size();
-            bin_data[jne_dt_body2 + 1] = (uint8_t)(pos_dt_body2 - (jne_dt_body2 + 2));
+            write_u32_le(bin_data, jne_dt_body2, (uint32_t)((int32_t)pos_dt_body2 - (int32_t)(jne_dt_body2 + 4)));
             append_u8(bin_data, 0x3C); append_u8(bin_data, 2);
-            size_t jne_dt_body3 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85);
+            size_t jne_dt_body3 = bin_data.size(); append_u32(bin_data, 0);
 
-            emit_print_str_lit("║                                                                              ║\n");
-            emit_print_str_lit("║  Проводник файлов RamFS:                                                     ║\n");
-            emit_print_str_lit("║  ┌─ Содержимое папки / ─────────────┐ ┌─ Просмотр файла ───────────────────┐ ║\n");
-            emit_print_str_lit("║  │  [DIR]   system                  │ │ Имя:     readme.txt                │ ║\n");
-            emit_print_str_lit("║  │  [DIR]   users                   │ │ Размер:  41 байт                   │ ║\n");
-            emit_print_str_lit("║  │  [DIR]   apps                    │ │                                    │ ║\n");
-            emit_print_str_lit("║  │  [FILE]  welcome.txt (32 Б)      │ │ Содержимое:                        │ ║\n");
-            emit_print_str_lit("║  │  [FILE]  desktop.ini (скрытый)   │ │  \"Welcome to RQWos on              │ ║\n");
-            emit_print_str_lit("║  │                                  │ │   GrassGreen Bare-Metal!\"          │ ║\n");
-            emit_print_str_lit("║  └──────────────────────────────────┘ └────────────────────────────────────┘ ║\n");
-            emit_print_str_lit("║                                                                              ║\n");
-            emit_print_str_lit("║  Для навигации в консоли используйте команды: cd, ls, cat                    ║\n");
-            emit_print_str_lit("║                                                                              ║\n");
-            size_t jmp_dt_body_done2 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            emit_print_str_lit("|                                                                              |");
+            emit_print_str_lit("|  Проводник файлов RamFS:                                                     |");
+            emit_print_str_lit("|  +- Содержимое папки / -------------+ +- Просмотр файла -------------------+ |");
+            emit_print_str_lit("|  |  [DIR]   system                  | | Имя:     readme.txt                | |");
+            emit_print_str_lit("|  |  [DIR]   users                   | | Размер:  41 байт                   | |");
+            emit_print_str_lit("|  |  [DIR]   apps                    | |                                    | |");
+            emit_print_str_lit("|  |  [FILE]  welcome.txt (32 Б)      | | Содержимое:                        | |");
+            emit_print_str_lit("|  |  [FILE]  desktop.ini (скрытый)   | |  \"Welcome to RQWos on              | |");
+            emit_print_str_lit("|  |                                  | |   GrassGreen Bare-Metal!\"          | |");
+            emit_print_str_lit("|  +----------------------------------+ +------------------------------------+ |");
+            emit_print_str_lit("|                                                                              |");
+            emit_print_str_lit("|  Для навигации в консоли используйте команды: cd, ls, cat                    |");
+            emit_print_str_lit("|                                                                              |");
+            emit_print_str_lit("|  Примонтированные накопители:                                                |");
+            emit_print_str_lit("|    [hd0]  ATA Primary Master  - QEMU HARDDISK (512 ГБ)                       |");
+            emit_print_str_lit("|    [ram0] RamFS High-Speed    - 16 МБ (Виртуальная структура активна)        |");
+            emit_print_str_lit("|                                                                              |");
+            emit_print_str_lit("|                                                                              |");
+            append_u8(bin_data, 0xE9);
+            size_t jmp_dt_body_done2 = bin_data.size(); append_u32(bin_data, 0);
 
-            // Tab 3 Body
+            // Tab 3 Body (18 lines)
             size_t pos_dt_body3 = bin_data.size();
-            bin_data[jne_dt_body3 + 1] = (uint8_t)(pos_dt_body3 - (jne_dt_body3 + 2));
+            write_u32_le(bin_data, jne_dt_body3, (uint32_t)((int32_t)pos_dt_body3 - (int32_t)(jne_dt_body3 + 4)));
 
-            emit_print_str_lit("║                                                                              ║\n");
-            emit_print_str_lit("║  Аппаратный монитор железа в реальном времени:                               ║\n");
-            emit_print_str_lit("║                                                                              ║\n");
-            emit_print_str_lit("║  ЦПУ Вендор:    AuthenticAMD / GenuineIntel                                  ║\n");
-            emit_print_str_lit("║  ЦПУ Модель:    QEMU Virtual CPU 2.5+                                        ║\n");
-            emit_print_str_lit("║  Ядра / Потоки: 1 ядро / 1 поток (Базовая частота: 2900 МГц)                 ║\n");
-            emit_print_str_lit("║  Кэш L1/L2/L3:  256 КБ / 2048 КБ / 16384 КБ                                  ║\n");
-            emit_print_str_lit("║  Всего ОЗУ:     128 МБ (DIMM DDR4 3200 МГц)                                  ║\n");
-            emit_print_str_lit("║  Свободно ОЗУ:  124 МБ                                                       ║\n");
-            emit_print_str_lit("║  Материнская:   QEMU Standard PC (i440FX)                                    ║\n");
-            emit_print_str_lit("║  Версия BIOS:   SeaBIOS (04/01/2014)                                         ║\n");
-            emit_print_str_lit("║  Видеоадаптер:  QEMU Standard VGA (128 МБ VRAM)                              ║\n");
-            emit_print_str_lit("║  Сетевой чип:   Intel 82540EM Gigabit Ethernet (10.0.2.15)                   ║\n");
-            emit_print_str_lit("║                                                                              ║\n");
+            emit_print_str_lit("|                                                                              |");
+            emit_print_str_lit("|  Аппаратный монитор железа в реальном времени:                               |");
+            emit_print_str_lit("|                                                                              |");
+            emit_print_str_lit("|  ЦПУ Вендор:    AuthenticAMD / GenuineIntel                                  |");
+            emit_print_str_lit("|  ЦПУ Модель:    QEMU Virtual CPU 2.5+                                        |");
+            emit_print_str_lit("|  Ядра / Потоки: 1 ядро / 1 поток (Базовая частота: 2900 МГц)                 |");
+            emit_print_str_lit("|  Кэш L1/L2/L3:  256 КБ / 2048 КБ / 16384 КБ                                  |");
+            emit_print_str_lit("|  Всего ОЗУ:     128 МБ (DIMM DDR4 3200 МГц)                                  |");
+            emit_print_str_lit("|  Свободно ОЗУ:  124 МБ                                                       |");
+            emit_print_str_lit("|  Материнская:   QEMU Standard PC (i440FX)                                    |");
+            emit_print_str_lit("|  Версия BIOS:   SeaBIOS (04/01/2014)                                         |");
+            emit_print_str_lit("|  Видеоадаптер:  QEMU Standard VGA (128 МБ VRAM)                              |");
+            emit_print_str_lit("|  Сетевой чип:   Intel 82540EM Gigabit Ethernet (10.0.2.15)                   |");
+            emit_print_str_lit("|  Температура:   ЦПУ: 42 C | ГПУ: 45 C                                        |");
+            emit_print_str_lit("|  Виртуализация: Включено (VT-x / AMD-V аппаратная поддержка)                 |");
+            emit_print_str_lit("|                                                                              |");
+            emit_print_str_lit("|                                                                              |");
+            emit_print_str_lit("|                                                                              |");
 
             size_t pos_dt_body_done = bin_data.size();
-            bin_data[jmp_dt_body_done + 1] = (uint8_t)(pos_dt_body_done - (jmp_dt_body_done + 2));
-            bin_data[jmp_dt_body_done2 + 1] = (uint8_t)(pos_dt_body_done - (jmp_dt_body_done2 + 2));
+            write_u32_le(bin_data, jmp_dt_body_done, (uint32_t)((int32_t)pos_dt_body_done - (int32_t)(jmp_dt_body_done + 4)));
+            write_u32_le(bin_data, jmp_dt_body_done2, (uint32_t)((int32_t)pos_dt_body_done - (int32_t)(jmp_dt_body_done2 + 4)));
 
-            // Line 23: Bottom border
-            emit_print_str_lit("╚══════════════════════════════════════════════════════════════════════════════╝\n");
+            // Line 22: Bottom border
+            emit_print_str_lit("+==============================================================================+");
 
-            // Line 24: Status bar
+            // Line 23: Status bar
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x70); // Black on Gray
-            emit_print_str_lit(" [Tab/1,2,3]: Вкладки | [ESC]: Выход в консоль | [R]: Перезагрузка | [P]: Выкл ");
+            emit_print_str_lit(" [Tab/1,2,3]: Вкладки | [ESC]: Консоль | [R]: Перезагрузка | [P]: Выключение    ");
 
-            // Move cursor to bottom right
-            append_u8(bin_data, 0xBB); append_u32(bin_data, 3998);
+            // Move cursor to row 24 column 0 (offset 3840)
+            append_u8(bin_data, 0xBB); append_u32(bin_data, 3840);
             append_u8(bin_data, 0xE8);
             append_u32(bin_data, addr_update_cursor - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
 
@@ -2096,7 +2139,8 @@ namespace GrassBoot {
             bin_data[jne_bm_nonsp + 1] = (uint8_t)(pos_bm_nonsp - (jne_bm_nonsp + 2));
 
             append_u8(bin_data, 0x80); append_u8(bin_data, 0x3E); append_u8(bin_data, 0);
-            size_t jz_bm_ok = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x84);
+            size_t jz_bm_ok = bin_data.size(); append_u32(bin_data, 0);
 
             // 1. Check "help"
             append_u8(bin_data, 0x56);
@@ -2121,7 +2165,7 @@ namespace GrassBoot {
             emit_print_str_lit("  clear       - Очистить экран (сохраняя приветствие)\n");
             emit_print_str_lit("  reboot      - Мгновенная перезагрузка компьютера\n");
             emit_print_str_lit("  poweroff    - Выключение питания машины\n");
-            size_t jmp_bm_ok1 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE9); size_t jmp_bm_ok1 = bin_data.size(); append_u32(bin_data, 0);
 
             // 2. Check "ls"
             size_t pos_bm_chk_ls = bin_data.size();
@@ -2140,14 +2184,14 @@ namespace GrassBoot {
             append_u8(bin_data, 0x8D); append_u8(bin_data, 0x46); append_u8(bin_data, 3); // lea eax, [esi + 3]
             append_u8(bin_data, 0xE8);
             append_u32(bin_data, addr_vfs_ls - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-            size_t jmp_bm_ok2 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE9); size_t jmp_bm_ok2 = bin_data.size(); append_u32(bin_data, 0);
 
             size_t pos_bm_do_ls = bin_data.size();
             bin_data[je_bm_do_ls + 1] = (uint8_t)(pos_bm_do_ls - (je_bm_do_ls + 2));
             append_u8(bin_data, 0x31); append_u8(bin_data, 0xC0); // eax = 0
             append_u8(bin_data, 0xE8);
             append_u32(bin_data, addr_vfs_ls - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-            size_t jmp_bm_ok3 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE9); size_t jmp_bm_ok3 = bin_data.size(); append_u32(bin_data, 0);
 
             // 3. Check "cd"
             size_t pos_bm_chk_cd = bin_data.size();
@@ -2177,7 +2221,7 @@ namespace GrassBoot {
             bin_data[jne_cd_arg_ready + 1] = (uint8_t)(pos_cd_arg_ready - (jne_cd_arg_ready + 2));
             append_u8(bin_data, 0xE8);
             append_u32(bin_data, addr_vfs_cd - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-            size_t jmp_bm_ok4 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE9); size_t jmp_bm_ok4 = bin_data.size(); append_u32(bin_data, 0);
 
             size_t pos_bm_do_cd_up = bin_data.size();
             bin_data[je_bm_do_cd_up + 1] = (uint8_t)(pos_bm_do_cd_up - (je_bm_do_cd_up + 2));
@@ -2185,7 +2229,7 @@ namespace GrassBoot {
             append_u8(bin_data, 0xBE); append_u32(bin_data, s_dotdot2);
             append_u8(bin_data, 0xE8);
             append_u32(bin_data, addr_vfs_cd - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-            size_t jmp_bm_ok5 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE9); size_t jmp_bm_ok5 = bin_data.size(); append_u32(bin_data, 0);
 
             // 4. Check "pwd"
             size_t pos_bm_chk_pwd = bin_data.size();
@@ -2205,7 +2249,7 @@ namespace GrassBoot {
 
             append_u8(bin_data, 0xE8);
             append_u32(bin_data, addr_vfs_pwd - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-            size_t jmp_bm_ok6 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE9); size_t jmp_bm_ok6 = bin_data.size(); append_u32(bin_data, 0);
 
             // 5. Check "cat"
             size_t pos_bm_chk_cat = bin_data.size();
@@ -2231,7 +2275,7 @@ namespace GrassBoot {
             bin_data[jne_cat_arg_ready + 1] = (uint8_t)(pos_cat_arg_ready - (jne_cat_arg_ready + 2));
             append_u8(bin_data, 0xE8);
             append_u32(bin_data, addr_vfs_cat - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-            size_t jmp_bm_ok7 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE9); size_t jmp_bm_ok7 = bin_data.size(); append_u32(bin_data, 0);
 
             // 6. Check "disp"
             size_t pos_bm_chk_disp = bin_data.size();
@@ -2279,7 +2323,7 @@ namespace GrassBoot {
             append_u8(bin_data, 0xBE); append_u32(bin_data, 0x00091040);
             append_u8(bin_data, 0xE8); append_u32(bin_data, addr_print_string - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
             emit_print_str_lit(")\nЯдер/поток: 1 / 1 | 2900 МГц (18% 42 C)\nКэш L1/2/3: 256 КБ / 2048 КБ / 16384 КБ\nВиртуал.:   Включено\nДиск:       QEMU HARDDISK [SSD] 512 ГБ\nСеть:       Intel 82540EM Gigabit Ethernet (10.0.2.15)\nГПУ:        QEMU Standard VGA | VRAM: 128 МБ | 45 C\n");
-            size_t jmp_bm_ok8 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE9); size_t jmp_bm_ok8 = bin_data.size(); append_u32(bin_data, 0);
 
             // 7. Check "gui" or "vd"
             size_t pos_bm_chk_gui = bin_data.size();
@@ -2309,7 +2353,7 @@ namespace GrassBoot {
             bin_data[jnz_bm_do_gui + 1] = (uint8_t)(pos_bm_do_gui - (jnz_bm_do_gui + 2));
             append_u8(bin_data, 0xE8);
             append_u32(bin_data, addr_vd_desktop - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-            size_t jmp_bm_ok9 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE9); size_t jmp_bm_ok9 = bin_data.size(); append_u32(bin_data, 0);
 
             // 8. Check "clear" or "cls"
             size_t pos_bm_chk_clear = bin_data.size();
@@ -2339,7 +2383,7 @@ namespace GrassBoot {
             bin_data[jnz_bm_do_clear + 1] = (uint8_t)(pos_bm_do_clear - (jnz_bm_do_clear + 2));
             append_u8(bin_data, 0xE8);
             append_u32(bin_data, addr_clear - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-            size_t jmp_bm_ok10 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE9); size_t jmp_bm_ok10 = bin_data.size(); append_u32(bin_data, 0);
 
             // 9. Check "reboot"
             size_t pos_bm_chk_rb = bin_data.size();
@@ -2387,17 +2431,17 @@ namespace GrassBoot {
 
             // Command succeeded
             size_t pos_bm_ok = bin_data.size();
-            bin_data[jz_bm_ok + 1] = (uint8_t)(pos_bm_ok - (jz_bm_ok + 2));
-            bin_data[jmp_bm_ok1 + 1] = (uint8_t)(pos_bm_ok - (jmp_bm_ok1 + 2));
-            bin_data[jmp_bm_ok2 + 1] = (uint8_t)(pos_bm_ok - (jmp_bm_ok2 + 2));
-            bin_data[jmp_bm_ok3 + 1] = (uint8_t)(pos_bm_ok - (jmp_bm_ok3 + 2));
-            bin_data[jmp_bm_ok4 + 1] = (uint8_t)(pos_bm_ok - (jmp_bm_ok4 + 2));
-            bin_data[jmp_bm_ok5 + 1] = (uint8_t)(pos_bm_ok - (jmp_bm_ok5 + 2));
-            bin_data[jmp_bm_ok6 + 1] = (uint8_t)(pos_bm_ok - (jmp_bm_ok6 + 2));
-            bin_data[jmp_bm_ok7 + 1] = (uint8_t)(pos_bm_ok - (jmp_bm_ok7 + 2));
-            bin_data[jmp_bm_ok8 + 1] = (uint8_t)(pos_bm_ok - (jmp_bm_ok8 + 2));
-            bin_data[jmp_bm_ok9 + 1] = (uint8_t)(pos_bm_ok - (jmp_bm_ok9 + 2));
-            bin_data[jmp_bm_ok10 + 1] = (uint8_t)(pos_bm_ok - (jmp_bm_ok10 + 2));
+            write_u32_le(bin_data, jz_bm_ok, (uint32_t)((int32_t)pos_bm_ok - (int32_t)(jz_bm_ok + 4)));
+            write_u32_le(bin_data, jmp_bm_ok1, (uint32_t)((int32_t)pos_bm_ok - (int32_t)(jmp_bm_ok1 + 4)));
+            write_u32_le(bin_data, jmp_bm_ok2, (uint32_t)((int32_t)pos_bm_ok - (int32_t)(jmp_bm_ok2 + 4)));
+            write_u32_le(bin_data, jmp_bm_ok3, (uint32_t)((int32_t)pos_bm_ok - (int32_t)(jmp_bm_ok3 + 4)));
+            write_u32_le(bin_data, jmp_bm_ok4, (uint32_t)((int32_t)pos_bm_ok - (int32_t)(jmp_bm_ok4 + 4)));
+            write_u32_le(bin_data, jmp_bm_ok5, (uint32_t)((int32_t)pos_bm_ok - (int32_t)(jmp_bm_ok5 + 4)));
+            write_u32_le(bin_data, jmp_bm_ok6, (uint32_t)((int32_t)pos_bm_ok - (int32_t)(jmp_bm_ok6 + 4)));
+            write_u32_le(bin_data, jmp_bm_ok7, (uint32_t)((int32_t)pos_bm_ok - (int32_t)(jmp_bm_ok7 + 4)));
+            write_u32_le(bin_data, jmp_bm_ok8, (uint32_t)((int32_t)pos_bm_ok - (int32_t)(jmp_bm_ok8 + 4)));
+            write_u32_le(bin_data, jmp_bm_ok9, (uint32_t)((int32_t)pos_bm_ok - (int32_t)(jmp_bm_ok9 + 4)));
+            write_u32_le(bin_data, jmp_bm_ok10, (uint32_t)((int32_t)pos_bm_ok - (int32_t)(jmp_bm_ok10 + 4)));
             append_u8(bin_data, 0xB8); append_u32(bin_data, 1); // eax = 1
 
             size_t pos_bm_final_ret = bin_data.size();
@@ -2650,6 +2694,25 @@ namespace GrassBoot {
                         append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0A);
                         append_u8(bin_data, 0xE8);
                         append_u32(bin_data, addr_print_char - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+                        break;
+                    }
+                    case 0x42: { // OP_WAIT
+                        append_u8(bin_data, 0x59); // pop ecx
+                        append_u8(bin_data, 0xC1); append_u8(bin_data, 0xE1); append_u8(bin_data, 16); // shl ecx, 16
+                        size_t wait_lbl = bin_data.size();
+                        append_u8(bin_data, 0x90); // nop
+                        append_u8(bin_data, 0x49); // dec ecx
+                        append_u8(bin_data, 0x75); append_u8(bin_data, (uint8_t)(int8_t)(wait_lbl - (bin_data.size() + 1))); // jnz wait_lbl
+                        break;
+                    }
+                    case 0x43: { // OP_ASK
+                        append_u8(bin_data, 0x5E); // pop esi (prompt)
+                        append_u8(bin_data, 0xE8);
+                        append_u32(bin_data, addr_print_string - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+                        append_u8(bin_data, 0xBF); append_u32(bin_data, 0x00092000);
+                        append_u8(bin_data, 0xE8);
+                        append_u32(bin_data, addr_read_line - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+                        append_u8(bin_data, 0x68); append_u32(bin_data, 0x00092000);
                         break;
                     }
                     case 0x44: { // OP_PRINT_RAW
@@ -3044,6 +3107,154 @@ namespace GrassBoot {
                                 append_u8(bin_data, 0x58); // pop eax
                             }
                         }
+                        break;
+                    }
+                    case 0x60: // OP_LOAD_DB
+                        break;
+                    case 0x61: { // OP_START_WEB
+                        std::string host = readString();
+                        break;
+                    }
+                    case 0x70: { // OP_UI_INIT
+                        std::string title = readString();
+                        uint32_t w = readU32();
+                        uint32_t h = readU32();
+                        std::string bg = readString();
+                        std::string fon = readString();
+                        break;
+                    }
+                    case 0x71: { // OP_UI_ADD_ELEM
+                        std::string type = readString();
+                        std::string id = readString();
+                        std::string text = readString();
+                        uint32_t x = readU32();
+                        uint32_t y = readU32();
+                        uint32_t w = readU32();
+                        uint32_t h = readU32();
+                        uint32_t align = readU32();
+                        std::string color = readString();
+                        uint32_t fsize = readU32();
+                        std::string fstyle = readString();
+                        uint8_t glass = readU8();
+                        std::string run = readString();
+                        break;
+                    }
+                    case 0x72: { // OP_UI_SHOW
+                        // Launch freestanding interactive TUI/GUI Desktop
+                        append_u8(bin_data, 0xE8);
+                        append_u32(bin_data, addr_vd_desktop - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+                        break;
+                    }
+                    case 0x73: { // OP_UI_CMD
+                        std::string cmd_line = readString();
+                        break;
+                    }
+                    case 0x80: { // OP_NEW_ARRAY
+                        uint32_t count = readU32();
+                        for (uint32_t i = 0; i < count; ++i) append_u8(bin_data, 0x58);
+                        append_u8(bin_data, 0x68); append_u32(bin_data, 0x00098000);
+                        break;
+                    }
+                    case 0x81: { // OP_GET_INDEX
+                        append_u8(bin_data, 0x5B); // pop idx
+                        append_u8(bin_data, 0x58); // pop arr
+                        append_u8(bin_data, 0x6A); append_u8(bin_data, 0); // push 0
+                        break;
+                    }
+                    case 0x82: { // OP_SET_INDEX
+                        append_u8(bin_data, 0x58); // pop val
+                        append_u8(bin_data, 0x5B); // pop idx
+                        append_u8(bin_data, 0x5E); // pop arr
+                        break;
+                    }
+                    case 0x83: { // OP_ARRAY_PUSH
+                        append_u8(bin_data, 0x58); // pop val
+                        append_u8(bin_data, 0x5E); // pop arr
+                        break;
+                    }
+                    case 0x84: { // OP_ARRAY_POP
+                        append_u8(bin_data, 0x5E); // pop arr
+                        append_u8(bin_data, 0x6A); append_u8(bin_data, 0); // push 0
+                        break;
+                    }
+                    case 0x85: { // OP_NEW_STRUCT
+                        std::string sname = readString();
+                        append_u8(bin_data, 0x68); append_u32(bin_data, 0x00098000);
+                        break;
+                    }
+                    case 0x86: { // OP_GET_FIELD
+                        std::string fname = readString();
+                        append_u8(bin_data, 0x58); // pop struct
+                        append_u8(bin_data, 0x6A); append_u8(bin_data, 0); // push 0
+                        break;
+                    }
+                    case 0x87: { // OP_SET_FIELD
+                        std::string fname = readString();
+                        append_u8(bin_data, 0x58); // pop val
+                        append_u8(bin_data, 0x5E); // pop struct
+                        break;
+                    }
+                    case 0x90: { // OP_ADD_CONST
+                        double d = readDouble();
+                        int32_t val = (int32_t)d;
+                        append_u8(bin_data, 0x58); // pop eax
+                        append_u8(bin_data, 0x05); append_u32(bin_data, (uint32_t)val); // add eax, val
+                        append_u8(bin_data, 0x50); // push eax
+                        break;
+                    }
+                    case 0x91: { // OP_SUB_CONST
+                        double d = readDouble();
+                        int32_t val = (int32_t)d;
+                        append_u8(bin_data, 0x58); // pop eax
+                        append_u8(bin_data, 0x2D); append_u32(bin_data, (uint32_t)val); // sub eax, val
+                        append_u8(bin_data, 0x50); // push eax
+                        break;
+                    }
+                    case 0x92: { // OP_MUL_CONST
+                        double d = readDouble();
+                        int32_t val = (int32_t)d;
+                        append_u8(bin_data, 0x58); // pop eax
+                        append_u8(bin_data, 0x69); append_u8(bin_data, 0xC0); append_u32(bin_data, (uint32_t)val); // imul eax, eax, val
+                        append_u8(bin_data, 0x50); // push eax
+                        break;
+                    }
+                    case 0x93: { // OP_DIV_CONST
+                        double d = readDouble();
+                        int32_t val = (int32_t)d;
+                        if (val == 0) val = 1;
+                        append_u8(bin_data, 0x58); // pop eax
+                        append_u8(bin_data, 0x99); // cdq
+                        append_u8(bin_data, 0xBB); append_u32(bin_data, (uint32_t)val); // mov ebx, val
+                        append_u8(bin_data, 0xF7); append_u8(bin_data, 0xFB); // idiv ebx
+                        append_u8(bin_data, 0x50); // push eax
+                        break;
+                    }
+                    case 0x94: { // OP_INC_VAR
+                        std::string vname = readString();
+                        if (var_slots.find(vname) == var_slots.end()) {
+                            var_slots[vname] = next_var_addr;
+                            next_var_addr += 256;
+                        }
+                        uint32_t vaddr = var_slots[vname] + 4;
+                        append_u8(bin_data, 0xFF); append_u8(bin_data, 0x05); append_u32(bin_data, vaddr);
+                        break;
+                    }
+                    case 0x95: { // OP_DEC_VAR
+                        std::string vname = readString();
+                        if (var_slots.find(vname) == var_slots.end()) {
+                            var_slots[vname] = next_var_addr;
+                            next_var_addr += 256;
+                        }
+                        uint32_t vaddr = var_slots[vname] + 4;
+                        append_u8(bin_data, 0xFF); append_u8(bin_data, 0x0D); append_u32(bin_data, vaddr);
+                        break;
+                    }
+                    case 0xA0: { // OP_THREAD_SPAWN
+                        uint32_t addr = readU32();
+                        break;
+                    }
+                    case 0xA1: { // OP_ASYNC_SPAWN
+                        uint32_t addr = readU32();
                         break;
                     }
                     default:
