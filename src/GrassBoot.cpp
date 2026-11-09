@@ -2159,11 +2159,14 @@ namespace GrassBoot {
             emit_draw_rect(314, 8, 65, 22, 0x001E293B);
             emit_draw_str(320, 11, emit_inline_str("Справка"), 0x00E2E8F0, 1);
 
-            // Right Tray (WiFi, Battery, User)
-            emit_draw_rect(760, 8, 75, 22, 0x001E293B);
-            emit_draw_str(766, 11, emit_inline_str("WiFi: OK"), 0x0038BDF8, 1);
-            emit_draw_rect(845, 8, 160, 22, 0x001E293B);
-            emit_draw_str(855, 11, emit_inline_str("m1oky (Root)"), 0x0022C55E, 1);
+            // Center: Date & Time
+            emit_draw_str(450, 11, emit_inline_str("RQWos | Пн, 9 Ноября 07:45"), 0x0094A3B8, 1);
+
+            // Right Tray (LAN, Sound, User)
+            emit_draw_rect(740, 8, 130, 22, 0x001E293B);
+            emit_draw_str(748, 11, emit_inline_str("LAN: 10.0.2.15"), 0x0038BDF8, 1);
+            emit_draw_rect(880, 8, 125, 22, 0x001E293B);
+            emit_draw_str(890, 11, emit_inline_str("m1oky (Root)"), 0x0022C55E, 1);
 
             // 3. Central Window Card (928x626)
             emit_draw_rect(48, 56, 928, 626, 0x0018181B);
@@ -2183,13 +2186,54 @@ namespace GrassBoot {
             emit_draw_rect(340, 700, 1, 52, 0x00334155);
             emit_draw_rect(683, 700, 1, 52, 0x00334155);
 
-            // Colored App Icons in Dock (36x36)
-            emit_draw_rect(354, 708, 36, 36, 0x0022C55E); // Terminal
-            emit_draw_rect(406, 708, 36, 36, 0x003B82F6); // Files
-            emit_draw_rect(458, 708, 36, 36, 0x00F97316); // Calc
-            emit_draw_rect(510, 708, 36, 36, 0x008B5CF6); // Hardware
-            emit_draw_rect(562, 708, 36, 36, 0x0064748B); // Settings
-            emit_draw_rect(634, 708, 36, 36, 0x00EF4444); // Power
+            // Human-designed Modern Dock Tiles (48x40) with borders and clean labels
+            // 1. Terminal (>_)
+            emit_draw_rect(348, 706, 48, 40, 0x001E293B);
+            emit_draw_rect(348, 706, 48, 1, 0x0022C55E);
+            emit_draw_rect(348, 745, 48, 1, 0x0022C55E);
+            emit_draw_rect(348, 706, 1, 40, 0x0022C55E);
+            emit_draw_rect(395, 706, 1, 40, 0x0022C55E);
+            emit_draw_str(364, 718, emit_inline_str(">_"), 0x0022C55E, 1);
+
+            // 2. Files (FS)
+            emit_draw_rect(404, 706, 48, 40, 0x001E293B);
+            emit_draw_rect(404, 706, 48, 1, 0x0038BDF8);
+            emit_draw_rect(404, 745, 48, 1, 0x0038BDF8);
+            emit_draw_rect(404, 706, 1, 40, 0x0038BDF8);
+            emit_draw_rect(451, 706, 1, 40, 0x0038BDF8);
+            emit_draw_str(420, 718, emit_inline_str("FS"), 0x0038BDF8, 1);
+
+            // 3. Calculator (CAL)
+            emit_draw_rect(460, 706, 48, 40, 0x001E293B);
+            emit_draw_rect(460, 706, 48, 1, 0x00F97316);
+            emit_draw_rect(460, 745, 48, 1, 0x00F97316);
+            emit_draw_rect(460, 706, 1, 40, 0x00F97316);
+            emit_draw_rect(507, 706, 1, 40, 0x00F97316);
+            emit_draw_str(472, 718, emit_inline_str("123"), 0x00F97316, 1);
+
+            // 4. Hardware Monitor (CPU)
+            emit_draw_rect(516, 706, 48, 40, 0x001E293B);
+            emit_draw_rect(516, 706, 48, 1, 0x00A855F7);
+            emit_draw_rect(516, 745, 48, 1, 0x00A855F7);
+            emit_draw_rect(516, 706, 1, 40, 0x00A855F7);
+            emit_draw_rect(563, 706, 1, 40, 0x00A855F7);
+            emit_draw_str(528, 718, emit_inline_str("CPU"), 0x00A855F7, 1);
+
+            // 5. Settings (CFG)
+            emit_draw_rect(572, 706, 48, 40, 0x001E293B);
+            emit_draw_rect(572, 706, 48, 1, 0x0094A3B8);
+            emit_draw_rect(572, 745, 48, 1, 0x0094A3B8);
+            emit_draw_rect(572, 706, 1, 40, 0x0094A3B8);
+            emit_draw_rect(619, 706, 1, 40, 0x0094A3B8);
+            emit_draw_str(584, 718, emit_inline_str("CFG"), 0x0094A3B8, 1);
+
+            // 6. Power (OFF)
+            emit_draw_rect(628, 706, 48, 40, 0x001E293B);
+            emit_draw_rect(628, 706, 48, 1, 0x00EF4444);
+            emit_draw_rect(628, 745, 48, 1, 0x00EF4444);
+            emit_draw_rect(628, 706, 1, 40, 0x00EF4444);
+            emit_draw_rect(675, 706, 1, 40, 0x00EF4444);
+            emit_draw_str(640, 718, emit_inline_str("OFF"), 0x00EF4444, 1);
 
             // ══════════════════════════════════════════════════════════
             // TAB CONTENT REDRAW LOOP (Triggered on tab change 1/2/3/Tab)
