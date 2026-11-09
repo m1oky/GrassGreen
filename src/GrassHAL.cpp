@@ -8,6 +8,10 @@
 #include <iomanip>
 #include <unordered_set>
 #include <algorithm>
+#include <mutex>
+#if !defined(_WIN32)
+#include <sys/mman.h>
+#endif
 
 #if defined(_MSC_VER)
     #include <intrin.h>
@@ -271,8 +275,10 @@ namespace GrassHAL {
 
     alignas(4096) static uint8_t g_freestanding_exec_pool[1024 * 1024]; // 1 МБ исполняемой памяти
     static size_t g_exec_pool_offset = 0;
+    static std::mutex g_exec_pool_mtx;
 
     void* alloc_executable_memory(size_t size) {
+        std::lock_guard<std::mutex> lock(g_exec_pool_mtx);
         if (is_freestanding()) {
             size = (size + 4095) & ~4095; // выравнивание по 4KB странице
             if (g_exec_pool_offset + size <= sizeof(g_freestanding_exec_pool)) {
@@ -284,6 +290,9 @@ namespace GrassHAL {
         }
         #if defined(_WIN32)
         return VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+        #elif defined(__linux__) || defined(__APPLE__)
+        void* p = mmap(nullptr, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        return (p == MAP_FAILED) ? nullptr : p;
         #else
         return nullptr;
         #endif
@@ -295,6 +304,8 @@ namespace GrassHAL {
         }
         #if defined(_WIN32)
         VirtualFree(ptr, 0, MEM_RELEASE);
+        #elif defined(__linux__) || defined(__APPLE__)
+        munmap(ptr, size);
         #endif
     }
 }

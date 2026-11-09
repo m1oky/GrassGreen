@@ -41,6 +41,7 @@ public:
     static void circle(int x, int y, int r, const std::string& hex_color);
     static void line(int x1, int y1, int x2, int y2, const std::string& hex_color, int width);
     static void text(int x, int y, const std::string& str, int size, const std::string& hex_color);
+    static void draw_svg(const std::string& path, int x, int y, int w, int h);
     static bool key(const std::string& key_name);
     static int mouse_x();
     static int mouse_y();

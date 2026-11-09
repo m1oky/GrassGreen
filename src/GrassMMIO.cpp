@@ -26,18 +26,7 @@ namespace GrassMMIO {
     static std::mutex g_mmio_mutex;
 
     static bool is_valid_user_ptr(uint64_t address, size_t size, bool write_access) {
-#if defined(_WIN32)
-        if (address < 0x10000) return false;
-        MEMORY_BASIC_INFORMATION mbi;
-        if (VirtualQuery((LPCVOID)address, &mbi, sizeof(mbi))) {
-            if (mbi.State == MEM_COMMIT) {
-                if (write_access) {
-                    return (mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE | PAGE_WRITECOPY));
-                }
-                return (mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE));
-            }
-        }
-#endif
+        // Запрещаем доступ к сырой виртуальной памяти хост-процесса в hosted режиме (Security Sandbox Guard)
         return false;
     }
 

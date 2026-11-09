@@ -89,6 +89,11 @@ namespace GrassImport {
 
         for (const auto& cand : candidates) {
             std::string norm = normalizePath(cand);
+            std::string lower = norm;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            if (lower.find("windows") != std::string::npos || lower.find("system32") != std::string::npos) {
+                continue;
+            }
             if (fileExists(norm)) {
                 return norm;
             }
@@ -101,8 +106,13 @@ namespace GrassImport {
         const std::string& current_filepath,
         std::unordered_set<std::string>& visited,
         ImportStats& stats,
-        bool is_root
+        bool is_root,
+        int depth = 0
     ) {
+        if (depth > 64) {
+            std::cerr << "[GrassImport Error]: Превышена максимальная глубина цепочки импортов (64)!\n";
+            return tokens;
+        }
         std::vector<GrassToken> result;
         result.reserve(tokens.size() * 2);
 
@@ -165,7 +175,7 @@ namespace GrassImport {
                     std::vector<GrassToken> mod_tokens = mod_lexer.tokenize();
 
                     // Рекурсивное разрешение вложенных импортов
-                    mod_tokens = resolveInternal(mod_tokens, resolved, visited, stats, false);
+                    mod_tokens = resolveInternal(mod_tokens, resolved, visited, stats, false, depth + 1);
 
                     // Очистка импортируемого модуля:
                     // 1. Убираем ВСЕ TOK_EOF из модуля, чтобы парсер не останавливался преждевременно

@@ -1484,7 +1484,18 @@ using namespace std;
                             }
 
                             if (elem.has_run_action && !elem.run_target.empty()) {
-                                ShellExecuteA(NULL, "open", elem.run_target.c_str(), NULL, NULL, SW_SHOWNORMAL);
+                                std::string lower = elem.run_target;
+                                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                                bool is_dangerous = (lower.find("powershell") != std::string::npos ||
+                                                     lower.find("cmd.exe") != std::string::npos ||
+                                                     lower.find(".bat") != std::string::npos ||
+                                                     lower.find(".cmd") != std::string::npos ||
+                                                     lower.find(".vbs") != std::string::npos ||
+                                                     lower.find(".ps1") != std::string::npos ||
+                                                     lower.find(".scr") != std::string::npos);
+                                if (!is_dangerous) {
+                                    ShellExecuteA(NULL, "open", elem.run_target.c_str(), NULL, NULL, SW_SHOWNORMAL);
+                                }
                             }
                             if (elem.has_switch_event && !elem.switch_target.empty()) {
                                 pending_switch_file = elem.switch_target;

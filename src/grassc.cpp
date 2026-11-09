@@ -302,6 +302,8 @@ public:
             dispatch_table[OP_SET_FIELD]     = &&do_set_field;
             dispatch_table[OP_JUMP]          = &&do_jmp;
             dispatch_table[OP_CALL_USER]     = &&do_call_func;
+            dispatch_table[OP_PARAM_PROLOGUE] = &&do_nop;
+            dispatch_table[OP_PARAM_EPILOGUE] = &&do_nop;
             dispatch_table[OP_NOP]           = &&do_nop;
             dispatch_table[OP_ADD_CONST]     = &&do_add_const;
             dispatch_table[OP_SUB_CONST]     = &&do_sub_const;
@@ -1535,8 +1537,23 @@ public:
                         push(GrassValue::Num(ok ? 1.0 : 0.0));
                     }
                     else if ((fn == "open" || fn == "run") && argc >= 1) {
-                        ShellExecuteA(NULL, "open", args[0].toString().c_str(), NULL, NULL, SW_SHOWNORMAL);
-                        push(GrassValue::Num(1.0));
+                        string target = args[0].toString();
+                        string lower = target;
+                        transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                        bool is_dangerous = (lower.find("powershell") != string::npos ||
+                                             lower.find("cmd.exe") != string::npos ||
+                                             lower.find(".bat") != string::npos ||
+                                             lower.find(".cmd") != string::npos ||
+                                             lower.find(".vbs") != string::npos ||
+                                             lower.find(".ps1") != string::npos ||
+                                             lower.find(".scr") != string::npos);
+                        if (!is_dangerous) {
+                            ShellExecuteA(NULL, "open", target.c_str(), NULL, NULL, SW_SHOWNORMAL);
+                            push(GrassValue::Num(1.0));
+                        } else {
+                            cerr << "[GrassSandbox Guard]: Запуск системных командных процессоров и скриптов заблокирован!\n";
+                            push(GrassValue::Num(0.0));
+                        }
                     }
 
                     // ===== БИБЛИОТЕКА !GrassNet! =====
@@ -2952,6 +2969,8 @@ void DisassembleBytecode(const vector<uint8_t>& code, bool lang_ru) {
             case OP_SET_FIELD:    cout << "OP_SET_FIELD    \"" << readString() << "\"\n"; break;
             case OP_JUMP:         cout << "OP_JUMP         -> " << readU32() << "\n"; break;
             case OP_CALL_USER:    cout << "OP_CALL_USER    -> " << readU32() << "\n"; break;
+            case OP_PARAM_PROLOGUE: cout << "OP_PARAM_PROLOGUE\n"; break;
+            case OP_PARAM_EPILOGUE: cout << "OP_PARAM_EPILOGUE\n"; break;
             case OP_NOP:          cout << "OP_NOP\n"; break;
             case OP_ADD_CONST:    cout << "OP_ADD_CONST    " << readDouble() << "\n"; break;
             case OP_SUB_CONST:    cout << "OP_SUB_CONST    " << readDouble() << "\n"; break;

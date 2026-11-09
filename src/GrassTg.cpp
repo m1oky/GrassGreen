@@ -4,6 +4,10 @@
 #if defined(_WIN32)
 #include <windows.h>
 #include <wininet.h>
+#else
+#include <unistd.h>
+#include <sys/wait.h>
+#include <fcntl.h>
 #endif
 #include <sstream>
 #include <iomanip>
@@ -64,15 +68,34 @@ std::string GrassTg::httpGet(const std::string& url) {
     InternetCloseHandle(hInternet);
     return response;
 #else
-    std::string cmd = "curl -s -k \"" + url + "\" 2>/dev/null";
-    FILE* p = popen(cmd.c_str(), "r");
-    if (!p) return "";
-    std::string response;
-    char buffer[4096];
-    while (fgets(buffer, sizeof(buffer), p)) {
-        response += buffer;
+    if (url.find_first_of("\"' \t\r\n;$|&<>`\\") != std::string::npos) {
+        return "";
     }
-    pclose(p);
+    std::string response;
+    int pipefd[2];
+    if (pipe(pipefd) == -1) return "";
+    pid_t pid = fork();
+    if (pid == 0) {
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO);
+        close(pipefd[1]);
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull >= 0) {
+            dup2(devnull, STDERR_FILENO);
+            close(devnull);
+        }
+        execlp("curl", "curl", "-s", "-k", url.c_str(), (char*)NULL);
+        _exit(127);
+    } else if (pid > 0) {
+        close(pipefd[1]);
+        char buffer[4096];
+        ssize_t n;
+        while ((n = read(pipefd[0], buffer, sizeof(buffer))) > 0) {
+            response.append(buffer, n);
+        }
+        close(pipefd[0]);
+        waitpid(pid, NULL, 0);
+    }
     return response;
 #endif
 }

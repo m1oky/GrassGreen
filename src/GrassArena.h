@@ -1,6 +1,5 @@
 // =============================================================================
-//  GrassGreen 4.0 — Arena Allocator (bump-pointer)
-//  Файл создан Архитектором. Реализация — Кодер Ядра.
+//  GrassGreen 4.0 — Chained Chunk Arena Allocator (thread-safe, no UAF)
 // =============================================================================
 #ifndef GRASS_ARENA_H
 #define GRASS_ARENA_H
@@ -9,6 +8,8 @@
 #include <cstddef>
 #include <cstring>
 #include <cstdlib>
+#include <algorithm>
+#include <mutex>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -18,92 +19,106 @@
 
 class GrassArena {
 private:
-    uint8_t* base;
-    size_t   capacity;
-    size_t   offset;
+    struct Chunk {
+        uint8_t* mem = nullptr;
+        size_t cap = 0;
+        size_t off = 0;
+        Chunk* next = nullptr;
+        bool is_virt = false;
+    };
+
+    Chunk* head = nullptr;
+    Chunk* current = nullptr;
+    size_t chunk_size;
+    mutable std::mutex arena_mtx;
+
+    Chunk* create_chunk(size_t cap) {
+        Chunk* c = new Chunk();
+        c->cap = cap;
+        c->off = 0;
+        c->next = nullptr;
+#if defined(_WIN32)
+        c->mem = (uint8_t*)VirtualAlloc(nullptr, cap, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        if (c->mem) {
+            c->is_virt = true;
+        } else {
+            c->mem = (uint8_t*)malloc(cap);
+            c->is_virt = false;
+        }
+#else
+        c->mem = (uint8_t*)mmap(nullptr, cap, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (c->mem != MAP_FAILED && c->mem != nullptr) {
+            c->is_virt = true;
+        } else {
+            c->mem = (uint8_t*)malloc(cap);
+            c->is_virt = false;
+        }
+#endif
+        return c;
+    }
+
+    void free_chunk(Chunk* c) {
+        if (!c) return;
+        if (c->mem) {
+#if defined(_WIN32)
+            if (c->is_virt) {
+                VirtualFree(c->mem, 0, MEM_RELEASE);
+            } else {
+                free(c->mem);
+            }
+#else
+            if (c->is_virt) {
+                munmap(c->mem, c->cap);
+            } else {
+                free(c->mem);
+            }
+#endif
+        }
+        delete c;
+    }
 
 public:
-    // -------------------------------------------------------------------------
-    //  Конструктор: резервирует initial байт через VirtualAlloc / mmap (или malloc).
-    // -------------------------------------------------------------------------
-    explicit GrassArena(size_t initial = 1024 * 1024)
-        : base(nullptr), capacity(initial), offset(0)
+    explicit GrassArena(size_t initial = 4 * 1024 * 1024)
+        : chunk_size(initial)
     {
-#if defined(_WIN32)
-        base = (uint8_t*)VirtualAlloc(
-            nullptr, initial, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-#else
-        base = (uint8_t*)mmap(nullptr, initial, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (base == MAP_FAILED) base = nullptr;
-#endif
-        if (!base) {
-            // Fallback для совместимости
-            base = (uint8_t*)malloc(initial);
-        }
+        head = create_chunk(chunk_size);
+        current = head;
     }
 
-    // -------------------------------------------------------------------------
-    //  Деструктор: освобождает память.
-    // -------------------------------------------------------------------------
     ~GrassArena()
     {
-        if (base) {
-#if defined(_WIN32)
-            VirtualFree(base, 0, MEM_RELEASE);
-#else
-            munmap(base, capacity);
-#endif
+        std::lock_guard<std::mutex> lock(arena_mtx);
+        Chunk* c = head;
+        while (c) {
+            Chunk* nxt = c->next;
+            free_chunk(c);
+            c = nxt;
         }
-        base     = nullptr;
-        capacity = 0;
-        offset   = 0;
+        head = nullptr;
+        current = nullptr;
     }
 
-    // -------------------------------------------------------------------------
-    //  Выделение выровненного блока bytes байт из арены.
-    //  Возвращает nullptr, если арена исчерпана.
-    // -------------------------------------------------------------------------
     void* alloc(size_t bytes, size_t align = 8)
     {
-        size_t aligned = (offset + align - 1) & ~(align - 1);
-
-        if (aligned + bytes > capacity) {
-            // Расширяем арену удвоением, пока не хватит места
-            size_t new_cap = capacity * 2;
-            while (new_cap < aligned + bytes) {
-                new_cap *= 2;
-            }
-#if defined(_WIN32)
-            uint8_t* new_base = (uint8_t*)VirtualAlloc(
-                nullptr, new_cap, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-#else
-            uint8_t* new_base = (uint8_t*)mmap(nullptr, new_cap, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-            if (new_base == MAP_FAILED) new_base = nullptr;
-#endif
-            if (!new_base) {
-                new_base = (uint8_t*)malloc(new_cap);
-            }
-            if (!new_base) return nullptr;
-
-            memcpy(new_base, base, offset);
-#if defined(_WIN32)
-            VirtualFree(base, 0, MEM_RELEASE);
-#else
-            munmap(base, capacity);
-#endif
-
-            base     = new_base;
-            capacity = new_cap;
+        std::lock_guard<std::mutex> lock(arena_mtx);
+        if (!current) {
+            head = create_chunk(std::max(chunk_size, bytes + align));
+            current = head;
         }
 
-        offset = aligned + bytes;
-        return base + aligned;
+        size_t aligned = (current->off + align - 1) & ~(align - 1);
+        if (aligned + bytes > current->cap) {
+            size_t next_sz = std::max(chunk_size, bytes + align);
+            Chunk* nxt = create_chunk(next_sz);
+            current->next = nxt;
+            current = nxt;
+            aligned = (current->off + align - 1) & ~(align - 1);
+        }
+
+        current->off = aligned + bytes;
+        return current->mem + aligned;
     }
 
-    // -------------------------------------------------------------------------
-    //  Копирует строку src длиной len в арену и добавляет '\0'.
-    //  Возвращает указатель на копию внутри арены.
-    // -------------------------------------------------------------------------
     char* alloc_string(const char* src, size_t len)
     {
         char* dst = (char*)alloc(len + 1, 1);
@@ -113,23 +128,34 @@ public:
         return dst;
     }
 
-    // -------------------------------------------------------------------------
-    //  Сбрасывает арену: offset = 0, память не освобождается.
-    // -------------------------------------------------------------------------
     void reset()
     {
-        offset = 0;
+        std::lock_guard<std::mutex> lock(arena_mtx);
+        if (head) {
+            Chunk* c = head->next;
+            while (c) {
+                Chunk* nxt = c->next;
+                free_chunk(c);
+                c = nxt;
+            }
+            head->next = nullptr;
+            head->off = 0;
+            current = head;
+        }
     }
 
-    // -------------------------------------------------------------------------
-    //  Возвращает количество использованных байт.
-    // -------------------------------------------------------------------------
     size_t used() const
     {
-        return offset;
+        std::lock_guard<std::mutex> lock(arena_mtx);
+        size_t total = 0;
+        Chunk* c = head;
+        while (c) {
+            total += c->off;
+            c = c->next;
+        }
+        return total;
     }
 
-    // Запрет копирования
     GrassArena(const GrassArena&)            = delete;
     GrassArena& operator=(const GrassArena&) = delete;
 };

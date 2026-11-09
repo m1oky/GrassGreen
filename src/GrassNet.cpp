@@ -172,7 +172,7 @@ namespace GrassNet {
 
         DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE;
         if (url.find("https://") == 0) {
-            flags |= INTERNET_FLAG_SECURE | INTERNET_FLAG_IGNORE_CERT_CN_INVALID | INTERNET_FLAG_IGNORE_CERT_DATE_INVALID;
+            flags |= INTERNET_FLAG_SECURE;
         }
 
         HINTERNET hUrl = InternetOpenUrlA(hInternet, url.c_str(), headers.c_str(), (DWORD)headers.length(), flags, 0);
@@ -295,6 +295,19 @@ namespace GrassNet {
         char buf[2048] = {0};
         int rec = recv(client, buf, sizeof(buf) - 1, 0);
         std::string data = (rec > 0) ? std::string(buf, rec) : "";
+
+        if (!srv_password.empty()) {
+            std::string auth_header = "Authorization: Bearer " + srv_password;
+            std::string pwd_header = "Password: " + srv_password;
+            if (data.find(auth_header) == std::string::npos &&
+                data.find(pwd_header) == std::string::npos &&
+                data.find(srv_password) == std::string::npos) {
+                std::string deny = "HTTP/1.1 401 Unauthorized\r\n\r\nAccess Denied by GrassNet server password policy.";
+                ::send(client, deny.c_str(), (int)deny.size(), 0);
+                closesocket(client);
+                return "[GrassNet]: Unauthorized client blocked (invalid password)";
+            }
+        }
 
         std::string reply = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nGrassNet Server ACK";
         ::send(client, reply.c_str(), (int)reply.size(), 0);

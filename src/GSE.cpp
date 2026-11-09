@@ -12,11 +12,13 @@
 #include <iomanip>
 #include <ctime>
 #include <cstdint>
+#include <mutex>
 
 using namespace std;
 
 // Глобальный кэш переменных
 map<string, wstring> variables_cache;
+static std::mutex g_db_mutex;
 
 
 wstring utf8_to_wstring_gse(const string& str) {

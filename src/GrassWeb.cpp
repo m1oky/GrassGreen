@@ -21,6 +21,7 @@
 #include <sstream>
 #include <vector>
 #include <map>
+#include <thread>
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -794,36 +795,56 @@ void GrassWeb_LoadPage(const string& filename) {
     (void)r;
 #endif
 
-    while (true) {
-        SOCKET client_socket = accept(server_socket, NULL, NULL);
-        if (client_socket == INVALID_SOCKET) continue;
+    // Run server accept loop in background thread to prevent starving the VM main thread (DOS-02)
+    std::thread([server_socket, filename]() {
+        while (true) {
+            SOCKET client_socket = accept(server_socket, NULL, NULL);
+            if (client_socket == INVALID_SOCKET) break;
 
-        char buffer[4096] = {0};
-        recv(client_socket, buffer, 4096, 0);
-        string request(buffer);
-
-        if (request.find("GET ") == 0) {
-            size_t start = 4;
-            size_t end = request.find(" ", start);
-            string path = request.substr(start, end - start);
-
-            if (path == "/") path = "/" + filename;
-            string target_file = path.substr(1);
-
-            if (target_file != "favicon.ico") {
-                string html_body = CompileGrassToHTML(target_file);
-                string http_response =
-                    "HTTP/1.1 200 OK\r\n"
-                    "Content-Type: text/html; charset=UTF-8\r\n"
-                    "Cache-Control: no-cache, no-store, must-revalidate\r\n"
-                    "Connection: close\r\n\r\n" + html_body;
-                send(client_socket, http_response.c_str(), (int)http_response.length(), 0);
+            char buffer[4096];
+            int bytes = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
+            if (bytes <= 0) {
+                closesocket(client_socket);
+                continue;
             }
+            buffer[bytes] = '\0';
+            string request(buffer, bytes);
+
+            if (request.find("GET ") == 0) {
+                size_t start = 4;
+                size_t end = request.find(" ", start);
+                if (end == string::npos) {
+                    closesocket(client_socket);
+                    continue;
+                }
+                string path = request.substr(start, end - start);
+
+                if (path == "/") path = "/" + filename;
+                string target_file = path.substr(1);
+
+                // Path Traversal Check (SEC-02)
+                if (target_file.find("..") != string::npos || target_file.find(':') != string::npos || target_file.find('\\') != string::npos) {
+                    string http_response =
+                        "HTTP/1.1 403 Forbidden\r\n"
+                        "Content-Type: text/plain; charset=UTF-8\r\n"
+                        "Connection: close\r\n\r\nAccess Denied (Path Traversal Guard).";
+                    send(client_socket, http_response.c_str(), (int)http_response.length(), 0);
+                    closesocket(client_socket);
+                    continue;
+                }
+
+                if (target_file != "favicon.ico") {
+                    string html_body = CompileGrassToHTML(target_file);
+                    string http_response =
+                        "HTTP/1.1 200 OK\r\n"
+                        "Content-Type: text/html; charset=UTF-8\r\n"
+                        "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+                        "Connection: close\r\n\r\n" + html_body;
+                    send(client_socket, http_response.c_str(), (int)http_response.length(), 0);
+                }
+            }
+            closesocket(client_socket);
         }
-        closesocket(client_socket);
-    }
-    closesocket(server_socket);
-#if defined(_WIN32)
-    WSACleanup();
-#endif
+        closesocket(server_socket);
+    }).detach();
 }

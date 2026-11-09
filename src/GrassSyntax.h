@@ -85,7 +85,9 @@ enum OpCode : uint8_t {
     OP_ASYNC_SPAWN   = 0xA1,
 
     OP_JUMP          = 0xF0,
-    OP_CALL_USER     = 0xF1
+    OP_CALL_USER     = 0xF1,
+    OP_PARAM_PROLOGUE = 0xF2,
+    OP_PARAM_EPILOGUE = 0xF3
 };
 
 // 2. УНИВЕРСАЛЬНЫЙ ТИП ДАННЫХ ВМ (GRASS VALUE) — NaN-boxing (8 байт)
@@ -384,6 +386,8 @@ class BytecodeCompiler {
     int loop_counter = 0;
     bool inside_function = false;
     bool is_special_file = false; // Для чистых .gdb или !GrassWeb! файлов
+    int recursion_depth = 0;
+    static constexpr int MAX_RECURSION_DEPTH = 256;
 
     std::unordered_set<std::string> included_libs;
     std::vector<std::vector<size_t>> break_Fixups;

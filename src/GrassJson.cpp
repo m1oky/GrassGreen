@@ -3,10 +3,12 @@
 #include <sstream>
 #include <cctype>
 #include <algorithm>
+#include <mutex>
 
 namespace GrassJson {
 
     static std::vector<std::pair<std::string, std::string>> builder_entries;
+    static std::mutex g_builder_mutex;
 
     static void skip_ws(const std::string& s, size_t& i) {
         while (i < s.size() && (s[i] == ' ' || s[i] == '\t' || s[i] == '\r' || s[i] == '\n')) {
@@ -132,8 +134,16 @@ namespace GrassJson {
         bool in_str = false;
         for (size_t i = 0; i < json_str.size(); ++i) {
             char c = json_str[i];
-            if (c == '"' && (i == 0 || json_str[i - 1] != '\\')) {
-                in_str = !in_str;
+            if (c == '"') {
+                size_t bs = 0;
+                size_t k = i;
+                while (k > 0 && json_str[k - 1] == '\\') {
+                    bs++;
+                    k--;
+                }
+                if (bs % 2 == 0) {
+                    in_str = !in_str;
+                }
             }
             if (!in_str) {
                 if (c == '{') braces++;
@@ -151,7 +161,17 @@ namespace GrassJson {
         bool in_str = false;
         for (size_t i = 0; i < json_str.size(); ++i) {
             char c = json_str[i];
-            if (c == '"' && (i == 0 || json_str[i - 1] != '\\')) in_str = !in_str;
+            if (c == '"') {
+                size_t bs = 0;
+                size_t k = i;
+                while (k > 0 && json_str[k - 1] == '\\') {
+                    bs++;
+                    k--;
+                }
+                if (bs % 2 == 0) {
+                    in_str = !in_str;
+                }
+            }
             if (in_str || (!isspace((unsigned char)c))) {
                 res += c;
             }
@@ -159,22 +179,44 @@ namespace GrassJson {
         return res;
     }
 
+    static std::string escape_json_str(const std::string& val) {
+        std::string res;
+        res.reserve(val.size() + 2);
+        for (char c : val) {
+            switch (c) {
+                case '"':  res += "\\\""; break;
+                case '\\': res += "\\\\"; break;
+                case '\b': res += "\\b"; break;
+                case '\f': res += "\\f"; break;
+                case '\n': res += "\\n"; break;
+                case '\r': res += "\\r"; break;
+                case '\t': res += "\\t"; break;
+                default:   res += c; break;
+            }
+        }
+        return res;
+    }
+
     void builder_clear() {
+        std::lock_guard<std::mutex> lock(g_builder_mutex);
         builder_entries.clear();
     }
 
     void builder_add_str(const std::string& key, const std::string& val) {
-        builder_entries.push_back({key, "\"" + val + "\""});
+        std::lock_guard<std::mutex> lock(g_builder_mutex);
+        builder_entries.push_back({escape_json_str(key), "\"" + escape_json_str(val) + "\""});
     }
 
     void builder_add_num(const std::string& key, double val) {
+        std::lock_guard<std::mutex> lock(g_builder_mutex);
         std::ostringstream ss;
         if (val == (long long)val) ss << (long long)val;
         else ss << val;
-        builder_entries.push_back({key, ss.str()});
+        builder_entries.push_back({escape_json_str(key), ss.str()});
     }
 
     std::string builder_stringify() {
+        std::lock_guard<std::mutex> lock(g_builder_mutex);
         std::string res = "{";
         for (size_t i = 0; i < builder_entries.size(); ++i) {
             res += "\"" + builder_entries[i].first + "\":" + builder_entries[i].second;

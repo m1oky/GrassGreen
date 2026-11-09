@@ -3,6 +3,11 @@
 #include <chrono>
 #include <thread>
 #include <algorithm>
+#include <fstream>
+#include <sstream>
+#include <vector>
+#include <map>
+#include <cmath>
 
 HWND Grass2DGraphics::hwnd = nullptr;
 HDC Grass2DGraphics::hdc_screen = nullptr;
@@ -243,18 +248,190 @@ void Grass2DGraphics::text(int x, int y, const std::string& str, int size, const
     COLORREF col = parseColor(hex_color);
     SetTextColor(hdc_mem, col);
 
-    HFONT hFont = CreateFontA(
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, NULL, 0);
+    std::wstring wstr(wlen, 0);
+    MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &wstr[0], wlen);
+    if (!wstr.empty() && wstr.back() == L'\0') wstr.pop_back();
+
+    HFONT hFont = CreateFontW(
         size, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, "Segoe UI"
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI"
     );
     HGDIOBJ old_font = SelectObject(hdc_mem, hFont);
 
-    TextOutA(hdc_mem, x, y, str.c_str(), (int)str.length());
+    TextOutW(hdc_mem, x, y, wstr.c_str(), (int)wstr.length());
 
     SelectObject(hdc_mem, old_font);
     DeleteObject(hFont);
 #endif
+}
+
+static std::string get_svg_attr(const std::string& tag, const std::string& attr) {
+    std::string needle = attr + "=\"";
+    size_t pos = tag.find(needle);
+    if (pos == std::string::npos) {
+        needle = attr + "='";
+        pos = tag.find(needle);
+        if (pos == std::string::npos) return "";
+    }
+    size_t start = pos + needle.length();
+    char quote = tag[pos + needle.length() - 1];
+    size_t end = tag.find(quote, start);
+    if (end == std::string::npos) return "";
+    return tag.substr(start, end - start);
+}
+
+void Grass2DGraphics::draw_svg(const std::string& path, int targetX, int targetY, int targetW, int targetH) {
+    std::ifstream in(path);
+    if (!in.is_open()) {
+        in.open("assets/" + path);
+        if (!in.is_open()) {
+            in.open("../assets/" + path);
+            if (!in.is_open()) {
+                in.open("assets/icons/" + path);
+                if (!in.is_open()) return;
+            }
+        }
+    }
+    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    in.close();
+
+    float vbX = 0, vbY = 0, vbW = 100, vbH = 100;
+    size_t svgPos = content.find("<svg");
+    if (svgPos != std::string::npos) {
+        size_t svgEnd = content.find('>', svgPos);
+        if (svgEnd != std::string::npos) {
+            std::string header = content.substr(svgPos, svgEnd - svgPos);
+            std::string vb = get_svg_attr(header, "viewBox");
+            if (!vb.empty()) {
+                for (char& c : vb) if (c == ',') c = ' ';
+                std::stringstream ss(vb);
+                ss >> vbX >> vbY >> vbW >> vbH;
+            } else {
+                std::string sw = get_svg_attr(header, "width");
+                std::string sh = get_svg_attr(header, "height");
+                try { if (!sw.empty()) vbW = std::stof(sw); } catch(...) {}
+                try { if (!sh.empty()) vbH = std::stof(sh); } catch(...) {}
+            }
+        }
+    }
+    if (vbW <= 0) vbW = 100;
+    if (vbH <= 0) vbH = 100;
+
+    auto mapX = [&](float x) -> int { return targetX + (int)((x - vbX) * (targetW / vbW)); };
+    auto mapY = [&](float y) -> int { return targetY + (int)((y - vbY) * (targetH / vbH)); };
+    auto mapW = [&](float w_val) -> int { return std::max(1, (int)(w_val * (targetW / vbW))); };
+    auto mapH = [&](float h_val) -> int { return std::max(1, (int)(h_val * (targetH / vbH))); };
+
+    std::map<std::string, std::string> grad_colors;
+    size_t gpos = 0;
+    while ((gpos = content.find("<linearGradient", gpos)) != std::string::npos) {
+        size_t gend = content.find("</linearGradient>", gpos);
+        if (gend == std::string::npos) break;
+        std::string block = content.substr(gpos, gend - gpos);
+        std::string gid = get_svg_attr(block, "id");
+        size_t s1 = block.find("<stop");
+        if (s1 != std::string::npos) {
+            std::string col = get_svg_attr(block.substr(s1), "stop-color");
+            if (!col.empty()) grad_colors[gid] = col;
+        }
+        gpos = gend + 17;
+    }
+
+    auto resolve_col = [&](const std::string& raw) -> std::string {
+        if (raw.empty() || raw == "none") return "";
+        if (raw.find("url(#") == 0) {
+            std::string id = raw.substr(5);
+            if (!id.empty() && id.back() == ')') id.pop_back();
+            if (grad_colors.count(id)) return grad_colors[id];
+            return "#22c55e";
+        }
+        return raw;
+    };
+
+    size_t tagPos = 0;
+    while ((tagPos = content.find('<', tagPos)) != std::string::npos) {
+        size_t tagEnd = content.find('>', tagPos);
+        if (tagEnd == std::string::npos) break;
+        std::string tag = content.substr(tagPos, tagEnd - tagPos + 1);
+        tagPos = tagEnd + 1;
+
+        if (tag.rfind("<rect", 0) == 0) {
+            float rx = 0, ry = 0, rw = 0, rh = 0;
+            try {
+                std::string s = get_svg_attr(tag, "x"); if (!s.empty()) rx = std::stof(s);
+                s = get_svg_attr(tag, "y"); if (!s.empty()) ry = std::stof(s);
+                s = get_svg_attr(tag, "width"); if (!s.empty()) rw = std::stof(s);
+                s = get_svg_attr(tag, "height"); if (!s.empty()) rh = std::stof(s);
+            } catch (...) {}
+            std::string fillCol = resolve_col(get_svg_attr(tag, "fill"));
+            std::string strokeCol = resolve_col(get_svg_attr(tag, "stroke"));
+            if (!fillCol.empty()) rect(mapX(rx), mapY(ry), mapW(rw), mapH(rh), fillCol);
+            if (!strokeCol.empty()) {
+                int px = mapX(rx), py = mapY(ry), pw = mapW(rw), ph = mapH(rh);
+                line(px, py, px + pw, py, strokeCol, 1);
+                line(px, py + ph, px + pw, py + ph, strokeCol, 1);
+                line(px, py, px, py + ph, strokeCol, 1);
+                line(px + pw, py, px + pw, py + ph, strokeCol, 1);
+            }
+        } else if (tag.rfind("<circle", 0) == 0) {
+            float cx = 0, cy = 0, cr = 0;
+            try {
+                std::string s = get_svg_attr(tag, "cx"); if (!s.empty()) cx = std::stof(s);
+                s = get_svg_attr(tag, "cy"); if (!s.empty()) cy = std::stof(s);
+                s = get_svg_attr(tag, "r"); if (!s.empty()) cr = std::stof(s);
+            } catch (...) {}
+            std::string fillCol = resolve_col(get_svg_attr(tag, "fill"));
+            std::string strokeCol = resolve_col(get_svg_attr(tag, "stroke"));
+            int rad = std::max(1, (int)(cr * (targetW / vbW)));
+            if (!fillCol.empty()) circle(mapX(cx), mapY(cy), rad, fillCol);
+            else if (!strokeCol.empty()) circle(mapX(cx), mapY(cy), rad, strokeCol);
+        } else if (tag.rfind("<line", 0) == 0) {
+            float x1 = 0, y1 = 0, x2 = 0, y2 = 0, sw = 1;
+            try {
+                std::string s = get_svg_attr(tag, "x1"); if (!s.empty()) x1 = std::stof(s);
+                s = get_svg_attr(tag, "y1"); if (!s.empty()) y1 = std::stof(s);
+                s = get_svg_attr(tag, "x2"); if (!s.empty()) x2 = std::stof(s);
+                s = get_svg_attr(tag, "y2"); if (!s.empty()) y2 = std::stof(s);
+                s = get_svg_attr(tag, "stroke-width"); if (!s.empty()) sw = std::stof(s);
+            } catch (...) {}
+            std::string strokeCol = resolve_col(get_svg_attr(tag, "stroke"));
+            if (strokeCol.empty()) strokeCol = "#ffffff";
+            line(mapX(x1), mapY(y1), mapX(x2), mapY(y2), strokeCol, std::max(1, (int)sw));
+        } else if (tag.rfind("<path", 0) == 0) {
+            std::string d = get_svg_attr(tag, "d");
+            std::string fillCol = resolve_col(get_svg_attr(tag, "fill"));
+            std::string strokeCol = resolve_col(get_svg_attr(tag, "stroke"));
+            std::string col = !fillCol.empty() ? fillCol : strokeCol;
+            if (col.empty()) col = "#22c55e";
+
+            std::stringstream ss(d);
+            char cmd = 0;
+            float curX = 0, curY = 0, startX = 0, startY = 0;
+            while (ss >> cmd) {
+                if (cmd == 'M' || cmd == 'm') {
+                    float px, py;
+                    if (ss >> px >> py) {
+                        curX = px; curY = py; startX = px; startY = py;
+                    }
+                } else if (cmd == 'L' || cmd == 'l') {
+                    float px, py;
+                    if (ss >> px >> py) {
+                        line(mapX(curX), mapY(curY), mapX(px), mapY(py), col, 2);
+                        curX = px; curY = py;
+                    }
+                } else if (cmd == 'Z' || cmd == 'z') {
+                    line(mapX(curX), mapY(curY), mapX(startX), mapY(startY), col, 2);
+                    curX = startX; curY = startY;
+                } else {
+                    float dummy;
+                    while (ss.peek() == ' ' || ss.peek() == ',') ss.ignore();
+                    if (isdigit(ss.peek()) || ss.peek() == '-') ss >> dummy;
+                }
+            }
+        }
+    }
 }
 
 bool Grass2DGraphics::key(const std::string& key_name) {

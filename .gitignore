@@ -9,6 +9,7 @@ storage.gdb
 AGENTS.md
 STATE.md
 AUDIT_PROMPT.md
+BUGS.md
 
 # Сгенерированные данные инсталлятора
 installer/payload_data.h

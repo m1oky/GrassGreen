@@ -17,6 +17,7 @@
 #else
 #include <unistd.h>
 #include <cstdlib>
+#include <fcntl.h>
 #endif
 
 namespace GrassAudio {
@@ -151,9 +152,21 @@ namespace GrassAudio {
         std::wstring playCmd = loop ? L"play grass_audio repeat" : L"play grass_audio";
         return (mciSendStringW(playCmd.c_str(), NULL, 0, NULL) == 0);
 #else
-        std::string cmd = (loop ? "aplay -q \"" : "aplay -q \"") + filepath + "\" >/dev/null 2>&1 &";
-        int ret = system(cmd.c_str());
-        return (ret == 0);
+        if (filepath.find_first_of("\"' \t\r\n;$|&<>`\\") != std::string::npos) {
+            return false;
+        }
+        pid_t pid = fork();
+        if (pid == 0) {
+            int devnull = open("/dev/null", O_WRONLY);
+            if (devnull >= 0) {
+                dup2(devnull, STDOUT_FILENO);
+                dup2(devnull, STDERR_FILENO);
+                close(devnull);
+            }
+            execlp("aplay", "aplay", "-q", filepath.c_str(), (char*)NULL);
+            _exit(127);
+        }
+        return (pid > 0);
 #endif
     }
 

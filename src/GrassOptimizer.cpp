@@ -89,6 +89,8 @@ namespace GrassOptimizer {
                 case OP_SET_INDEX:
                 case OP_ARRAY_PUSH:
                 case OP_ARRAY_POP:
+                case OP_PARAM_PROLOGUE:
+                case OP_PARAM_EPILOGUE:
                     break;
 
                 case OP_CONST_NUM:
@@ -173,7 +175,8 @@ namespace GrassOptimizer {
                     break;
 
                 default:
-                    break;
+                    // Unknown opcode: abort decoding to prevent byte stream desync and bytecode corruption
+                    return {};
             }
             instrs.push_back(inst);
         }
@@ -196,6 +199,11 @@ namespace GrassOptimizer {
 
         std::unordered_set<size_t> jump_targets;
         std::vector<Instruction> instrs = decodeBytecode(bytecode, jump_targets);
+        if (instrs.empty()) {
+            stats.optimized_bytes = bytecode.size();
+            if (out_stats) *out_stats = stats;
+            return bytecode;
+        }
 
         int max_passes = (opt_level >= 3) ? 4 : (opt_level == 2 ? 2 : 1);
 

@@ -16,6 +16,7 @@ namespace GrassThread {
         int64_t id;
         std::thread th;
         std::atomic<bool> completed{false};
+        std::atomic<bool> joined{false};
         GrassValue result{GrassValue::Num(0.0)};
         bool detached{false};
     };
@@ -115,6 +116,13 @@ namespace GrassThread {
                 return GrassValue::Num(0.0);
             }
             item = it->second;
+            if (item->joined.exchange(true)) {
+                // Already joined by another thread, wait for completion and return result
+                while (!item->completed) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+                return item->result;
+            }
         }
 
         if (item->th.joinable()) {

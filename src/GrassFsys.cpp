@@ -3,8 +3,25 @@
 #include <filesystem>
 #include <sstream>
 #include <fstream>
+#include <algorithm>
 
 namespace fs = std::filesystem;
+
+static bool is_dangerous_system_path(const std::string& path_str) {
+    if (path_str.empty()) return true;
+    std::string s = path_str;
+    while (!s.empty() && (s.back() == '/' || s.back() == '\\')) s.pop_back();
+    if (s.empty() || s == "." || s == "..") return true;
+    if (s.size() <= 2 && s.find(':') != std::string::npos) return true;
+    std::string lower = s;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    if (lower == "c:" || lower == "c:/" || lower == "c:\\" || lower == "/" || lower == "\\") return true;
+    if (lower.find("windows") != std::string::npos || lower.find("system32") != std::string::npos ||
+        lower == "/etc" || lower == "/bin" || lower == "/usr" || lower == "/sbin") {
+        return true;
+    }
+    return false;
+}
 
 bool GrassFsys::mkdir(const std::string& path) {
     if (GrassHAL::is_freestanding()) {
@@ -69,6 +86,7 @@ bool GrassFsys::write(const std::string& path, const std::string& content) {
     if (GrassHAL::is_freestanding()) {
         return GrassHAL::vfs_write(path, content);
     }
+    if (is_dangerous_system_path(path)) return false;
     std::error_code ec;
     auto parent = fs::path(path).parent_path();
     if (!parent.empty()) fs::create_directories(parent, ec);
@@ -90,6 +108,7 @@ bool GrassFsys::remove(const std::string& path) {
     if (GrassHAL::is_freestanding()) {
         return GrassHAL::vfs_remove(path);
     }
+    if (is_dangerous_system_path(path)) return false;
     std::error_code ec;
     return fs::remove_all(path, ec) > 0;
 }

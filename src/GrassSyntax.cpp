@@ -14,7 +14,7 @@ bool Lexer::isIdentStart(unsigned char c) {
 }
 
 bool Lexer::isIdentCont(unsigned char c) {
-    return isalnum(c) || c == '_' || c == '.' || c >= 128;
+    return isalnum(c) || c == '_' || c >= 128;
 }
 
 Lexer::Lexer(const string& source) : src(source) {}
@@ -125,7 +125,7 @@ vector<GrassToken> Lexer::tokenize() {
                     else if (src[pos] == 't') s += '\t';
                     else if (src[pos] == 'r') s += '\r';
                     else s += src[pos];
-                } else if (src[pos] == '/' && pos + 1 < src.size() && src[pos + 1] == 'n') {
+                } else if (src[pos] == '/' && pos + 1 < src.size() && src[pos + 1] == 'n' && (pos + 2 >= src.size() || !isalpha((unsigned char)src[pos + 2]))) {
                     s += '\n';
                     pos++;
                 } else {
@@ -181,19 +181,36 @@ vector<GrassToken> Lexer::tokenize() {
             continue;
         }
 
+        // Дефисные UI-директивы (docs/interface.md)
+        static const char* const kHyphenKeywords[] = {
+            "header-buttons-offset", "header-buttons-pos", "header-text-color",
+            "header-title-align", "auto-size-display", "border-radius-app",
+            "placeholder-color", "header-buttons", "header-height",
+            "header-color", "window-border", "active-color", "hover-color",
+            "button-color", "click-switch", "header-align", "font-weight",
+            "clock-format", "time-format", "center-all", "font-style",
+            "text-color", "font-size", "window-ob", "align-all",
+            "size-top", "click-ob", "z-index"
+        };
+        bool matched_hk = false;
+        for (const char* kw : kHyphenKeywords) {
+            size_t klen = strlen(kw);
+            if (pos + klen <= src.size() && src.compare(pos, klen, kw) == 0) {
+                if (pos + klen == src.size() || (!isalnum((unsigned char)src[pos + klen]) && src[pos + klen] != '_' && src[pos + klen] != '-')) {
+                    tokens.push_back(GrassToken(TOK_IDENT, kw, 0.0, line));
+                    pos += klen;
+                    matched_hk = true;
+                    break;
+                }
+            }
+        }
+        if (matched_hk) continue;
+
         // Идентификаторы
         if (isIdentStart((unsigned char)c)) {
             size_t start = pos;
-            while (pos < src.size()) {
-                unsigned char cur_c = (unsigned char)src[pos];
-                if (isIdentCont(cur_c)) {
-                    pos++;
-                } else if (cur_c == '-' && pos + 1 < src.size() &&
-                           (isIdentStart((unsigned char)src[pos + 1]) || isdigit((unsigned char)src[pos + 1]))) {
-                    pos++;
-                } else {
-                    break;
-                }
+            while (pos < src.size() && isIdentCont((unsigned char)src[pos])) {
+                pos++;
             }
             string ident = src.substr(start, pos - start);
             tokens.push_back(GrassToken(TOK_IDENT, ident, 0.0, line));
@@ -492,7 +509,15 @@ void BytecodeCompiler::emitUICmd(const string& cmd_line) {
     emitString(cmd_line);
 }
 
-void BytecodeCompiler::parseExpression() { parseLogicalOr(); }
+void BytecodeCompiler::parseExpression() {
+    if (++recursion_depth > MAX_RECURSION_DEPTH) {
+        reportError(peek().line, "Превышена максимальная глубина вложенности выражений (Stack Overflow Guard)!");
+        --recursion_depth;
+        return;
+    }
+    parseLogicalOr();
+    --recursion_depth;
+}
 
 void BytecodeCompiler::parseLogicalOr() {
     parseLogicalAnd();
@@ -1479,9 +1504,15 @@ void BytecodeCompiler::parseStatement() {
         user_functions[fn_name] = { entry_ip, params };
         func_table[fn_name] = entry_ip;
 
+        if (!params.empty()) {
+            emitByte(OP_PARAM_PROLOGUE);
+        }
         for (int i = (int)params.size() - 1; i >= 0; --i) {
             emitByte(OP_STORE_VAR);
             emitString(params[i]);
+        }
+        if (!params.empty()) {
+            emitByte(OP_PARAM_EPILOGUE);
         }
 
         bool prev_inside = inside_function;

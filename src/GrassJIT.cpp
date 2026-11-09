@@ -264,7 +264,7 @@ namespace GrassJIT {
             return GrassHAL::alloc_executable_memory(size);
         }
         #if defined(_WIN32)
-        return VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+        return VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
         #else
         return GrassHAL::alloc_executable_memory(size);
         #endif
@@ -585,6 +585,13 @@ namespace GrassJIT {
         if (!exec_mem) return nullptr;
 
         std::memcpy(exec_mem, x64.buf.data(), code_size);
+        #if defined(_WIN32)
+        if (!GrassHAL::is_freestanding()) {
+            DWORD oldProtect;
+            VirtualProtect(exec_mem, code_size, PAGE_EXECUTE_READ, &oldProtect);
+            FlushInstructionCache(GetCurrentProcess(), exec_mem, code_size);
+        }
+        #endif
 
         auto block = std::make_shared<CompiledJitBlock>();
         block->code_ptr = exec_mem;
