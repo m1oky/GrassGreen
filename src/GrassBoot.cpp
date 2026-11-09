@@ -2055,8 +2055,17 @@ namespace GrassBoot {
 
             size_t pos_not_d1 = bin_data.size();
             bin_data[j_not_d1 + 1] = (uint8_t)(pos_not_d1 - (j_not_d1 + 2));
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 0xE2); // cmp al, 0xE2 (3-byte UTF-8 like dash)
+            size_t j_not_e2 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xC6); append_u8(bin_data, 0x02); // add esi, 2
+            append_u8(bin_data, 0xB0); append_u8(bin_data, 0x2D); // mov al, '-' (0x2D)
+            size_t j_utf_e2_done = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            size_t pos_not_e2 = bin_data.size();
+            bin_data[j_not_e2 + 1] = (uint8_t)(pos_not_e2 - (j_not_e2 + 2));
             size_t pos_utf_done = bin_data.size();
             bin_data[j_utf_done + 1] = (uint8_t)(pos_utf_done - (j_utf_done + 2));
+            bin_data[j_utf_e2_done + 1] = (uint8_t)(pos_utf_done - (j_utf_e2_done + 2));
 
             append_u8(bin_data, 0xFF); append_u8(bin_data, 0x74); append_u8(bin_data, 0x24); append_u8(bin_data, 32); // scale
             append_u8(bin_data, 0x50); // ch
@@ -2177,7 +2186,7 @@ namespace GrassBoot {
 
             // Window Header Bar
             emit_draw_rect(49, 57, 926, 42, 0x000F172A);
-            emit_draw_str(68, 70, emit_inline_str("RQWos Desktop Environment — GrassGreen v4.3.0 Engine"), 0x0022C55E, 1);
+            emit_draw_str(68, 70, emit_inline_str("RQWos Desktop Environment - GrassGreen v4.3.0 Engine"), 0x0022C55E, 1);
 
             // 4. Floating macOS Dock at Bottom (6 Icons)
             emit_draw_rect(340, 700, 344, 52, 0x000F172A);
