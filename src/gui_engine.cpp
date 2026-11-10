@@ -1057,7 +1057,12 @@ using namespace std;
 
         float scale_x = (float)new_w / (float)base_design_w;
         float scale_y = (float)new_h / (float)base_design_h;
-        float scale_font = min(scale_x, scale_y);
+        float scale_uniform = min(scale_x, scale_y);
+
+        int content_offset_x = (int)((new_w - (base_design_w * scale_uniform)) / 2.0f);
+        int content_offset_y = (int)((new_h - (base_design_h * scale_uniform)) / 2.0f);
+        if (content_offset_x < 0) content_offset_x = 0;
+        if (content_offset_y < 0) content_offset_y = 0;
 
         for (auto& elem : elements) {
             if (elem.orig_design_w < 0) {
@@ -1073,42 +1078,49 @@ using namespace std;
                 elem.x = 0;
                 elem.w = new_w;
                 elem.y = 0;
-                elem.h = max(34, (int)(elem.orig_design_h * scale_y));
+                elem.h = max(34, (int)(elem.orig_design_h * scale_uniform));
                 continue;
             }
 
             // 2. Right-anchored status elements in top bar (wifi, volume, battery, user, clock)
             if (elem.orig_design_y < 45 && elem.orig_design_x > base_design_w - 450) {
                 int dist_from_right = base_design_w - elem.orig_design_x;
-                elem.x = new_w - dist_from_right;
-                elem.y = elem.orig_design_y;
-                elem.w = elem.orig_design_w;
-                elem.h = elem.orig_design_h;
+                elem.x = new_w - (int)(dist_from_right * scale_uniform);
+                elem.y = (int)(elem.orig_design_y * scale_uniform);
+                elem.w = (int)(elem.orig_design_w * scale_uniform);
+                elem.h = (int)(elem.orig_design_h * scale_uniform);
+                elem.f_size = max(11, (int)(elem.orig_design_f_size * scale_uniform));
                 continue;
             }
 
             // 3. Top-right toast notification
             if (elem.orig_design_y < 120 && elem.orig_design_x > base_design_w - 450) {
                 int dist_from_right = base_design_w - elem.orig_design_x;
-                elem.x = new_w - dist_from_right - 20;
-                elem.y = (int)(elem.orig_design_y * scale_y);
+                elem.x = new_w - (int)(dist_from_right * scale_uniform) - (int)(20 * scale_uniform);
+                elem.y = (int)(elem.orig_design_y * scale_uniform);
+                elem.w = (int)(elem.orig_design_w * scale_uniform);
+                elem.h = (int)(elem.orig_design_h * scale_uniform);
+                elem.f_size = max(11, (int)(elem.orig_design_f_size * scale_uniform));
                 continue;
             }
 
             // 4. Bottom floating dock (anchored to bottom center)
             if (elem.orig_design_y >= 650) {
                 int dock_center_offset = elem.orig_design_x - (base_design_w / 2);
-                elem.x = (new_w / 2) + dock_center_offset;
-                elem.y = new_h - (base_design_h - elem.orig_design_y) - 16;
+                elem.x = (new_w / 2) + (int)(dock_center_offset * scale_uniform);
+                elem.y = new_h - (int)((base_design_h - elem.orig_design_y) * scale_uniform) - (int)(16 * scale_uniform);
+                elem.w = (int)(elem.orig_design_w * scale_uniform);
+                elem.h = (int)(elem.orig_design_h * scale_uniform);
+                elem.f_size = max(11, (int)(elem.orig_design_f_size * scale_uniform));
                 continue;
             }
 
-            // 5. Main cards and general elements: proportional scaling
-            elem.x = (int)(elem.orig_design_x * scale_x);
-            elem.y = (int)(elem.orig_design_y * scale_y);
-            elem.w = (int)(elem.orig_design_w * scale_x);
-            elem.h = (int)(elem.orig_design_h * scale_y);
-            elem.f_size = max(11, (int)(elem.orig_design_f_size * scale_font));
+            // 5. Main cards and general elements: proportional uniform scaling & centering
+            elem.x = content_offset_x + (int)(elem.orig_design_x * scale_uniform);
+            elem.y = content_offset_y + (int)(elem.orig_design_y * scale_uniform);
+            elem.w = (int)(elem.orig_design_w * scale_uniform);
+            elem.h = (int)(elem.orig_design_h * scale_uniform);
+            elem.f_size = max(11, (int)(elem.orig_design_f_size * scale_uniform));
         }
     }
 

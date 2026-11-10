@@ -2259,226 +2259,21 @@ namespace GrassBoot {
             append_u8(bin_data, 0x5A); append_u8(bin_data, 0x59); append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
             append_u8(bin_data, 0xC3);
 
-            // Helper: addr_draw_rect(color, x, y, w, h)
-            uint32_t addr_draw_rect = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
-            append_u8(bin_data, 0x53); append_u8(bin_data, 0x56); append_u8(bin_data, 0x57);
-            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x00091390); // mov edi, [0x00091390]
-            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x44); append_u8(bin_data, 0x24); append_u8(bin_data, 24); // y
-            append_u8(bin_data, 0xC1); append_u8(bin_data, 0xE0); append_u8(bin_data, 12); // y * 4096
-            append_u8(bin_data, 0x01); append_u8(bin_data, 0xC7);
-            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x44); append_u8(bin_data, 0x24); append_u8(bin_data, 20); // x
-            append_u8(bin_data, 0xC1); append_u8(bin_data, 0xE0); append_u8(bin_data, 2);  // x * 4
-            append_u8(bin_data, 0x01); append_u8(bin_data, 0xC7);
-            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x74); append_u8(bin_data, 0x24); append_u8(bin_data, 16); // color
-            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x5C); append_u8(bin_data, 0x24); append_u8(bin_data, 32); // h
-            size_t loop_gui_rect_r = bin_data.size();
-            append_u8(bin_data, 0x57); // push edi
-            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x4C); append_u8(bin_data, 0x24); append_u8(bin_data, 32); // w
-            append_u8(bin_data, 0x89); append_u8(bin_data, 0xF0); // mov eax, esi
-            append_u8(bin_data, 0xFC); append_u8(bin_data, 0xF3); append_u8(bin_data, 0xAB); // rep stosd
-            append_u8(bin_data, 0x5F); // pop edi
-            append_u8(bin_data, 0x81); append_u8(bin_data, 0xC7); append_u32(bin_data, 4096);
-            append_u8(bin_data, 0x4B); // dec ebx
-            int8_t rel_rect_r = (int8_t)(loop_gui_rect_r - (bin_data.size() + 2));
-            append_u8(bin_data, 0x75); append_u8(bin_data, (uint8_t)rel_rect_r);
-            append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E); append_u8(bin_data, 0x5B);
-            append_u8(bin_data, 0xC2); append_u16(bin_data, 20); // ret 20
+            // Perfectly assembled GUI helpers from GNU AS (helpers.bin)
+            static const uint8_t s_gui_helpers_bin[904] = {
+                0x50, 0x52, 0xA3, 0xC0, 0x13, 0x09, 0x00, 0x89, 0x15, 0xC4, 0x13, 0x09, 0x00, 0xC1, 0xE0, 0x02, 0xA3, 0xC8, 0x13, 0x09, 0x00, 0xC7, 0x05, 0xD4, 0x13, 0x09, 0x00, 0x01, 0x00, 0x00, 0x00, 0x66, 0xBA, 0xCE, 0x01, 0x66, 0xB8, 0x04, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCF, 0x01, 0x66, 0x31, 0xC0, 0x66, 0xEF, 0x66, 0xBA, 0xCE, 0x01, 0x66, 0xB8, 0x01, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCF, 0x01, 0xA1, 0xC0, 0x13, 0x09, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCE, 0x01, 0x66, 0xB8, 0x02, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCF, 0x01, 0xA1, 0xC4, 0x13, 0x09, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCE, 0x01, 0x66, 0xB8, 0x03, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCF, 0x01, 0x66, 0xB8, 0x20, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCE, 0x01, 0x66, 0xB8, 0x04, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCF, 0x01, 0x66, 0xB8, 0x41, 0x00, 0x66, 0xEF, 0x5A, 0x58, 0xC3, 0x55, 0x89, 0xE5, 0x53, 0x56, 0x57, 0x8B, 0x45, 0x0C, 0x8B, 0x5D, 0x10, 0x8B, 0x4D, 0x14, 0x8B, 0x55, 0x18, 0x85, 0xC0, 0x75, 0x25, 0x85, 0xDB, 0x75, 0x21, 0x81, 0xF9, 0x00, 0x04, 0x00, 0x00, 0x72, 0x19, 0x81, 0xFA, 0x00, 0x03, 0x00, 0x00, 0x72, 0x11, 0x8B, 0x0D, 0xC0, 0x13, 0x09, 0x00, 0x8B, 0x15, 0xC4, 0x13, 0x09, 0x00, 0xE9, 0x9C, 0x00, 0x00, 0x00, 0x85, 0xC0, 0x75, 0x18, 0x83, 0xFB, 0x28, 0x77, 0x13, 0x81, 0xF9, 0x00, 0x04, 0x00, 0x00, 0x72, 0x0B, 0x8B, 0x0D, 0xC0, 0x13, 0x09, 0x00, 0xE9, 0x80, 0x00, 0x00, 0x00, 0x83, 0xFB, 0x2C, 0x73, 0x33, 0x3D, 0xBC, 0x02, 0x00, 0x00, 0x72, 0x10, 0x8B, 0x35, 0xC0, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x04, 0x00, 0x00, 0x01, 0xF0, 0xEB, 0x64, 0x3D, 0x90, 0x01, 0x00, 0x00, 0x72, 0x5D, 0x3D, 0xF4, 0x01, 0x00, 0x00, 0x73, 0x56, 0xA1, 0xC0, 0x13, 0x09, 0x00, 0x2D, 0xE0, 0x00, 0x00, 0x00, 0xD1, 0xE8, 0xEB, 0x48, 0x81, 0xFB, 0xBC, 0x02, 0x00, 0x00, 0x72, 0x20, 0x8B, 0x35, 0xC0, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x04, 0x00, 0x00, 0xD1, 0xEE, 0x01, 0xF0, 0x8B, 0x35, 0xC4, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x03, 0x00, 0x00, 0x01, 0xF3, 0xEB, 0x20, 0x8B, 0x35, 0xC0, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x04, 0x00, 0x00, 0xD1, 0xEE, 0x01, 0xF0, 0x8B, 0x35, 0xC4, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x03, 0x00, 0x00, 0xD1, 0xEE, 0x01, 0xF3, 0x3B, 0x05, 0xC0, 0x13, 0x09, 0x00, 0x73, 0x60, 0x3B, 0x1D, 0xC4, 0x13, 0x09, 0x00, 0x73, 0x58, 0x85, 0xC9, 0x7E, 0x54, 0x85, 0xD2, 0x7E, 0x50, 0x89, 0xC6, 0x01, 0xCE, 0x3B, 0x35, 0xC0, 0x13, 0x09, 0x00, 0x76, 0x08, 0x8B, 0x0D, 0xC0, 0x13, 0x09, 0x00, 0x29, 0xC1, 0x89, 0xDE, 0x01, 0xD6, 0x3B, 0x35, 0xC4, 0x13, 0x09, 0x00, 0x76, 0x08, 0x8B, 0x15, 0xC4, 0x13, 0x09, 0x00, 0x29, 0xDA, 0x8B, 0x3D, 0x90, 0x13, 0x09, 0x00, 0x89, 0xDE, 0x0F, 0xAF, 0x35, 0xC8, 0x13, 0x09, 0x00, 0x01, 0xF7, 0x8D, 0x3C, 0x87, 0x8B, 0x75, 0x08, 0x57, 0x51, 0x89, 0xF0, 0xF3, 0xAB, 0x59, 0x5F, 0x03, 0x3D, 0xC8, 0x13, 0x09, 0x00, 0x4A, 0x75, 0xEF, 0x5F, 0x5E, 0x5B, 0x5D, 0xC2, 0x14, 0x00, 0x55, 0x89, 0xE5, 0x53, 0x56, 0x57, 0x8B, 0x45, 0x0C, 0x8B, 0x5D, 0x10, 0x3B, 0x05, 0xC0, 0x13, 0x09, 0x00, 0x0F, 0x83, 0xAA, 0x00, 0x00, 0x00, 0x3B, 0x1D, 0xC4, 0x13, 0x09, 0x00, 0x0F, 0x83, 0x9E, 0x00, 0x00, 0x00, 0x0F, 0xB6, 0x45, 0x14, 0x3C, 0xC0, 0x72, 0x06, 0x2C, 0xC0, 0x04, 0x5F, 0xEB, 0x0A, 0x3C, 0x20, 0x0F, 0x82, 0x88, 0x00, 0x00, 0x00, 0x2C, 0x20, 0x0F, 0xB6, 0xC0, 0xC1, 0xE0, 0x04, 0x05, 0x00, 0x50, 0x10, 0x00, 0x50, 0x8B, 0x3D, 0x90, 0x13, 0x09, 0x00, 0x8B, 0x45, 0x10, 0x0F, 0xAF, 0x05, 0xC8, 0x13, 0x09, 0x00, 0x01, 0xC7, 0x8B, 0x45, 0x0C, 0x8D, 0x3C, 0x87, 0x8B, 0x75, 0x08, 0x8B, 0x5D, 0x18, 0x31, 0xC9, 0x8B, 0x14, 0x24, 0x8A, 0x04, 0x0A, 0xB4, 0x08, 0x57, 0xA8, 0x80, 0x74, 0x1B, 0x83, 0xFB, 0x02, 0x75, 0x14, 0x89, 0x37, 0x89, 0x77, 0x04, 0x8B, 0x15, 0xC8, 0x13, 0x09, 0x00, 0x89, 0x34, 0x17, 0x89, 0x74, 0x17, 0x04, 0xEB, 0x02, 0x89, 0x37, 0x83, 0xFB, 0x02, 0x75, 0x05, 0x83, 0xC7, 0x08, 0xEB, 0x03, 0x83, 0xC7, 0x04, 0xD0, 0xE0, 0xFE, 0xCC, 0x75, 0xCE, 0x5F, 0x83, 0xFB, 0x02, 0x75, 0x0C, 0x8B, 0x15, 0xC8, 0x13, 0x09, 0x00, 0xD1, 0xE2, 0x01, 0xD7, 0xEB, 0x06, 0x03, 0x3D, 0xC8, 0x13, 0x09, 0x00, 0x41, 0x83, 0xF9, 0x10, 0x72, 0xA7, 0x58, 0x5F, 0x5E, 0x5B, 0x5D, 0xC2, 0x14, 0x00, 0x55, 0x89, 0xE5, 0x53, 0x56, 0x57, 0x8B, 0x45, 0x0C, 0x8B, 0x5D, 0x10, 0x83, 0xFB, 0x2C, 0x73, 0x33, 0x3D, 0xBC, 0x02, 0x00, 0x00, 0x72, 0x10, 0x8B, 0x35, 0xC0, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x04, 0x00, 0x00, 0x01, 0xF0, 0xEB, 0x64, 0x3D, 0x90, 0x01, 0x00, 0x00, 0x72, 0x5D, 0x3D, 0xF4, 0x01, 0x00, 0x00, 0x73, 0x56, 0xA1, 0xC0, 0x13, 0x09, 0x00, 0x2D, 0xE0, 0x00, 0x00, 0x00, 0xD1, 0xE8, 0xEB, 0x48, 0x81, 0xFB, 0xBC, 0x02, 0x00, 0x00, 0x72, 0x20, 0x8B, 0x35, 0xC0, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x04, 0x00, 0x00, 0xD1, 0xEE, 0x01, 0xF0, 0x8B, 0x35, 0xC4, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x03, 0x00, 0x00, 0x01, 0xF3, 0xEB, 0x20, 0x8B, 0x35, 0xC0, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x04, 0x00, 0x00, 0xD1, 0xEE, 0x01, 0xF0, 0x8B, 0x35, 0xC4, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x03, 0x00, 0x00, 0xD1, 0xEE, 0x01, 0xF3, 0x89, 0xC7, 0x8B, 0x75, 0x14, 0x0F, 0xB6, 0x06, 0x85, 0xC0, 0x74, 0x52, 0x46, 0x3C, 0xD0, 0x75, 0x10, 0x0F, 0xB6, 0x06, 0x46, 0x3C, 0x81, 0x75, 0x04, 0xB0, 0xC5, 0xEB, 0x21, 0x04, 0x30, 0xEB, 0x1D, 0x3C, 0xD1, 0x75, 0x10, 0x0F, 0xB6, 0x06, 0x46, 0x3C, 0x91, 0x75, 0x04, 0xB0, 0xE5, 0xEB, 0x0D, 0x04, 0x70, 0xEB, 0x09, 0x3C, 0xE2, 0x75, 0x05, 0x83, 0xC6, 0x02, 0xB0, 0x2D, 0xFF, 0x75, 0x18, 0x50, 0x53, 0x57, 0xFF, 0x75, 0x08, 0xE8, 0x5F, 0xFE, 0xFF, 0xFF, 0x8B, 0x45, 0x18, 0x83, 0xF8, 0x02, 0x75, 0x05, 0x83, 0xC7, 0x10, 0xEB, 0xAC, 0x83, 0xC7, 0x08, 0xEB, 0xA7, 0x5F, 0x5E, 0x5B, 0x5D, 0xC2, 0x14, 0x00, 0x90
+            };
+            size_t start_helpers_offset = bin_data.size();
+            uint32_t addr_bga_set_mode = KERNEL_LOAD_ADDR + (uint32_t)start_helpers_offset;
+            uint32_t addr_draw_rect     = addr_bga_set_mode + 0x87;
+            uint32_t addr_draw_char     = addr_bga_set_mode + 0x1CD;
+            uint32_t addr_draw_str      = addr_bga_set_mode + 0x296;
 
-            // Helper: addr_draw_char(color, x, y, ch, scale)
-            uint32_t addr_draw_char = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
-            append_u8(bin_data, 0x53); append_u8(bin_data, 0x56); append_u8(bin_data, 0x57); append_u8(bin_data, 0x55);
-            append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB6); append_u8(bin_data, 0x44); append_u8(bin_data, 0x24); append_u8(bin_data, 32); // al = ch
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 0xC0);
-            size_t j_chk_asc = bin_data.size(); append_u8(bin_data, 0x72); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0x2C); append_u8(bin_data, 0xC0);
-            append_u8(bin_data, 0x04); append_u8(bin_data, 95);
-            size_t j_got_idx = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
-
-            size_t pos_chk_asc = bin_data.size();
-            bin_data[j_chk_asc + 1] = (uint8_t)(pos_chk_asc - (j_chk_asc + 2));
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 32);
-            size_t j_skp_ch = bin_data.size(); append_u8(bin_data, 0x72); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0x2C); append_u8(bin_data, 32);
-
-            size_t pos_got_idx = bin_data.size();
-            bin_data[j_got_idx + 1] = (uint8_t)(pos_got_idx - (j_got_idx + 2));
-            append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB6); append_u8(bin_data, 0xC0);
-            append_u8(bin_data, 0xC1); append_u8(bin_data, 0xE0); append_u8(bin_data, 4);
-            append_u8(bin_data, 0xBD); append_u32(bin_data, addr_unified_font);
-            append_u8(bin_data, 0x01); append_u8(bin_data, 0xC5);
-
-            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x00091390);
-            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x44); append_u8(bin_data, 0x24); append_u8(bin_data, 28); // y
-            append_u8(bin_data, 0xC1); append_u8(bin_data, 0xE0); append_u8(bin_data, 12);
-            append_u8(bin_data, 0x01); append_u8(bin_data, 0xC7);
-            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x44); append_u8(bin_data, 0x24); append_u8(bin_data, 24); // x
-            append_u8(bin_data, 0xC1); append_u8(bin_data, 0xE0); append_u8(bin_data, 2);
-            append_u8(bin_data, 0x01); append_u8(bin_data, 0xC7);
-            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x74); append_u8(bin_data, 0x24); append_u8(bin_data, 20); // color
-            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x5C); append_u8(bin_data, 0x24); append_u8(bin_data, 36); // scale
-
-            append_u8(bin_data, 0x31); append_u8(bin_data, 0xC9);
-            size_t loop_cr = bin_data.size();
-            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x54); append_u8(bin_data, 0x0D); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xB6); append_u8(bin_data, 0x08);
-            append_u8(bin_data, 0x57);
-
-            size_t loop_cb = bin_data.size();
-            append_u8(bin_data, 0xF6); append_u8(bin_data, 0xC2); append_u8(bin_data, 0x80);
-            size_t j_bz = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
-
-            append_u8(bin_data, 0x83); append_u8(bin_data, 0xFB); append_u8(bin_data, 0x02);
-            size_t j_s1 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0x89); append_u8(bin_data, 0x37);
-            append_u8(bin_data, 0x89); append_u8(bin_data, 0x77); append_u8(bin_data, 0x04);
-            append_u8(bin_data, 0x89); append_u8(bin_data, 0xB7); append_u32(bin_data, 4096);
-            append_u8(bin_data, 0x89); append_u8(bin_data, 0xB7); append_u32(bin_data, 4100);
-            size_t j_pd = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
-
-            size_t pos_s1 = bin_data.size();
-            bin_data[j_s1 + 1] = (uint8_t)(pos_s1 - (j_s1 + 2));
-            append_u8(bin_data, 0x89); append_u8(bin_data, 0x37);
-
-            size_t pos_pd = bin_data.size();
-            bin_data[j_pd + 1] = (uint8_t)(pos_pd - (j_pd + 2));
-            size_t pos_bz = bin_data.size();
-            bin_data[j_bz + 1] = (uint8_t)(pos_bz - (j_bz + 2));
-            // Antialiased edge contour smoothing for BGA linear framebuffer
-            append_u8(bin_data, 0x83); append_u8(bin_data, 0xFB); append_u8(bin_data, 0x01);
-            size_t jne_no_aa1 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xF6); append_u8(bin_data, 0xC2); append_u8(bin_data, 0x40);
-            size_t jz_no_aa2 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0x89); append_u8(bin_data, 0xF0); // mov eax, esi
-            append_u8(bin_data, 0xD1); append_u8(bin_data, 0xE8); // shr eax, 1
-            append_u8(bin_data, 0x25); append_u32(bin_data, 0x7F7F7F7F); // and eax, 0x7F7F7F7F
-            append_u8(bin_data, 0x89); append_u8(bin_data, 0x07); // mov [edi], eax
-            size_t pos_aa_done = bin_data.size();
-            bin_data[jne_no_aa1 + 1] = (uint8_t)(pos_aa_done - (jne_no_aa1 + 2));
-            bin_data[jz_no_aa2 + 1] = (uint8_t)(pos_aa_done - (jz_no_aa2 + 2));
-
-            append_u8(bin_data, 0x83); append_u8(bin_data, 0xFB); append_u8(bin_data, 0x02);
-            size_t j_ab1 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0x83); append_u8(bin_data, 0xC7); append_u8(bin_data, 0x08);
-            size_t j_abd = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
-
-            size_t pos_ab1 = bin_data.size();
-            bin_data[j_ab1 + 1] = (uint8_t)(pos_ab1 - (j_ab1 + 2));
-            append_u8(bin_data, 0x83); append_u8(bin_data, 0xC7); append_u8(bin_data, 0x04);
-
-            size_t pos_abd = bin_data.size();
-            bin_data[j_abd + 1] = (uint8_t)(pos_abd - (j_abd + 2));
-
-            append_u8(bin_data, 0xD0); append_u8(bin_data, 0xE2);
-            append_u8(bin_data, 0xFE); append_u8(bin_data, 0xCE);
-            int8_t rel_cb = (int8_t)(loop_cb - (bin_data.size() + 2));
-            append_u8(bin_data, 0x75); append_u8(bin_data, (uint8_t)rel_cb);
-
-            append_u8(bin_data, 0x5F);
-            append_u8(bin_data, 0x83); append_u8(bin_data, 0xFB); append_u8(bin_data, 0x02);
-            size_t j_rws1 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0x81); append_u8(bin_data, 0xC7); append_u32(bin_data, 8192);
-            size_t j_rwd = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
-
-            size_t pos_rws1 = bin_data.size();
-            bin_data[j_rws1 + 1] = (uint8_t)(pos_rws1 - (j_rws1 + 2));
-            append_u8(bin_data, 0x81); append_u8(bin_data, 0xC7); append_u32(bin_data, 4096);
-
-            size_t pos_rwd = bin_data.size();
-            bin_data[j_rwd + 1] = (uint8_t)(pos_rwd - (j_rwd + 2));
-
-            append_u8(bin_data, 0x41);
-            append_u8(bin_data, 0x83); append_u8(bin_data, 0xF9); append_u8(bin_data, 16);
-            int8_t rel_cr = (int8_t)(loop_cr - (bin_data.size() + 2));
-            append_u8(bin_data, 0x72); append_u8(bin_data, (uint8_t)rel_cr);
-
-            size_t pos_skp_ch = bin_data.size();
-            bin_data[j_skp_ch + 1] = (uint8_t)(pos_skp_ch - (j_skp_ch + 2));
-            append_u8(bin_data, 0x5D); append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E); append_u8(bin_data, 0x5B);
-            append_u8(bin_data, 0xC2); append_u16(bin_data, 20);
-
-            // Helper: addr_draw_str(color, x, y, str_ptr, scale) with UTF-8 Cyrillic Decoding
-            uint32_t addr_draw_str = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
-            append_u8(bin_data, 0x53); append_u8(bin_data, 0x56); append_u8(bin_data, 0x57);
-            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x74); append_u8(bin_data, 0x24); append_u8(bin_data, 28); // str_ptr
-            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x7C); append_u8(bin_data, 0x24); append_u8(bin_data, 20); // x
-            size_t loop_st = bin_data.size();
-            append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB6); append_u8(bin_data, 0x06); // movzx eax, byte [esi]
-            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0);
-            size_t j_st_end = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0x46); // inc esi
-
-            // UTF-8 Cyrillic decoder
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 0xD0);
-            size_t j_not_d0 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB6); append_u8(bin_data, 0x06);
-            append_u8(bin_data, 0x46);
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x81); // 'Ё' -> 'Е'
-            size_t j_not_yo_u = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xB0); append_u8(bin_data, 0xC5);
-            size_t j_yo_u_done = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
-            bin_data[j_not_yo_u + 1] = (uint8_t)(bin_data.size() - (j_not_yo_u + 2));
-            append_u8(bin_data, 0x04); append_u8(bin_data, 0x30);
-            size_t j_utf_done = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
-
-            size_t pos_not_d0 = bin_data.size();
-            bin_data[j_not_d0 + 1] = (uint8_t)(pos_not_d0 - (j_not_d0 + 2));
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 0xD1);
-            size_t j_not_d1 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0x0F); append_u8(bin_data, 0xB6); append_u8(bin_data, 0x06);
-            append_u8(bin_data, 0x46);
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 0x91); // 'ё' -> 'е'
-            size_t j_not_yo_l = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xB0); append_u8(bin_data, 0xE5);
-            size_t j_yo_l_done = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
-            bin_data[j_not_yo_l + 1] = (uint8_t)(bin_data.size() - (j_not_yo_l + 2));
-            append_u8(bin_data, 0x04); append_u8(bin_data, 0x70);
-            size_t j_utf_d1_done = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
-
-            size_t pos_not_d1 = bin_data.size();
-            bin_data[j_not_d1 + 1] = (uint8_t)(pos_not_d1 - (j_not_d1 + 2));
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 0xE2); // cmp al, 0xE2 (3-byte UTF-8 like dash)
-            size_t j_not_e2 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0x83); append_u8(bin_data, 0xC6); append_u8(bin_data, 0x02); // add esi, 2
-            append_u8(bin_data, 0xB0); append_u8(bin_data, 0x2D); // mov al, '-' (0x2D)
-            size_t j_utf_e2_done = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
-
-            size_t pos_not_e2 = bin_data.size();
-            bin_data[j_not_e2 + 1] = (uint8_t)(pos_not_e2 - (j_not_e2 + 2));
-            size_t pos_utf_done = bin_data.size();
-            bin_data[j_yo_u_done + 1] = (uint8_t)(pos_utf_done - (j_yo_u_done + 2));
-            bin_data[j_utf_done + 1] = (uint8_t)(pos_utf_done - (j_utf_done + 2));
-            bin_data[j_yo_l_done + 1] = (uint8_t)(pos_utf_done - (j_yo_l_done + 2));
-            bin_data[j_utf_d1_done + 1] = (uint8_t)(pos_utf_done - (j_utf_d1_done + 2));
-            bin_data[j_utf_e2_done + 1] = (uint8_t)(pos_utf_done - (j_utf_e2_done + 2));
-
-            append_u8(bin_data, 0xFF); append_u8(bin_data, 0x74); append_u8(bin_data, 0x24); append_u8(bin_data, 32); // scale
-            append_u8(bin_data, 0x50); // ch
-            append_u8(bin_data, 0xFF); append_u8(bin_data, 0x74); append_u8(bin_data, 0x24); append_u8(bin_data, 32); // y
-            append_u8(bin_data, 0x57); // x
-            append_u8(bin_data, 0xFF); append_u8(bin_data, 0x74); append_u8(bin_data, 0x24); append_u8(bin_data, 32); // color
-            append_u8(bin_data, 0xE8);
-            append_u32(bin_data, addr_draw_char - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-
-            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x44); append_u8(bin_data, 0x24); append_u8(bin_data, 32);
-            append_u8(bin_data, 0x83); append_u8(bin_data, 0xF8); append_u8(bin_data, 0x02);
-            size_t j_as1 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0x83); append_u8(bin_data, 0xC7); append_u8(bin_data, 0x10);
-            size_t j_asd = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
-
-            size_t pos_as1 = bin_data.size();
-            bin_data[j_as1 + 1] = (uint8_t)(pos_as1 - (j_as1 + 2));
-            append_u8(bin_data, 0x83); append_u8(bin_data, 0xC7); append_u8(bin_data, 0x08);
-
-            size_t pos_asd = bin_data.size();
-            bin_data[j_asd + 1] = (uint8_t)(pos_asd - (j_asd + 2));
-
-            int8_t rel_lst = (int8_t)(loop_st - (bin_data.size() + 2));
-            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)rel_lst);
-
-            size_t pos_st_end = bin_data.size();
-            bin_data[j_st_end + 1] = (uint8_t)(pos_st_end - (j_st_end + 2));
-            append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E); append_u8(bin_data, 0x5B);
-            append_u8(bin_data, 0xC2); append_u16(bin_data, 20);
+            for (size_t i = 0; i < sizeof(s_gui_helpers_bin); ++i) {
+                append_u8(bin_data, s_gui_helpers_bin[i]);
+            }
+            // Fixup addr_unified_font placeholder at offset 0x210
+            write_u32_le(bin_data, start_helpers_offset + 0x210, addr_unified_font);
 
             // Fixup jump over GUI helpers
             size_t pos_after_gui_helpers = bin_data.size();
@@ -2544,16 +2339,21 @@ namespace GrassBoot {
             append_u8(bin_data, 0x25); append_u32(bin_data, 0xFFFFFFF0);
             append_u8(bin_data, 0xA3); append_u32(bin_data, 0x00091390);
 
-            // Set BGA 1024x768x32
-            emit_bga_write(4, 0);
-            emit_bga_write(1, 1024);
-            emit_bga_write(2, 768);
-            emit_bga_write(3, 32);
-            emit_bga_write(4, 0x41);
+            // Perfectly assembled Multiboot cmdline scan and BGA resolution select (bga_boot.bin)
+            static const uint8_t s_bga_boot_bin[146] = {
+                0xB8, 0x00, 0x04, 0x00, 0x00, 0xBA, 0x00, 0x03, 0x00, 0x00, 0x8B, 0x0D, 0x04, 0x00, 0x09, 0x00, 0x85, 0xC9, 0x74, 0x7E, 0xF6, 0x01, 0x04, 0x74, 0x79, 0x8B, 0x71, 0x10, 0x85, 0xF6, 0x74, 0x72, 0x8A, 0x1E, 0x84, 0xDB, 0x74, 0x6C, 0x80, 0x3E, 0x32, 0x75, 0x1E, 0x80, 0x7E, 0x01, 0x35, 0x75, 0x18, 0x80, 0x7E, 0x02, 0x36, 0x75, 0x12, 0x80, 0x7E, 0x03, 0x30, 0x75, 0x0C, 0xB8, 0x00, 0x0A, 0x00, 0x00, 0xBA, 0xA0, 0x05, 0x00, 0x00, 0xEB, 0x49, 0x80, 0x3E, 0x31, 0x75, 0x1E, 0x80, 0x7E, 0x01, 0x39, 0x75, 0x18, 0x80, 0x7E, 0x02, 0x32, 0x75, 0x12, 0x80, 0x7E, 0x03, 0x30, 0x75, 0x0C, 0xB8, 0x80, 0x07, 0x00, 0x00, 0xBA, 0x38, 0x04, 0x00, 0x00, 0xEB, 0x26, 0x80, 0x3E, 0x31, 0x75, 0x1E, 0x80, 0x7E, 0x01, 0x34, 0x75, 0x18, 0x80, 0x7E, 0x02, 0x34, 0x75, 0x12, 0x80, 0x7E, 0x03, 0x30, 0x75, 0x0C, 0xB8, 0x00, 0x0A, 0x00, 0x00, 0xBA, 0xA0, 0x05, 0x00, 0x00, 0xEB, 0x03, 0x46, 0xEB, 0x8E
+            };
+            for (size_t i = 0; i < sizeof(s_bga_boot_bin); ++i) {
+                append_u8(bin_data, s_bga_boot_bin[i]);
+            }
+            // Call addr_bga_set_mode(eax=width, edx=height)
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_bga_set_mode - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
 
             // Set default tab = 1
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, 1);
 
+            size_t loop_gui_full_redraw = bin_data.size();
             // 1. Wallpaper (Deep obsidian)
             emit_draw_rect(0, 0, 1024, 768, 0x0009090B);
 
@@ -2701,7 +2501,30 @@ namespace GrassBoot {
             // Card 1: System Info
             emit_draw_rect(68, 160, 888, 140, 0x001E293B);
             emit_draw_str(88, 180, emit_inline_str("Операционная система:  RQWos v1.0.0 (Protected Mode Multiboot Kernel)"), 0x00F8FAFC, 1);
-            emit_draw_str(88, 210, emit_inline_str("Графическая подсистема: Bochs BGA 32-bit Linear Framebuffer (1024x768 1:1)"), 0x0038BDF8, 1);
+            // Dynamic resolution string for Tab 1
+            uint32_t str_gfx_1024 = emit_inline_str("Графическая подсистема: Bochs BGA 32-bit Linear Framebuffer (1024x768 1:1)");
+            uint32_t str_gfx_1080 = emit_inline_str("Графическая подсистема: Bochs BGA 32-bit Linear Framebuffer (1920x1080 1:1)");
+            uint32_t str_gfx_1440 = emit_inline_str("Графическая подсистема: Bochs BGA 32-bit Linear Framebuffer (2560x1440 1:1)");
+            append_u8(bin_data, 0xB8); append_u32(bin_data, str_gfx_1024);
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x000913C0); append_u32(bin_data, 1920);
+            size_t jne_g1 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xB8); append_u32(bin_data, str_gfx_1080);
+            size_t jmp_gd = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            size_t pos_g1 = bin_data.size();
+            bin_data[jne_g1 + 1] = (uint8_t)(pos_g1 - (jne_g1 + 2));
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x000913C0); append_u32(bin_data, 2560);
+            size_t jne_g2 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xB8); append_u32(bin_data, str_gfx_1440);
+            size_t pos_g2 = bin_data.size();
+            bin_data[jne_g2 + 1] = (uint8_t)(pos_g2 - (jne_g2 + 2));
+            bin_data[jmp_gd + 1] = (uint8_t)(pos_g2 - (jmp_gd + 2));
+            append_u8(bin_data, 0x68); append_u32(bin_data, 1);
+            append_u8(bin_data, 0x50); // push eax
+            append_u8(bin_data, 0x68); append_u32(bin_data, 210);
+            append_u8(bin_data, 0x68); append_u32(bin_data, 88);
+            append_u8(bin_data, 0x68); append_u32(bin_data, 0x0038BDF8);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_draw_str - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
             emit_draw_str(88, 240, emit_inline_str("Хранилище данных:       RamFS + ATA Primary Master SSD (RQFS LBA 100)"), 0x00A1A1AA, 1);
 
             // Card 2: Memory Bar
@@ -2714,7 +2537,7 @@ namespace GrassBoot {
             // Card 3: Shortcuts & Network
             emit_draw_rect(68, 422, 888, 160, 0x001E293B);
             emit_draw_str(88, 442, emit_inline_str("Горячие клавиши: [1] Система  [2] Файлы  [3] Железо  [4] Кальк  [5] Заметки  [6] Часы"), 0x00FBBF24, 1);
-            emit_draw_str(88, 472, emit_inline_str("Управление:      [Tab] Цикл вкладок  [ESC] Консоль  [R] Ребут  [P] Питание"), 0x00FBBF24, 1);
+            emit_draw_str(88, 472, emit_inline_str("Управление:      [Tab] Цикл  [7] 1024x768  [8] Full HD  [9] QHD  [0] Режим  [ESC] Консоль"), 0x00FBBF24, 1);
             emit_draw_str(88, 502, emit_inline_str("Сетевой адаптер: Realtek RTL8139 (IP 10.0.2.15 -> Gateway 10.0.2.2 ARP OK)"), 0x00E2E8F0, 1);
             emit_draw_str(88, 532, emit_inline_str("Пользователь:    m1oky (Root) | Аудио: Sound Blaster 16 (0x220) + Beep"), 0x0022C55E, 1);
 
@@ -2798,7 +2621,30 @@ namespace GrassBoot {
             emit_draw_str(88, 442, emit_inline_str("Сетевой чип:     Realtek RTL8139 (PCI Dev 0x8139, I/O Port 0xC000)"), 0x00F8FAFC, 1);
             emit_draw_str(88, 472, emit_inline_str("Контроллер ATA:  Primary Master 0x1F0 SSD (512 GB) LBA28 Mode Active"), 0x0038BDF8, 1);
             emit_draw_str(88, 502, emit_inline_str("ОЗУ системное:   128 МБ DIMM 3200 МГц DDR4 (W^X Защита включена)"), 0x00E2E8F0, 1);
-            emit_draw_str(88, 532, emit_inline_str("Видеокарта:      Bochs VBE Linear Framebuffer 1024x768x32bpp (1:1 Ratio)"), 0x00A1A1AA, 1);
+            // Dynamic resolution string for Tab 3
+            uint32_t str_vbe_1024 = emit_inline_str("Видеокарта:      Bochs VBE Linear Framebuffer 1024x768x32bpp (1:1 Ratio)");
+            uint32_t str_vbe_1080 = emit_inline_str("Видеокарта:      Bochs VBE Linear Framebuffer 1920x1080x32bpp (1:1 Ratio)");
+            uint32_t str_vbe_1440 = emit_inline_str("Видеокарта:      Bochs VBE Linear Framebuffer 2560x1440x32bpp (1:1 Ratio)");
+            append_u8(bin_data, 0xB8); append_u32(bin_data, str_vbe_1024);
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x000913C0); append_u32(bin_data, 1920);
+            size_t jne_v1 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xB8); append_u32(bin_data, str_vbe_1080);
+            size_t jmp_vd = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            size_t pos_v1 = bin_data.size();
+            bin_data[jne_v1 + 1] = (uint8_t)(pos_v1 - (jne_v1 + 2));
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x000913C0); append_u32(bin_data, 2560);
+            size_t jne_v2 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xB8); append_u32(bin_data, str_vbe_1440);
+            size_t pos_v2 = bin_data.size();
+            bin_data[jne_v2 + 1] = (uint8_t)(pos_v2 - (jne_v2 + 2));
+            bin_data[jmp_vd + 1] = (uint8_t)(pos_v2 - (jmp_vd + 2));
+            append_u8(bin_data, 0x68); append_u32(bin_data, 1);
+            append_u8(bin_data, 0x50); // push eax
+            append_u8(bin_data, 0x68); append_u32(bin_data, 532);
+            append_u8(bin_data, 0x68); append_u32(bin_data, 88);
+            append_u8(bin_data, 0x68); append_u32(bin_data, 0x00A1A1AA);
+            append_u8(bin_data, 0xE8);
+            append_u32(bin_data, addr_draw_str - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
 
             append_u8(bin_data, 0xE9);
             size_t jmp_tab3_done = bin_data.size(); append_u32(bin_data, 0);
@@ -2983,6 +2829,56 @@ namespace GrassBoot {
             // 't' / 'T' -> Tab 6 (Clock / Time)
             emit_key_to_tab('t', 6, jmp_ret);
 
+            // Resolution hotkeys: '7' (1024x768), '8' (1920x1080), '9' (2560x1440), '0' (Cycle)
+            size_t jmp_re7 = 0, jmp_re8 = 0, jmp_re9 = 0;
+            auto emit_key_to_res = [&](uint8_t key, uint32_t w, uint32_t h, size_t& jmp_out) {
+                append_u8(bin_data, 0x3C); append_u8(bin_data, key);
+                size_t jne_next = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+                append_u8(bin_data, 0xB0); append_u8(bin_data, 1);
+                append_u8(bin_data, 0xE8); append_u32(bin_data, addr_play_sound - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+                append_u8(bin_data, 0xB8); append_u32(bin_data, w);
+                append_u8(bin_data, 0xBA); append_u32(bin_data, h);
+                append_u8(bin_data, 0xE8); append_u32(bin_data, addr_bga_set_mode - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+                append_u8(bin_data, 0xE9);
+                jmp_out = bin_data.size(); append_u32(bin_data, 0);
+                size_t pos_next = bin_data.size();
+                bin_data[jne_next + 1] = (uint8_t)(pos_next - (jne_next + 2));
+            };
+
+            emit_key_to_res('7', 1024, 768, jmp_re7);
+            emit_key_to_res('8', 1920, 1080, jmp_re8);
+            emit_key_to_res('9', 2560, 1440, jmp_re9);
+
+            // '0' -> Cycle resolution (1024 -> 1920 -> 2560 -> 1024)
+            append_u8(bin_data, 0x3C); append_u8(bin_data, '0');
+            size_t jne_k0 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xB0); append_u8(bin_data, 1);
+            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_play_sound - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x000913C0); append_u32(bin_data, 1024);
+            size_t jne_not1024 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xB8); append_u32(bin_data, 1920);
+            append_u8(bin_data, 0xBA); append_u32(bin_data, 1080);
+            size_t jmp_dm1 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            size_t pos_n1 = bin_data.size();
+            bin_data[jne_not1024 + 1] = (uint8_t)(pos_n1 - (jne_not1024 + 2));
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x000913C0); append_u32(bin_data, 1920);
+            size_t jne_not1920 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xB8); append_u32(bin_data, 2560);
+            append_u8(bin_data, 0xBA); append_u32(bin_data, 1440);
+            size_t jmp_dm2 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+            size_t pos_n2 = bin_data.size();
+            bin_data[jne_not1920 + 1] = (uint8_t)(pos_n2 - (jne_not1920 + 2));
+            append_u8(bin_data, 0xB8); append_u32(bin_data, 1024);
+            append_u8(bin_data, 0xBA); append_u32(bin_data, 768);
+            size_t pos_dm = bin_data.size();
+            bin_data[jmp_dm1 + 1] = (uint8_t)(pos_dm - (jmp_dm1 + 2));
+            bin_data[jmp_dm2 + 1] = (uint8_t)(pos_dm - (jmp_dm2 + 2));
+            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_bga_set_mode - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0xE9);
+            size_t jmp_re0 = bin_data.size(); append_u32(bin_data, 0);
+            size_t pos_k0 = bin_data.size();
+            bin_data[jne_k0 + 1] = (uint8_t)(pos_k0 - (jne_k0 + 2));
+
             // Tab Key (0x09) -> Cycle 1..6
             append_u8(bin_data, 0x3C); append_u8(bin_data, 0x09);
             size_t jne_kr = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
@@ -3058,6 +2954,10 @@ namespace GrassBoot {
             write_u32_le(bin_data, jmp_rec, (uint32_t)((int32_t)loop_gui_tab_redraw - (int32_t)(jmp_rec + 4)));
             write_u32_le(bin_data, jmp_ren, (uint32_t)((int32_t)loop_gui_tab_redraw - (int32_t)(jmp_ren + 4)));
             write_u32_le(bin_data, jmp_ret, (uint32_t)((int32_t)loop_gui_tab_redraw - (int32_t)(jmp_ret + 4)));
+            write_u32_le(bin_data, jmp_re7, (uint32_t)((int32_t)loop_gui_full_redraw - (int32_t)(jmp_re7 + 4)));
+            write_u32_le(bin_data, jmp_re8, (uint32_t)((int32_t)loop_gui_full_redraw - (int32_t)(jmp_re8 + 4)));
+            write_u32_le(bin_data, jmp_re9, (uint32_t)((int32_t)loop_gui_full_redraw - (int32_t)(jmp_re9 + 4)));
+            write_u32_le(bin_data, jmp_re0, (uint32_t)((int32_t)loop_gui_full_redraw - (int32_t)(jmp_re0 + 4)));
             write_u32_le(bin_data, jmp_retab, (uint32_t)((int32_t)loop_gui_tab_redraw - (int32_t)(jmp_retab + 4)));
 
             // 8.22. Helper: helper_bm_exec (ESI = command string)
