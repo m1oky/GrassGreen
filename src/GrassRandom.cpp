@@ -3,11 +3,15 @@
 #include <vector>
 #include <chrono>
 #include <algorithm>
+#ifndef GRASS_FREESTANDING
 #include <mutex>
+#endif
 
 namespace GrassRandom {
     static std::mt19937_64 g_rng((uint64_t)std::chrono::high_resolution_clock::now().time_since_epoch().count());
+#ifndef GRASS_FREESTANDING
     static std::mutex g_rng_mutex;
+#endif
     static bool g_is_stopped = false;
     static double g_last_num = 0.0;
     static std::string g_last_txt = "";
@@ -21,7 +25,9 @@ namespace GrassRandom {
     static const std::string ENG_LETTERS = "abcdefghijklmnopqrstuvwxyz";
 
     double get_random(double min_val, double max_val) {
+#ifndef GRASS_FREESTANDING
         std::lock_guard<std::mutex> lock(g_rng_mutex);
+#endif
         if (g_is_stopped) return g_last_num;
 
         if (min_val > max_val) std::swap(min_val, max_val);
@@ -31,7 +37,9 @@ namespace GrassRandom {
     }
 
     std::string get_random_txt(const std::string& lang, int length) {
+#ifndef GRASS_FREESTANDING
         std::lock_guard<std::mutex> lock(g_rng_mutex);
+#endif
         if (g_is_stopped) return g_last_txt;
         if (length <= 0) length = 1;
 
@@ -56,17 +64,23 @@ namespace GrassRandom {
     }
 
     void stop_random() {
+#ifndef GRASS_FREESTANDING
         std::lock_guard<std::mutex> lock(g_rng_mutex);
+#endif
         g_is_stopped = true;
     }
 
     void play_random() {
+#ifndef GRASS_FREESTANDING
         std::lock_guard<std::mutex> lock(g_rng_mutex);
+#endif
         g_is_stopped = false;
     }
 
     bool is_stopped() {
+#ifndef GRASS_FREESTANDING
         std::lock_guard<std::mutex> lock(g_rng_mutex);
+#endif
         return g_is_stopped;
     }
 }

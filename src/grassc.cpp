@@ -79,6 +79,7 @@ struct GrassSharedEnv {
 // 1. СТЕКОВАЯ ВИРТУАЛЬНАЯ МАШИНА GRASSGREEN (ТУРБО-ВЕРСИЯ)
 // ============================================================================
 class GrassVM {
+    shared_ptr<const vector<uint8_t>> bytecode_ptr;
     const vector<uint8_t>& code;
     size_t ip = 0;
     vector<GrassValue> stack;
@@ -204,17 +205,34 @@ class GrassVM {
     }
 
 public:
-    explicit GrassVM(const vector<uint8_t>& bytecode,
+    explicit GrassVM(shared_ptr<const vector<uint8_t>> bytecode,
                      shared_ptr<GrassSharedEnv> shared = nullptr,
                      bool root = true)
-        : code(bytecode), shared_env(shared), is_root_vm(root) {
+        : bytecode_ptr(bytecode ? std::move(bytecode) : make_shared<const vector<uint8_t>>()),
+          code(*bytecode_ptr),
+          shared_env(shared),
+          is_root_vm(root) {
         if (is_root_vm && !shared_env) {
             shared_env = make_shared<GrassSharedEnv>();
         }
         stack.reserve(512);
         call_stack.reserve(128);
+        local_frames.reserve(64);
+        local_frames.push_back({}); // Уровень 0 (глобальная область видимости)
         vars.reserve(128);
         heap_arrays.reserve(64);
+    }
+
+    explicit GrassVM(const vector<uint8_t>& bytecode,
+                     shared_ptr<GrassSharedEnv> shared = nullptr,
+                     bool root = true)
+        : GrassVM(make_shared<const vector<uint8_t>>(bytecode), shared, root) {
+    }
+
+    explicit GrassVM(vector<uint8_t>&& bytecode,
+                     shared_ptr<GrassSharedEnv> shared = nullptr,
+                     bool root = true)
+        : GrassVM(make_shared<const vector<uint8_t>>(std::move(bytecode)), shared, root) {
     }
 
     ~GrassVM() {
@@ -233,10 +251,10 @@ public:
             shared_env = make_shared<GrassSharedEnv>();
         }
         auto shared = shared_env;
-        const vector<uint8_t>& bc = this->code;
+        auto bc_ptr = this->bytecode_ptr;
 
-        int64_t tid = GrassThread::create_thread([&bc, shared, entry_ip, args]() -> GrassValue {
-            GrassVM thread_vm(bc, shared, false);
+        int64_t tid = GrassThread::create_thread([bc_ptr, shared, entry_ip, args = std::move(args)]() -> GrassValue {
+            GrassVM thread_vm(bc_ptr, shared, false);
             for (size_t i = 0; i < args.size(); ++i) {
                 thread_vm.push(args[i]);
             }
@@ -261,6 +279,7 @@ public:
             dispatch_table[OP_CONST_STR]     = &&do_const_str;
             dispatch_table[OP_LOAD_VAR]      = &&do_load_var;
             dispatch_table[OP_STORE_VAR]     = &&do_store_var;
+            dispatch_table[OP_DEF_VAR]       = &&do_def_var;
             dispatch_table[OP_POP]           = &&do_pop;
             dispatch_table[OP_ADD]           = &&do_add;
             dispatch_table[OP_SUB]           = &&do_sub;
@@ -368,30 +387,29 @@ public:
     do_inc_var: {
         {
             string name = readString();
-            if (is_root_vm) {
-                if (shared_env) {
+            bool done = false;
+            if (!local_frames.empty() && local_frames.back().count(name)) {
+                double n = local_frames.back()[name].toNumber() + 1.0;
+                local_frames.back()[name] = GrassValue::Num(n);
+                if (is_root_vm && local_frames.size() <= 2 && shared_env) {
                     std::lock_guard<std::mutex> lk(shared_env->mtx);
-                    auto it = shared_env->vars.find(name);
-                    if (it != shared_env->vars.end()) it->second = GrassValue::Num(it->second.toNumber() + 1.0);
-                    else shared_env->vars[name] = GrassValue::Num(1.0);
+                    if (shared_env->vars.count(name)) shared_env->vars[name] = GrassValue::Num(n);
                 }
-            } else {
-                auto it = vars.find(name);
-                if (it != vars.end()) {
+                done = true;
+            }
+            if (!done && shared_env) {
+                std::lock_guard<std::mutex> lk(shared_env->mtx);
+                auto it = shared_env->vars.find(name);
+                if (it != shared_env->vars.end()) {
                     it->second = GrassValue::Num(it->second.toNumber() + 1.0);
+                    done = true;
+                }
+            }
+            if (!done) {
+                if (!local_frames.empty()) {
+                    local_frames.back()[name] = GrassValue::Num(1.0);
                 } else {
-                    bool in_shared = false;
-                    if (shared_env) {
-                        std::lock_guard<std::mutex> lk(shared_env->mtx);
-                        auto sit = shared_env->vars.find(name);
-                        if (sit != shared_env->vars.end()) {
-                            sit->second = GrassValue::Num(sit->second.toNumber() + 1.0);
-                            in_shared = true;
-                        }
-                    }
-                    if (!in_shared) {
-                        vars[name] = GrassValue::Num(1.0);
-                    }
+                    vars[name] = GrassValue::Num(1.0);
                 }
             }
         }
@@ -401,30 +419,29 @@ public:
     do_dec_var: {
         {
             string name = readString();
-            if (is_root_vm) {
-                if (shared_env) {
+            bool done = false;
+            if (!local_frames.empty() && local_frames.back().count(name)) {
+                double n = local_frames.back()[name].toNumber() - 1.0;
+                local_frames.back()[name] = GrassValue::Num(n);
+                if (is_root_vm && local_frames.size() <= 2 && shared_env) {
                     std::lock_guard<std::mutex> lk(shared_env->mtx);
-                    auto it = shared_env->vars.find(name);
-                    if (it != shared_env->vars.end()) it->second = GrassValue::Num(it->second.toNumber() - 1.0);
-                    else shared_env->vars[name] = GrassValue::Num(-1.0);
+                    if (shared_env->vars.count(name)) shared_env->vars[name] = GrassValue::Num(n);
                 }
-            } else {
-                auto it = vars.find(name);
-                if (it != vars.end()) {
+                done = true;
+            }
+            if (!done && shared_env) {
+                std::lock_guard<std::mutex> lk(shared_env->mtx);
+                auto it = shared_env->vars.find(name);
+                if (it != shared_env->vars.end()) {
                     it->second = GrassValue::Num(it->second.toNumber() - 1.0);
+                    done = true;
+                }
+            }
+            if (!done) {
+                if (!local_frames.empty()) {
+                    local_frames.back()[name] = GrassValue::Num(-1.0);
                 } else {
-                    bool in_shared = false;
-                    if (shared_env) {
-                        std::lock_guard<std::mutex> lk(shared_env->mtx);
-                        auto sit = shared_env->vars.find(name);
-                        if (sit != shared_env->vars.end()) {
-                            sit->second = GrassValue::Num(sit->second.toNumber() - 1.0);
-                            in_shared = true;
-                        }
-                    }
-                    if (!in_shared) {
-                        vars[name] = GrassValue::Num(-1.0);
-                    }
+                    vars[name] = GrassValue::Num(-1.0);
                 }
             }
         }
@@ -460,6 +477,7 @@ public:
     do_call_func: {
         uint32_t target_ip = readU32();
         call_stack.push_back(ip);
+        local_frames.push_back({}); // Создаем новый локальный фрейм вызова
         ip = target_ip;
         DISPATCH_STEP();
     }
@@ -471,6 +489,9 @@ public:
         if (!call_stack.empty()) {
             ip = call_stack.back();
             call_stack.pop_back();
+            if (local_frames.size() > 1) {
+                local_frames.pop_back(); // Уничтожаем локальный фрейм завершенной функции
+            }
         } else {
             return;
         }
@@ -482,17 +503,45 @@ public:
             string name = readString();
             bool found = false;
             GrassValue val;
-            if (!is_root_vm) {
-                auto it = vars.find(name);
-                if (it != vars.end()) {
+            // 1. Поиск в текущем локальном фрейме функции
+            if (!local_frames.empty()) {
+                auto it = local_frames.back().find(name);
+                if (it != local_frames.back().end()) {
+                    if (is_root_vm && local_frames.size() <= 2 && shared_env) {
+                        std::lock_guard<std::mutex> lk(shared_env->mtx);
+                        auto sit = shared_env->vars.find(name);
+                        if (sit != shared_env->vars.end()) {
+                            val = sit->second;
+                        } else {
+                            val = it->second;
+                        }
+                    } else {
+                        val = it->second;
+                    }
+                    found = true;
+                }
+            }
+            // 2. Поиск в разделяемых глобальных переменных (shared_env)
+            if (!found && shared_env) {
+                std::lock_guard<std::mutex> lk(shared_env->mtx);
+                auto sit = shared_env->vars.find(name);
+                if (sit != shared_env->vars.end()) {
+                    val = sit->second;
+                    found = true;
+                }
+            }
+            // 3. Поиск в глобальном фрейме (уровень 0)
+            if (!found && !local_frames.empty()) {
+                auto it = local_frames[0].find(name);
+                if (it != local_frames[0].end()) {
                     val = it->second;
                     found = true;
                 }
             }
-            if (!found && shared_env) {
-                std::lock_guard<std::mutex> lk(shared_env->mtx);
-                auto it = shared_env->vars.find(name);
-                if (it != shared_env->vars.end()) {
+            // 4. Поиск в локальных переменных потока
+            if (!found && !is_root_vm) {
+                auto it = vars.find(name);
+                if (it != vars.end()) {
                     val = it->second;
                     found = true;
                 }
@@ -514,32 +563,66 @@ public:
         DISPATCH_STEP();
     }
 
-    do_store_var: {
+    do_def_var: {
         {
             string name = readString();
             GrassValue val = pop();
-            if (is_root_vm) {
+            if (!is_root_vm || local_frames.size() > 2) {
+                if (!local_frames.empty()) {
+                    local_frames.back()[name] = std::move(val);
+                } else {
+                    vars[name] = std::move(val);
+                }
+            } else {
+                if (!local_frames.empty()) {
+                    local_frames.back()[name] = val;
+                }
                 if (shared_env) {
                     std::lock_guard<std::mutex> lk(shared_env->mtx);
                     shared_env->vars[name] = std::move(val);
                 }
-            } else {
-                auto it = vars.find(name);
-                if (it != vars.end()) {
-                    it->second = std::move(val);
-                } else {
-                    bool in_shared = false;
-                    if (shared_env) {
-                        std::lock_guard<std::mutex> lk(shared_env->mtx);
-                        auto sit = shared_env->vars.find(name);
-                        if (sit != shared_env->vars.end()) {
-                            sit->second = std::move(val);
-                            in_shared = true;
-                        }
+            }
+        }
+        DISPATCH_STEP();
+    }
+
+    do_store_var: {
+        {
+            string name = readString();
+            GrassValue val = pop();
+            // 1. Если переменная есть в текущем локальном фрейме функции
+            if (!local_frames.empty() && local_frames.back().count(name)) {
+                local_frames.back()[name] = val;
+                if (is_root_vm && local_frames.size() <= 2 && shared_env) {
+                    std::lock_guard<std::mutex> lk(shared_env->mtx);
+                    if (shared_env->vars.count(name)) {
+                        shared_env->vars[name] = val;
                     }
-                    if (!in_shared) {
+                }
+            } else if (shared_env) {
+                // 2. Иначе если переменная существует в разделяемой среде
+                bool in_shared = false;
+                {
+                    std::lock_guard<std::mutex> lk(shared_env->mtx);
+                    auto sit = shared_env->vars.find(name);
+                    if (sit != shared_env->vars.end()) {
+                        sit->second = val;
+                        in_shared = true;
+                    }
+                }
+                if (!in_shared) {
+                    if (!local_frames.empty()) {
+                        local_frames.back()[name] = std::move(val);
+                    } else {
                         vars[name] = std::move(val);
                     }
+                }
+            } else {
+                // 3. Fallback в локальный фрейм
+                if (!local_frames.empty()) {
+                    local_frames.back()[name] = std::move(val);
+                } else {
+                    vars[name] = std::move(val);
                 }
             }
         }
@@ -2959,6 +3042,7 @@ void DisassembleBytecode(const vector<uint8_t>& code, bool lang_ru) {
             case OP_CONST_STR:    cout << "OP_CONST_STR    \"" << readString() << "\"\n"; break;
             case OP_LOAD_VAR:     cout << "OP_LOAD_VAR     \"" << readString() << "\"\n"; break;
             case OP_STORE_VAR:    cout << "OP_STORE_VAR    \"" << readString() << "\"\n"; break;
+            case OP_DEF_VAR:      cout << "OP_DEF_VAR      \"" << readString() << "\"\n"; break;
             case OP_POP:          cout << "OP_POP\n"; break;
             case OP_ADD:          cout << "OP_ADD\n"; break;
             case OP_SUB:          cout << "OP_SUB\n"; break;
@@ -3169,6 +3253,11 @@ bool ProcessCompilation(CompilerOptions& opt) {
     // 2.1. Разрешение директив импорта (Import Pass)
     GrassImport::ImportStats import_stats;
     tokens = GrassImport::resolveImports(tokens, input_path, &import_stats);
+    if (import_stats.has_error) {
+        if (opt.lang_ru) cerr << "[GrassCompiler]: Сборка прервана из-за ошибок импорта!\n";
+        else cerr << "[GrassCompiler]: Build stopped due to import errors!\n";
+        return false;
+    }
     if (opt.print_timing && import_stats.total_modules_imported > 0) {
         if (opt.lang_ru) {
             cout << "[Импорт]: Подключено модулей: " << import_stats.total_modules_imported
@@ -3464,12 +3553,12 @@ int main(int argc, char* argv[]) {
             return 0;
         }
 
-        ProcessCompilation(opt);
+        bool comp_ok = ProcessCompilation(opt);
 
 #if defined(_WIN32)
         if (hIn != INVALID_HANDLE_VALUE) SetConsoleMode(hIn, origInMode);
 #endif
-        return 0;
+        return comp_ok ? 0 : 1;
     }
 
     cout << "========================================================\n";

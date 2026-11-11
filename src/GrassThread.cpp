@@ -109,6 +109,7 @@ namespace GrassThread {
 
     GrassValue join_thread(int64_t thread_id) {
         std::shared_ptr<ThreadItem> item;
+        bool already_joined = false;
         {
             std::lock_guard<std::mutex> lock(g_mgr_mutex);
             auto it = g_threads.find(thread_id);
@@ -116,13 +117,15 @@ namespace GrassThread {
                 return GrassValue::Num(0.0);
             }
             item = it->second;
-            if (item->joined.exchange(true)) {
-                // Already joined by another thread, wait for completion and return result
-                while (!item->completed) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                }
-                return item->result;
+            already_joined = item->joined.exchange(true);
+        }
+
+        if (already_joined) {
+            // Already joined by another thread, wait for completion outside the manager lock
+            while (!item->completed) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
+            return item->result;
         }
 
         if (item->th.joinable()) {

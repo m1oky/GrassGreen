@@ -9,7 +9,9 @@
 #include <cstring>
 #include <cstdlib>
 #include <algorithm>
+#ifndef GRASS_FREESTANDING
 #include <mutex>
+#endif
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -30,7 +32,9 @@ private:
     Chunk* head = nullptr;
     Chunk* current = nullptr;
     size_t chunk_size;
+#ifndef GRASS_FREESTANDING
     mutable std::mutex arena_mtx;
+#endif
 
     Chunk* create_chunk(size_t cap) {
         Chunk* c = new Chunk();
@@ -87,7 +91,9 @@ public:
 
     ~GrassArena()
     {
+#ifndef GRASS_FREESTANDING
         std::lock_guard<std::mutex> lock(arena_mtx);
+#endif
         Chunk* c = head;
         while (c) {
             Chunk* nxt = c->next;
@@ -100,7 +106,9 @@ public:
 
     void* alloc(size_t bytes, size_t align = 8)
     {
+#ifndef GRASS_FREESTANDING
         std::lock_guard<std::mutex> lock(arena_mtx);
+#endif
         if (!current) {
             head = create_chunk(std::max(chunk_size, bytes + align));
             current = head;
@@ -130,7 +138,9 @@ public:
 
     void reset()
     {
+#ifndef GRASS_FREESTANDING
         std::lock_guard<std::mutex> lock(arena_mtx);
+#endif
         if (head) {
             Chunk* c = head->next;
             while (c) {
@@ -146,7 +156,9 @@ public:
 
     size_t used() const
     {
+#ifndef GRASS_FREESTANDING
         std::lock_guard<std::mutex> lock(arena_mtx);
+#endif
         size_t total = 0;
         Chunk* c = head;
         while (c) {
