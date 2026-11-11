@@ -299,6 +299,10 @@ public:
             dispatch_table[OP_DIV]           = &&do_div;
             dispatch_table[OP_NEG]           = &&do_neg;
             dispatch_table[OP_MOD]           = &&do_mod;
+            dispatch_table[OP_BIT_AND]       = &&do_bit_and;
+            dispatch_table[OP_BIT_OR]        = &&do_bit_or;
+            dispatch_table[OP_BIT_XOR]       = &&do_bit_xor;
+            dispatch_table[OP_BIT_NOT]       = &&do_bit_not;
             dispatch_table[OP_CMP_EQ]        = &&do_cmp_eq;
             dispatch_table[OP_CMP_NEQ]       = &&do_cmp_neq;
             dispatch_table[OP_CMP_LT]        = &&do_cmp_lt;
@@ -674,6 +678,30 @@ public:
         GrassValue b = pop(), a = pop();
         long long bv = (long long)b.toNumber();
         push(GrassValue::Num(bv != 0 ? (double)((long long)a.toNumber() % bv) : 0.0));
+        DISPATCH_STEP();
+    }
+
+    do_bit_and: {
+        GrassValue b = pop(), a = pop();
+        push(GrassValue::Num((double)((long long)a.toNumber() & (long long)b.toNumber())));
+        DISPATCH_STEP();
+    }
+
+    do_bit_or: {
+        GrassValue b = pop(), a = pop();
+        push(GrassValue::Num((double)((long long)a.toNumber() | (long long)b.toNumber())));
+        DISPATCH_STEP();
+    }
+
+    do_bit_xor: {
+        GrassValue b = pop(), a = pop();
+        push(GrassValue::Num((double)((long long)a.toNumber() ^ (long long)b.toNumber())));
+        DISPATCH_STEP();
+    }
+
+    do_bit_not: {
+        GrassValue a = pop();
+        push(GrassValue::Num((double)(~(long long)a.toNumber())));
         DISPATCH_STEP();
     }
 
@@ -3060,6 +3088,10 @@ void DisassembleBytecode(const vector<uint8_t>& code, bool lang_ru) {
             case OP_DIV:          cout << "OP_DIV\n"; break;
             case OP_NEG:          cout << "OP_NEG\n"; break;
             case OP_MOD:          cout << "OP_MOD\n"; break;
+            case OP_BIT_AND:      cout << "OP_BIT_AND\n"; break;
+            case OP_BIT_OR:       cout << "OP_BIT_OR\n"; break;
+            case OP_BIT_XOR:      cout << "OP_BIT_XOR\n"; break;
+            case OP_BIT_NOT:      cout << "OP_BIT_NOT\n"; break;
             case OP_CMP_EQ:       cout << "OP_CMP_EQ\n"; break;
             case OP_CMP_NEQ:      cout << "OP_CMP_NEQ\n"; break;
             case OP_CMP_LT:       cout << "OP_CMP_LT\n"; break;

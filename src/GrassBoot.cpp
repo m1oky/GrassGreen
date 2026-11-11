@@ -3638,7 +3638,8 @@ namespace GrassBoot {
                         bin_data[jmp_load_done + 1] = (uint8_t)(bin_data.size() - (jmp_load_done + 2));
                         break;
                     }
-                    case 0x04: { // OP_STORE_VAR
+                    case 0x04:   // OP_STORE_VAR
+                    case 0x06: { // OP_DEF_VAR
                         std::string vname = readString();
                         if (var_slots.find(vname) == var_slots.end()) {
                             var_slots[vname] = next_var_addr;
@@ -3675,6 +3676,37 @@ namespace GrassBoot {
                         append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
                         append_u8(bin_data, 0x99); append_u8(bin_data, 0xF7); append_u8(bin_data, 0xFB);
                         append_u8(bin_data, 0x50);
+                        break;
+                    case 0x14: // OP_NEG
+                        append_u8(bin_data, 0x58); // pop eax
+                        append_u8(bin_data, 0xF7); append_u8(bin_data, 0xD8); // neg eax
+                        append_u8(bin_data, 0x50); // push eax
+                        break;
+                    case 0x15: // OP_MOD
+                        append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58); // pop ebx, pop eax
+                        append_u8(bin_data, 0x99); // cdq
+                        append_u8(bin_data, 0xF7); append_u8(bin_data, 0xFB); // idiv ebx
+                        append_u8(bin_data, 0x52); // push edx
+                        break;
+                    case 0x16: // OP_BIT_AND
+                        append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58); // pop ebx, pop eax
+                        append_u8(bin_data, 0x21); append_u8(bin_data, 0xD8); // and eax, ebx
+                        append_u8(bin_data, 0x50); // push eax
+                        break;
+                    case 0x17: // OP_BIT_OR
+                        append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58); // pop ebx, pop eax
+                        append_u8(bin_data, 0x09); append_u8(bin_data, 0xD8); // or eax, ebx
+                        append_u8(bin_data, 0x50); // push eax
+                        break;
+                    case 0x18: // OP_BIT_XOR
+                        append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58); // pop ebx, pop eax
+                        append_u8(bin_data, 0x31); append_u8(bin_data, 0xD8); // xor eax, ebx
+                        append_u8(bin_data, 0x50); // push eax
+                        break;
+                    case 0x19: // OP_BIT_NOT
+                        append_u8(bin_data, 0x58); // pop eax
+                        append_u8(bin_data, 0xF7); append_u8(bin_data, 0xD0); // not eax
+                        append_u8(bin_data, 0x50); // push eax
                         break;
                     case 0x20: // OP_CMP_EQ
                         append_u8(bin_data, 0x5B); // pop ebx

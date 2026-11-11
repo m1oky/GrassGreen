@@ -296,6 +296,15 @@ bool BytecodeCompiler::matchIdent(const string& name) {
     return false;
 }
 
+bool BytecodeCompiler::consume(GrassTokenKind kind, const string& error_msg) {
+    if (peek().kind == kind) {
+        advance();
+        return true;
+    }
+    reportError(peek().line, error_msg);
+    return false;
+}
+
 void BytecodeCompiler::reportError(int line, const string& msg) {
     cerr << "[GrassSyntax Error] (строка " << line << "): " << msg << endl;
     has_error = true;
@@ -566,10 +575,34 @@ void BytecodeCompiler::parseLogicalOr() {
 }
 
 void BytecodeCompiler::parseLogicalAnd() {
-    parseComparison();
+    parseBitwiseOr();
     while (match(TOK_AND) || matchIdent("and")) {
-        parseComparison();
+        parseBitwiseOr();
         emitByte(OP_AND);
+    }
+}
+
+void BytecodeCompiler::parseBitwiseOr() {
+    parseBitwiseXor();
+    while (match(TOK_PIPE)) {
+        parseBitwiseXor();
+        emitByte(OP_BIT_OR);
+    }
+}
+
+void BytecodeCompiler::parseBitwiseXor() {
+    parseBitwiseAnd();
+    while (match(TOK_CARET)) {
+        parseBitwiseAnd();
+        emitByte(OP_BIT_XOR);
+    }
+}
+
+void BytecodeCompiler::parseBitwiseAnd() {
+    parseComparison();
+    while (match(TOK_AMP)) {
+        parseComparison();
+        emitByte(OP_BIT_AND);
     }
 }
 
@@ -612,6 +645,7 @@ void BytecodeCompiler::parseFactor() {
 void BytecodeCompiler::parseUnary() {
     if (match(TOK_MINUS)) { parseUnary(); emitByte(OP_NEG); return; }
     if (match(TOK_NOT))   { parseUnary(); emitByte(OP_NOT); return; }
+    if (match(TOK_TILDE)) { parseUnary(); emitByte(OP_BIT_NOT); return; }
     if (match(TOK_PLUS))  { parseUnary(); return; }
     parsePrimary();
 }
@@ -631,7 +665,7 @@ void BytecodeCompiler::parsePrimary() {
     }
     if (match(TOK_LPAREN)) {
         parseExpression();
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         return;
     }
     if (match(TOK_LBRACKET)) {
@@ -693,12 +727,12 @@ void BytecodeCompiler::parsePrimary() {
             if (match(TOK_LPAREN)) {
                 if (member == "push") {
                     parseExpression();
-                    match(TOK_RPAREN);
+                    consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
                     emitByte(OP_LOAD_VAR); emitString(obj_name);
                     emitByte(OP_ARRAY_PUSH);
                     return;
                 } else if (member == "pop") {
-                    match(TOK_RPAREN);
+                    consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
                     emitByte(OP_LOAD_VAR); emitString(obj_name);
                     emitByte(OP_ARRAY_POP);
                     return;
@@ -716,12 +750,12 @@ void BytecodeCompiler::parsePrimary() {
             if (match(TOK_LPAREN)) {
                 if (member == "push") {
                     parseExpression();
-                    match(TOK_RPAREN);
+                    consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
                     emitByte(OP_LOAD_VAR); emitString(name);
                     emitByte(OP_ARRAY_PUSH);
                     return;
                 } else if (member == "pop") {
-                    match(TOK_RPAREN);
+                    consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
                     emitByte(OP_LOAD_VAR); emitString(name);
                     emitByte(OP_ARRAY_POP);
                     return;
@@ -735,7 +769,7 @@ void BytecodeCompiler::parsePrimary() {
 
         // Конструктор структуры: Player()
         if (g_struct_registry.count(name) && match(TOK_LPAREN)) {
-            match(TOK_RPAREN);
+            consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
             emitByte(OP_NEW_STRUCT);
             emitString(name);
             return;
@@ -755,7 +789,7 @@ void BytecodeCompiler::parsePrimary() {
                 parseExpression();
                 argc++;
             }
-            match(TOK_RPAREN);
+            consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
 
             emitByte(name == "thread" ? OP_THREAD_SPAWN : OP_ASYNC_SPAWN);
             if (user_functions.count(fn_target)) {
@@ -776,7 +810,7 @@ void BytecodeCompiler::parsePrimary() {
                     argc++;
                 } while (match(TOK_COMMA));
             }
-            match(TOK_RPAREN);
+            consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
 
             if (user_functions.count(name)) {
                 emitByte(OP_CALL_USER);
@@ -846,7 +880,7 @@ string BytecodeCompiler::extractParenArgsAsString() {
                 first = false;
             }
         }
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
     } else {
         match(TOK_ASSIGN);
         if (peek().kind == TOK_STRING || peek().kind == TOK_IDENT || peek().kind == TOK_NUMBER) {
@@ -898,7 +932,7 @@ bool BytecodeCompiler::parseSingleGuiDirective() {
                 txt += advance().text;
                 first = false;
             }
-            match(TOK_RPAREN);
+            consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         } else if (peek().kind == TOK_STRING || peek().kind == TOK_IDENT || peek().kind == TOK_NUMBER) {
             txt = advance().text;
         }
@@ -921,7 +955,7 @@ bool BytecodeCompiler::parseSingleGuiDirective() {
         while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
             if (!parseSingleGuiDirective()) advance();
         }
-        match(TOK_RBRACE);
+        consume(TOK_RBRACE, "Ожидалась закрывающая фигурная скобка '}'!");
         match(TOK_SEMI);
         return true;
     }
@@ -937,7 +971,7 @@ bool BytecodeCompiler::parseSingleGuiDirective() {
             if (peek().kind == TOK_STRING || peek().kind == TOK_IDENT) {
                 tab_name = advance().text;
             }
-            match(TOK_RPAREN);
+            consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         } else if (peek().kind == TOK_STRING || peek().kind == TOK_IDENT) {
             tab_name = advance().text;
         }
@@ -948,7 +982,7 @@ bool BytecodeCompiler::parseSingleGuiDirective() {
             while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
                 if (!parseSingleGuiDirective()) advance();
             }
-            match(TOK_RBRACE);
+            consume(TOK_RBRACE, "Ожидалась закрывающая фигурная скобка '}'!");
             match(TOK_SEMI);
             emitUICmd("tab(main)");
             return true;
@@ -964,7 +998,7 @@ bool BytecodeCompiler::parseSingleGuiDirective() {
         string arg = "";
         if (match(TOK_LPAREN)) {
             while (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) arg += advance().text;
-            match(TOK_RPAREN);
+            consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         }
         match(TOK_SEMI);
         if (!arg.empty()) emitUICmd(norm_cmd + "(" + arg + ")");
@@ -1055,7 +1089,7 @@ void BytecodeCompiler::parseWindowBlock() {
 
     if (match(TOK_LPAREN)) {
         while (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) advance();
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
     }
 
     if (!match(TOK_LBRACE)) {
@@ -1075,7 +1109,7 @@ void BytecodeCompiler::parseWindowBlock() {
             advance();
         }
     }
-    match(TOK_RBRACE);
+    consume(TOK_RBRACE, "Ожидалась закрывающая фигурная скобка '}' блока 'window'!");
     match(TOK_SEMI);
     emitByte(OP_UI_SHOW);
 }
@@ -1090,7 +1124,7 @@ void BytecodeCompiler::parseBlock() {
                 synchronize();
             }
         }
-        match(TOK_RBRACE);
+        consume(TOK_RBRACE, "Ожидалась закрывающая фигурная скобка '}'!");
     } else {
         reportError(peek().line, "Ожидалась открывающая фигурная скобка '{' для блока кода!");
         parseStatement();
@@ -1296,7 +1330,7 @@ void BytecodeCompiler::parseStatement() {
                 emitByte(OP_CALL_BUILTIN); emitString("not_clear_on"); emitByte(0); emitByte(OP_POP);
             } else {
                 parseExpression();
-                match(TOK_RPAREN);
+                consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
                 emitByte(OP_CALL_BUILTIN); emitString("not_clear"); emitByte(1); emitByte(OP_POP);
             }
         } else {
@@ -1329,7 +1363,7 @@ void BytecodeCompiler::parseStatement() {
         match(TOK_LPAREN);
         string path = "";
         if (peek().kind == TOK_STRING) path = advance().text;
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         match(TOK_SEMI);
         emitByte(OP_CONST_STR); emitString(path);
         emitByte(OP_CALL_BUILTIN); emitString("physical_struct"); emitByte(1); emitByte(OP_POP);
@@ -1341,7 +1375,7 @@ void BytecodeCompiler::parseStatement() {
         requireLib("baremetal", "!baremetal!", "bm_exec", bme_line);
         match(TOK_LPAREN);
         parseExpression();
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         match(TOK_SEMI);
         emitByte(OP_CALL_BUILTIN); emitString("bm_exec"); emitByte(1); emitByte(OP_POP);
         return;
@@ -1353,7 +1387,7 @@ void BytecodeCompiler::parseStatement() {
         requireLib("baremetal", "!baremetal!", cname, cat_line);
         match(TOK_LPAREN);
         parseExpression();
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         match(TOK_SEMI);
         emitByte(OP_CALL_BUILTIN); emitString("cat"); emitByte(1); emitByte(OP_POP);
         return;
@@ -1408,7 +1442,7 @@ void BytecodeCompiler::parseStatement() {
             if (!match(TOK_RPAREN)) {
                 parseExpression();
                 argc = 1;
-                match(TOK_RPAREN);
+                consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
             }
         }
         match(TOK_SEMI);
@@ -1421,7 +1455,7 @@ void BytecodeCompiler::parseStatement() {
         requireLib("baremetal", "!baremetal!", "cd", cd_line);
         if (match(TOK_LPAREN)) {
             parseExpression();
-            match(TOK_RPAREN);
+            consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         } else if (peek().kind == TOK_STRING || peek().kind == TOK_IDENT || peek().kind == TOK_DOT) {
             string p = advance().text;
             while (peek().kind == TOK_DOT || peek().kind == TOK_SLASH || peek().kind == TOK_IDENT) {
@@ -1441,7 +1475,7 @@ void BytecodeCompiler::parseStatement() {
         requireLib("baremetal", "!baremetal!", "cr_folder", cf_line);
         match(TOK_LPAREN);
         parseExpression();
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         match(TOK_SEMI);
         emitByte(OP_CALL_BUILTIN); emitString("cr_folder"); emitByte(1); emitByte(OP_POP);
         return;
@@ -1457,7 +1491,7 @@ void BytecodeCompiler::parseStatement() {
             parseExpression();
             argc = 2;
         }
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         match(TOK_SEMI);
         emitByte(OP_CALL_BUILTIN); emitString("cr_file"); emitByte(argc); emitByte(OP_POP);
         return;
@@ -1468,7 +1502,7 @@ void BytecodeCompiler::parseStatement() {
         requireLib("baremetal", "!baremetal!", "delete", del_line);
         match(TOK_LPAREN);
         parseExpression();
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         match(TOK_SEMI);
         emitByte(OP_CALL_BUILTIN); emitString("delete"); emitByte(1); emitByte(OP_POP);
         return;
@@ -1481,7 +1515,7 @@ void BytecodeCompiler::parseStatement() {
         parseExpression();
         match(TOK_COMMA);
         parseExpression();
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         match(TOK_SEMI);
         emitByte(OP_CALL_BUILTIN); emitString("copy"); emitByte(2); emitByte(OP_POP);
         return;
@@ -1494,7 +1528,7 @@ void BytecodeCompiler::parseStatement() {
         parseExpression();
         match(TOK_COMMA);
         parseExpression();
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         match(TOK_SEMI);
         emitByte(OP_CALL_BUILTIN); emitString("move"); emitByte(2); emitByte(OP_POP);
         return;
@@ -1505,7 +1539,7 @@ void BytecodeCompiler::parseStatement() {
         requireLib("baremetal", "!baremetal!", "not_show", ns_line);
         match(TOK_LPAREN);
         parseExpression();
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         match(TOK_SEMI);
         emitByte(OP_CALL_BUILTIN); emitString("not_show"); emitByte(1); emitByte(OP_POP);
         return;
@@ -1516,7 +1550,7 @@ void BytecodeCompiler::parseStatement() {
         requireLib("baremetal", "!baremetal!", "specSign_show", ss_line);
         match(TOK_LPAREN);
         parseExpression();
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         match(TOK_SEMI);
         emitByte(OP_CALL_BUILTIN); emitString("specSign_show"); emitByte(1); emitByte(OP_POP);
         return;
@@ -1542,7 +1576,7 @@ void BytecodeCompiler::parseStatement() {
                 if (!match(TOK_COMMA)) break;
             }
         }
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
 
         emitByte(OP_JUMP);
         size_t skip_patch = code.size();
@@ -1556,7 +1590,7 @@ void BytecodeCompiler::parseStatement() {
             emitByte(OP_PARAM_PROLOGUE);
         }
         for (int i = (int)params.size() - 1; i >= 0; --i) {
-            emitByte(OP_STORE_VAR);
+            emitByte(OP_DEF_VAR);
             emitString(params[i]);
         }
         if (!params.empty()) {
@@ -1654,11 +1688,11 @@ void BytecodeCompiler::parseStatement() {
         } else if (match(TOK_LPAREN)) {
             if (peek().kind == TOK_STRING) {
                 asm_body = advance().text;
-                match(TOK_RPAREN);
+                consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
                 match(TOK_SEMI);
             } else {
                 parseExpression();
-                match(TOK_RPAREN);
+                consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
                 match(TOK_SEMI);
                 emitByte(OP_CALL_BUILTIN); emitString("asm_run"); emitByte(1);
                 emitByte(OP_POP);
@@ -1689,7 +1723,7 @@ void BytecodeCompiler::parseStatement() {
             if (peek().kind == TOK_STRING || peek().kind == TOK_IDENT) {
                 mode = advance().text;
             }
-            match(TOK_RPAREN);
+            consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         }
         match(TOK_SEMI);
         emitByte(OP_CONST_STR); emitString(mode);
@@ -1718,7 +1752,7 @@ void BytecodeCompiler::parseStatement() {
             if (peek().kind == TOK_NUMBER || peek().kind == TOK_IDENT) {
                 rad = advance().text;
             }
-            match(TOK_RPAREN);
+            consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         }
         match(TOK_SEMI);
         emitByte(OP_CONST_STR); emitString("border-radius-app(" + rad + ")");
@@ -1740,7 +1774,7 @@ void BytecodeCompiler::parseStatement() {
             parseExpression();
             argc = 3;
         }
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         match(TOK_SEMI);
         emitByte(OP_CALL_BUILTIN); emitString("tone"); emitByte(argc);
         emitByte(OP_POP);
@@ -1760,7 +1794,7 @@ void BytecodeCompiler::parseStatement() {
                 argc = 2;
             }
         }
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         match(TOK_SEMI);
         emitByte(OP_CALL_BUILTIN); emitString("beep"); emitByte(argc);
         emitByte(OP_POP);
@@ -1781,7 +1815,7 @@ void BytecodeCompiler::parseStatement() {
             parseExpression();
             argc = 4;
         }
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         match(TOK_SEMI);
         emitByte(OP_CALL_BUILTIN); emitString("synth_play"); emitByte(argc);
         emitByte(OP_POP);
@@ -1798,7 +1832,7 @@ void BytecodeCompiler::parseStatement() {
             parseExpression();
             argc = 2;
         }
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         match(TOK_SEMI);
         emitByte(OP_CALL_BUILTIN); emitString("sound_play"); emitByte(argc);
         emitByte(OP_POP);
@@ -1840,7 +1874,7 @@ void BytecodeCompiler::parseStatement() {
         requireLib("audio", "!audio!", "sound_volume()", aud_line);
         match(TOK_LPAREN);
         parseExpression();
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         match(TOK_SEMI);
         emitByte(OP_CALL_BUILTIN); emitString("sound_volume"); emitByte(1);
         emitByte(OP_POP);
@@ -1859,18 +1893,18 @@ void BytecodeCompiler::parseStatement() {
         if (match(TOK_LBRACE)) {
             while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
                 if (matchIdent("browser")) {
-                    match(TOK_ASSIGN);
+                    if (!match(TOK_ASSIGN)) match(TOK_COLON);
                     if (peek().kind != TOK_SEMI && peek().kind != TOK_RBRACE) browser_val = advance().text;
                     match(TOK_SEMI);
                 } else if (matchIdent("device")) {
-                    match(TOK_ASSIGN);
+                    if (!match(TOK_ASSIGN)) match(TOK_COLON);
                     if (peek().kind != TOK_SEMI && peek().kind != TOK_RBRACE) device_val = advance().text;
                     match(TOK_SEMI);
                 } else {
                     advance();
                 }
             }
-            match(TOK_RBRACE);
+            consume(TOK_RBRACE, "Ожидалась закрывающая фигурная скобка '}'!");
         }
         match(TOK_SEMI);
 
@@ -1895,27 +1929,27 @@ void BytecodeCompiler::parseStatement() {
         if (match(TOK_LBRACE)) {
             while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
                 if (matchIdent("port")) {
-                    match(TOK_ASSIGN);
+                    if (!match(TOK_ASSIGN)) match(TOK_COLON);
                     if (peek().kind == TOK_NUMBER) port_val = advance().num_val;
                     else if (peek().kind != TOK_SEMI) { try { port_val = stod(advance().text); } catch (...) {} }
                     match(TOK_SEMI);
                 } else if (matchIdent("IP") || matchIdent("ip")) {
-                    match(TOK_ASSIGN);
+                    if (!match(TOK_ASSIGN)) match(TOK_COLON);
                     if (peek().kind != TOK_SEMI && peek().kind != TOK_RBRACE) ip_val = advance().text;
                     match(TOK_SEMI);
                 } else if (matchIdent("password")) {
-                    match(TOK_ASSIGN);
+                    if (!match(TOK_ASSIGN)) match(TOK_COLON);
                     if (peek().kind != TOK_SEMI && peek().kind != TOK_RBRACE) pass_val = advance().text;
                     match(TOK_SEMI);
                 } else if (matchIdent("certainIP") || matchIdent("certain_ip")) {
-                    match(TOK_ASSIGN);
+                    if (!match(TOK_ASSIGN)) match(TOK_COLON);
                     if (peek().kind != TOK_SEMI && peek().kind != TOK_RBRACE) cert_ip_val = advance().text;
                     match(TOK_SEMI);
                 } else {
                     advance();
                 }
             }
-            match(TOK_RBRACE);
+            consume(TOK_RBRACE, "Ожидалась закрывающая фигурная скобка '}'!");
         }
         match(TOK_SEMI);
 
@@ -1942,7 +1976,7 @@ void BytecodeCompiler::parseStatement() {
                 argc++;
             } while (match(TOK_COMMA));
         }
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         match(TOK_SEMI);
 
         emitByte(OP_ASYNC_SPAWN);
@@ -1964,7 +1998,7 @@ void BytecodeCompiler::parseStatement() {
         if (match(TOK_LPAREN)) {
             if (peek().kind != TOK_RPAREN) parseExpression();
             else { emitByte(OP_CONST_NUM); emitDouble(10.0); }
-            match(TOK_RPAREN);
+            consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         } else {
             emitByte(OP_CONST_NUM);
             emitDouble(10.0);
@@ -2042,7 +2076,7 @@ void BytecodeCompiler::parseStatement() {
                 parseExpression();
                 emitByte(OP_ADD);
             }
-            match(TOK_RPAREN);
+            consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         } else {
             parseExpression();
         }
@@ -2062,7 +2096,7 @@ void BytecodeCompiler::parseStatement() {
         if (match(TOK_LPAREN)) {
             if (peek().kind == TOK_IDENT && peek(1).kind == TOK_RPAREN && !user_functions.count(peek().text)) {
                 string var_name = advance().text;
-                match(TOK_RPAREN);
+                consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
                 match(TOK_SEMI);
                 emitByte(OP_CALL_BUILTIN);
                 emitString(builtin_target);
@@ -2074,7 +2108,7 @@ void BytecodeCompiler::parseStatement() {
             parseExpression();
             if (match(TOK_COMMA) && peek().kind == TOK_IDENT) {
                 string var_name = advance().text;
-                match(TOK_RPAREN);
+                consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
                 match(TOK_SEMI);
                 emitByte(OP_CALL_BUILTIN);
                 emitString(builtin_target);
@@ -2122,7 +2156,7 @@ void BytecodeCompiler::parseStatement() {
             string var_name = advance().text;
             emitByte(OP_CONST_STR);
             emitString("");
-            emitByte(OP_STORE_VAR);
+            emitByte(OP_DEF_VAR);
             emitString(var_name);
             match(TOK_SEMI);
             return;
@@ -2139,7 +2173,7 @@ void BytecodeCompiler::parseStatement() {
                 emitByte(OP_CONST_NUM);
                 emitDouble(0.0);
             }
-            emitByte(OP_STORE_VAR);
+            emitByte(OP_DEF_VAR);
             emitString(var_name);
             if (!match(TOK_COMMA)) break;
         }
@@ -2151,7 +2185,7 @@ void BytecodeCompiler::parseStatement() {
     if (matchIdent("if") || matchIdent("check") || matchIdent("chek")) {
         if (match(TOK_LPAREN)) {
             parseExpression();
-            match(TOK_RPAREN);
+            consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         } else {
             parseExpression();
         }
@@ -2207,7 +2241,7 @@ void BytecodeCompiler::parseStatement() {
         if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
             parseStepStatement();
         }
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
 
         emitByte(OP_JMP);
         emitU32((uint32_t)loop_start);
@@ -2239,7 +2273,7 @@ void BytecodeCompiler::parseStatement() {
         size_t loop_start = code.size();
         if (match(TOK_LPAREN)) {
             parseExpression();
-            match(TOK_RPAREN);
+            consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         } else {
             parseExpression();
         }
@@ -2279,13 +2313,13 @@ void BytecodeCompiler::parseStatement() {
         if (match(TOK_LPAREN)) {
             has_count = true;
             parseExpression();
-            match(TOK_RPAREN);
-            emitByte(OP_STORE_VAR);
+            consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
+            emitByte(OP_DEF_VAR);
             emitString(limit_var);
 
             emitByte(OP_CONST_NUM);
             emitDouble(0.0);
-            emitByte(OP_STORE_VAR);
+            emitByte(OP_DEF_VAR);
             emitString(iter_var);
         }
 
@@ -2357,7 +2391,7 @@ void BytecodeCompiler::parseStatement() {
     if (matchIdent("wait") || matchIdent("sleep")) {
         match(TOK_LPAREN);
         parseExpression();
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         match(TOK_SEMI);
         emitByte(OP_WAIT);
         return;
@@ -2366,7 +2400,7 @@ void BytecodeCompiler::parseStatement() {
     if (matchIdent("exit")) {
         if (match(TOK_LPAREN)) {
             if (peek().kind != TOK_RPAREN) parseExpression();
-            match(TOK_RPAREN);
+            consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         }
         match(TOK_SEMI);
         emitByte(OP_HALT);
@@ -2571,7 +2605,7 @@ void BytecodeCompiler::parseStructDefinition() {
         if (f_align > max_align) max_align = f_align;
     }
 
-    match(TOK_RBRACE);
+    consume(TOK_RBRACE, "Ожидалась закрывающая фигурная скобка '}' структуры!");
     match(TOK_SEMI); // опциональный ';'
 
     def.alignment = max_align;
@@ -2597,7 +2631,7 @@ void BytecodeCompiler::parseVFSBody() {
                 emitByte(OP_CALL_BUILTIN); emitString("cd"); emitByte(1); emitByte(OP_POP);
 
                 parseVFSBody();
-                match(TOK_RBRACE);
+                consume(TOK_RBRACE, "Ожидалась закрывающая фигурная скобка '}' папки virtual_struct!");
 
                 emitByte(OP_CONST_STR); emitString("..");
                 emitByte(OP_CALL_BUILTIN); emitString("cd"); emitByte(1); emitByte(OP_POP);
@@ -2639,13 +2673,13 @@ void BytecodeCompiler::parseVirtualStruct() {
     emitByte(OP_POP);
 
     if (match(TOK_LPAREN)) {
-        match(TOK_RPAREN);
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         match(TOK_SEMI);
         return;
     }
 
     if (match(TOK_LBRACE)) {
         parseVFSBody();
-        match(TOK_RBRACE);
+        consume(TOK_RBRACE, "Ожидалась закрывающая фигурная скобка '}' блока virtual_struct!");
     }
 }

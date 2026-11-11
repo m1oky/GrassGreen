@@ -78,6 +78,10 @@ namespace GrassOptimizer {
                 case OP_AND:
                 case OP_OR:
                 case OP_NOT:
+                case OP_BIT_AND:
+                case OP_BIT_OR:
+                case OP_BIT_XOR:
+                case OP_BIT_NOT:
                 case OP_RET:
                 case OP_LOG:
                 case OP_LOG_EMPTY:
@@ -124,6 +128,7 @@ namespace GrassOptimizer {
                 case OP_CONST_STR:
                 case OP_LOAD_VAR:
                 case OP_STORE_VAR:
+                case OP_DEF_VAR:
                 case OP_INC_VAR:
                 case OP_DEC_VAR:
                 case OP_ASK:
@@ -365,6 +370,7 @@ namespace GrassOptimizer {
                 case OP_CONST_STR:
                 case OP_LOAD_VAR:
                 case OP_STORE_VAR:
+                case OP_DEF_VAR:
                 case OP_INC_VAR:
                 case OP_DEC_VAR:
                 case OP_ASK:
@@ -456,6 +462,7 @@ namespace GrassOptimizer {
                 case OP_CONST_STR:
                 case OP_LOAD_VAR:
                 case OP_STORE_VAR:
+                case OP_DEF_VAR:
                 case OP_INC_VAR:
                 case OP_DEC_VAR:
                 case OP_ASK:

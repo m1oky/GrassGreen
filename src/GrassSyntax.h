@@ -24,6 +24,7 @@ enum OpCode : uint8_t {
     OP_LOAD_VAR      = 0x03,
     OP_STORE_VAR     = 0x04,
     OP_POP           = 0x05,
+    OP_DEF_VAR       = 0x06,
     OP_NOP           = 0x0E,
 
     OP_ADD           = 0x10,
@@ -32,6 +33,10 @@ enum OpCode : uint8_t {
     OP_DIV           = 0x13,
     OP_NEG           = 0x14,
     OP_MOD           = 0x15,
+    OP_BIT_AND       = 0x16,
+    OP_BIT_OR        = 0x17,
+    OP_BIT_XOR       = 0x18,
+    OP_BIT_NOT       = 0x19,
 
     OP_CMP_EQ        = 0x20,
     OP_CMP_NEQ       = 0x21,
@@ -417,6 +422,7 @@ class BytecodeCompiler {
     GrassToken advance();
     bool match(GrassTokenKind kind);
     bool matchIdent(const std::string& name);
+    bool consume(GrassTokenKind kind, const std::string& error_msg);
 
     void reportError(int line, const std::string& msg);
     void synchronize();
@@ -436,6 +442,9 @@ class BytecodeCompiler {
     void parseExpression();
     void parseLogicalOr();
     void parseLogicalAnd();
+    void parseBitwiseOr();
+    void parseBitwiseXor();
+    void parseBitwiseAnd();
     void parseComparison();
     void parseTerm();
     void parseFactor();
