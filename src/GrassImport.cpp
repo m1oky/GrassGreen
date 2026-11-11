@@ -154,6 +154,7 @@ namespace GrassImport {
                         std::cerr << "[GrassImport Error]: Файл модуля '" << target_name
                                   << "' не найден (импорт из " << current_filepath
                                   << " на строке " << import_line << ")!\n";
+                        stats.has_error = true;
                         continue;
                     }
 

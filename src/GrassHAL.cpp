@@ -279,6 +279,14 @@ namespace GrassHAL {
 
     void* alloc_executable_memory(size_t size) {
         std::lock_guard<std::mutex> lock(g_exec_pool_mtx);
+        #if defined(_WIN32)
+        // На хост-системе Windows всегда используем VirtualAlloc с PAGE_EXECUTE_READWRITE
+        // для предотвращения аппаратного падения DEP/NX (0xC0000005)
+        return VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+        #elif defined(__linux__) || defined(__APPLE__)
+        void* p = mmap(nullptr, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        return (p == MAP_FAILED) ? nullptr : p;
+        #else
         if (is_freestanding()) {
             size = (size + 4095) & ~4095; // выравнивание по 4KB странице
             if (g_exec_pool_offset + size <= sizeof(g_freestanding_exec_pool)) {
@@ -288,20 +296,13 @@ namespace GrassHAL {
             }
             return nullptr;
         }
-        #if defined(_WIN32)
-        return VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-        #elif defined(__linux__) || defined(__APPLE__)
-        void* p = mmap(nullptr, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        return (p == MAP_FAILED) ? nullptr : p;
-        #else
         return nullptr;
         #endif
     }
 
     void free_executable_memory(void* ptr, size_t size) {
-        if (is_freestanding() || !ptr) {
-            return;
-        }
+        if (!ptr) return;
+        std::lock_guard<std::mutex> lock(g_exec_pool_mtx);
         #if defined(_WIN32)
         VirtualFree(ptr, 0, MEM_RELEASE);
         #elif defined(__linux__) || defined(__APPLE__)

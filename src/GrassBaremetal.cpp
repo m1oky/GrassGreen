@@ -653,4 +653,68 @@ namespace GrassBaremetal {
         std::cout << "Команда не найдена: " << trimmed << " (введите 'help' для списка команд)\n";
         return false;
     }
+
+    // ── 9. Mouse Subsystem Implementation (!baremetal!) ──
+    static int g_mouse_x = 0;
+    static int g_mouse_y = 0;
+    static int g_mouse_buttons = 0;
+    static bool g_mouse_cursor_visible = true;
+
+    void mouse_init() {
+        mouse_poll();
+    }
+
+    void mouse_poll() {
+#if defined(_WIN32)
+        POINT pt;
+        if (GetCursorPos(&pt)) {
+            g_mouse_x = pt.x;
+            g_mouse_y = pt.y;
+        }
+        int btns = 0;
+        if (GetAsyncKeyState(VK_LBUTTON) & 0x8000) btns |= 1;
+        if (GetAsyncKeyState(VK_RBUTTON) & 0x8000) btns |= 2;
+        if (GetAsyncKeyState(VK_MBUTTON) & 0x8000) btns |= 4;
+        g_mouse_buttons = btns;
+#endif
+    }
+
+    int mouse_x() {
+        mouse_poll();
+        return g_mouse_x;
+    }
+
+    int mouse_y() {
+        mouse_poll();
+        return g_mouse_y;
+    }
+
+    int mouse_btn() {
+        mouse_poll();
+        return g_mouse_buttons;
+    }
+
+    bool mouse_down(int btn) {
+        mouse_poll();
+        if (btn == 1) return (g_mouse_buttons & 1) != 0;
+        if (btn == 2) return (g_mouse_buttons & 2) != 0;
+        if (btn == 3 || btn == 4) return (g_mouse_buttons & 4) != 0;
+        return (g_mouse_buttons & btn) != 0;
+    }
+
+    bool mouse_down(const std::string& btn_name) {
+        mouse_poll();
+        std::string s = to_lower_str(btn_name);
+        if (s == "left" || s == "l") return (g_mouse_buttons & 1) != 0;
+        if (s == "right" || s == "r") return (g_mouse_buttons & 2) != 0;
+        if (s == "middle" || s == "m" || s == "mid") return (g_mouse_buttons & 4) != 0;
+        return false;
+    }
+
+    void mouse_cursor(bool visible) {
+        g_mouse_cursor_visible = visible;
+#if defined(_WIN32)
+        ShowCursor(visible ? TRUE : FALSE);
+#endif
+    }
 }

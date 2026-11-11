@@ -90,6 +90,16 @@ namespace GrassBaremetal {
     bool bm_exec(const std::string& cmd);
     void vd_desktop();
     std::string cat(const std::string& path);
+
+    // ── 9. Mouse Subsystem (!baremetal!) ──
+    void mouse_init();
+    int mouse_x();
+    int mouse_y();
+    int mouse_btn();
+    bool mouse_down(int btn = 1);
+    bool mouse_down(const std::string& btn_name);
+    void mouse_poll();
+    void mouse_cursor(bool visible);
 }
 
 #endif // GRASS_BAREMETAL_H

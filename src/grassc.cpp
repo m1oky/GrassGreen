@@ -83,6 +83,7 @@ class GrassVM {
     size_t ip = 0;
     vector<GrassValue> stack;
     vector<size_t> call_stack;
+    vector<unordered_map<string, GrassValue>> local_frames;
     unordered_map<string, GrassValue> vars;
     shared_ptr<GrassSharedEnv> shared_env;
     bool is_root_vm = true;
@@ -95,7 +96,7 @@ class GrassVM {
     bool tryRunJitLoop(uint32_t loop_start, uint32_t loop_end) {
         if (failed_loops.count(loop_start)) return false;
 
-        auto& active_vars = (is_root_vm && shared_env) ? shared_env->vars : vars;
+        auto& active_vars = local_frames.empty() ? ((is_root_vm && shared_env) ? shared_env->vars : vars) : local_frames.back();
         auto jit_it = jit_cache.find(loop_start);
         if (jit_it != jit_cache.end()) {
             GrassJIT::executeJitBlock(jit_it->second, active_vars);
@@ -1192,6 +1193,42 @@ public:
                     }
                     else if (fn == "gui" || fn == "vd" || fn == "vd_desktop") {
                         GrassBaremetal::vd_desktop();
+                        push(GrassValue::Num(1.0));
+                    }
+                    // ===== МЫШЬ (!baremetal!) =====
+                    else if (fn == "mouse_init") {
+                        GrassBaremetal::mouse_init();
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "mouse_x") {
+                        push(GrassValue::Num(GrassBaremetal::mouse_x()));
+                    }
+                    else if (fn == "mouse_y") {
+                        push(GrassValue::Num(GrassBaremetal::mouse_y()));
+                    }
+                    else if (fn == "mouse_btn") {
+                        push(GrassValue::Num(GrassBaremetal::mouse_btn()));
+                    }
+                    else if (fn == "mouse_down") {
+                        bool down = false;
+                        if (argc >= 1) {
+                            if (args[0].is_str()) {
+                                down = GrassBaremetal::mouse_down(args[0].toString());
+                            } else {
+                                down = GrassBaremetal::mouse_down((int)args[0].toNumber());
+                            }
+                        } else {
+                            down = GrassBaremetal::mouse_down(1);
+                        }
+                        push(GrassValue::Num(down ? 1.0 : 0.0));
+                    }
+                    else if (fn == "mouse_poll") {
+                        GrassBaremetal::mouse_poll();
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "mouse_cursor") {
+                        bool vis = (argc >= 1) ? (args[0].toNumber() != 0.0) : true;
+                        GrassBaremetal::mouse_cursor(vis);
                         push(GrassValue::Num(1.0));
                     }
                     // ===== БИБЛИОТЕКА !time! =====

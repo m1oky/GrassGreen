@@ -15,6 +15,7 @@ namespace GrassImport {
     struct ImportStats {
         size_t total_modules_imported = 0;
         size_t total_tokens_after_import = 0;
+        bool has_error = false;
     };
 
     // Главная функция рекурсивного разрешения директив import / include

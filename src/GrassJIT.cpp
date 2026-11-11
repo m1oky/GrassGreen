@@ -330,6 +330,8 @@ namespace GrassJIT {
         size_t ip = loop_start;
         bool has_back_jump = false;
         uint32_t loop_exit_ip = 0;
+        int stack_depth = 0;
+        int max_stack_depth = 0;
 
         while (ip < loop_end) {
             uint8_t op = code[ip++];
@@ -339,6 +341,8 @@ namespace GrassJIT {
                 case OP_CONST_NUM:
                     if (ip + 8 > loop_end) return nullptr;
                     ip += 8;
+                    stack_depth++;
+                    if (stack_depth > max_stack_depth) max_stack_depth = stack_depth;
                     break;
                 case OP_LOAD_VAR: {
                     std::string name = readStringAt(code, ip);
@@ -347,6 +351,8 @@ namespace GrassJIT {
                         if (next_slot >= 120) return nullptr; // лимит слотов
                         var_slot_map[name] = next_slot++;
                     }
+                    stack_depth++;
+                    if (stack_depth > max_stack_depth) max_stack_depth = stack_depth;
                     break;
                 }
                 case OP_STORE_VAR: {
@@ -356,6 +362,7 @@ namespace GrassJIT {
                         if (next_slot >= 120) return nullptr;
                         var_slot_map[name] = next_slot++;
                     }
+                    if (stack_depth > 0) stack_depth--;
                     break;
                 }
                 case OP_INC_VAR:
@@ -379,8 +386,13 @@ namespace GrassJIT {
                 case OP_SUB:
                 case OP_MUL:
                 case OP_DIV:
+                    if (stack_depth > 0) stack_depth--;
+                    break;
                 case OP_MOD:
+                    // Опкод остатка от деления не поддерживается x86_64 JIT (требует fmod) — отдаем интерпретатору VM
+                    return nullptr;
                 case OP_POP:
+                    if (stack_depth > 0) stack_depth--;
                     break;
                 case OP_CMP_LT:
                 case OP_CMP_GT:
@@ -388,12 +400,14 @@ namespace GrassJIT {
                 case OP_CMP_GTE:
                 case OP_CMP_EQ:
                 case OP_CMP_NEQ:
+                    if (stack_depth > 0) stack_depth--;
                     break;
                 case OP_JMP_IF_FALSE: {
                     if (ip + 4 > loop_end) return nullptr;
                     uint32_t exit_tgt = readU32LE(&code[ip]);
                     ip += 4;
                     if (loop_exit_ip == 0) loop_exit_ip = exit_tgt;
+                    if (stack_depth > 0) stack_depth--;
                     break;
                 }
                 case OP_JMP: {
@@ -415,6 +429,8 @@ namespace GrassJIT {
         }
 
         if (!has_back_jump || loop_exit_ip == 0) return nullptr;
+        // Защита от разрушения вычислений при глубине стека выражений > 2 (лимит xmm0/xmm1)
+        if (max_stack_depth > 2) return nullptr;
 
         // 2. Генерация машинного кода x86_64
         X64Assembler x64;

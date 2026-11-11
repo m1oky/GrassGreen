@@ -351,7 +351,12 @@ enum GrassTokenKind {
     TOK_NOT,
     TOK_SHL,
     TOK_SHR,
-    TOK_DOT
+    TOK_DOT,
+    TOK_COLON,
+    TOK_AMP,
+    TOK_PIPE,
+    TOK_CARET,
+    TOK_TILDE
 };
 
 struct GrassToken {
@@ -391,7 +396,15 @@ class BytecodeCompiler {
 
     std::unordered_set<std::string> included_libs;
     std::vector<std::vector<size_t>> break_Fixups;
+    std::vector<std::vector<size_t>> continue_Fixups;
     std::unordered_map<std::string, uint32_t> func_table;
+
+    struct FunctionContextGuard {
+        bool& var;
+        bool prev;
+        FunctionContextGuard(bool& v, bool newVal) : var(v), prev(v) { var = newVal; }
+        ~FunctionContextGuard() { var = prev; }
+    };
 
     struct UserFunction {
         uint32_t entry_ip;
@@ -406,6 +419,7 @@ class BytecodeCompiler {
     bool matchIdent(const std::string& name);
 
     void reportError(int line, const std::string& msg);
+    void synchronize();
     bool requireLib(const std::string& lib_key, const std::string& display_name, const std::string& feature_desc, int line);
     void checkBuiltinLibraryRequirement(const std::string& fn, int line);
 

@@ -247,7 +247,7 @@ vector<GrassToken> Lexer::tokenize() {
             case ']': tokens.push_back(GrassToken(TOK_RBRACKET, "]", 0.0, line)); break;
             case ',': tokens.push_back(GrassToken(TOK_COMMA, ",", 0.0, line)); break;
             case ';': tokens.push_back(GrassToken(TOK_SEMI, ";", 0.0, line)); break;
-            case ':':
+            case ':': tokens.push_back(GrassToken(TOK_COLON, ":", 0.0, line)); break;
             case '=': tokens.push_back(GrassToken(TOK_ASSIGN, "=", 0.0, line)); break;
             case '+': tokens.push_back(GrassToken(TOK_PLUS, "+", 0.0, line)); break;
             case '-': tokens.push_back(GrassToken(TOK_MINUS, "-", 0.0, line)); break;
@@ -258,6 +258,10 @@ vector<GrassToken> Lexer::tokenize() {
             case '<': tokens.push_back(GrassToken(TOK_LT, "<", 0.0, line)); break;
             case '>': tokens.push_back(GrassToken(TOK_GT, ">", 0.0, line)); break;
             case '.': tokens.push_back(GrassToken(TOK_DOT, ".", 0.0, line)); break;
+            case '&': tokens.push_back(GrassToken(TOK_AMP, "&", 0.0, line)); break;
+            case '|': tokens.push_back(GrassToken(TOK_PIPE, "|", 0.0, line)); break;
+            case '^': tokens.push_back(GrassToken(TOK_CARET, "^", 0.0, line)); break;
+            case '~': tokens.push_back(GrassToken(TOK_TILDE, "~", 0.0, line)); break;
             default: break;
         }
     }
@@ -295,6 +299,37 @@ bool BytecodeCompiler::matchIdent(const string& name) {
 void BytecodeCompiler::reportError(int line, const string& msg) {
     cerr << "[GrassSyntax Error] (строка " << line << "): " << msg << endl;
     has_error = true;
+}
+
+void BytecodeCompiler::synchronize() {
+    if (peek().kind != TOK_EOF) advance();
+    while (peek().kind != TOK_EOF) {
+        if (peek(-1).kind == TOK_SEMI) return;
+        switch (peek().kind) {
+            case TOK_RBRACE:
+            case TOK_LBRACE:
+            case TOK_SEMI:
+                return;
+            case TOK_IDENT: {
+                const string& txt = peek().text;
+                if (isTypeOrFuncKeyword(txt) || isVarKeyword(txt) ||
+                    txt == "struct" || txt == "if" || txt == "check" ||
+                    txt == "while" || txt == "for" || txt == "again" ||
+                    txt == "loop" || txt == "return" || txt == "break" ||
+                    txt == "continue" || txt == "gout" || txt == "cout" ||
+                    txt == "gin" || txt == "cin" || txt == "clear" ||
+                    txt == "window" || txt == "surface" || txt == "tab") {
+                    return;
+                }
+                break;
+            }
+            case TOK_LIB:
+                return;
+            default:
+                break;
+        }
+        advance();
+    }
 }
 
 bool BytecodeCompiler::requireLib(const string& lib_key, const string& display_name, const string& feature_desc, int line) {
@@ -363,7 +398,8 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
     else if (fn == "clip_set" || fn == "clip_get" || fn == "screen_w" ||
              fn == "screen_h" || fn == "pc_name" || fn == "user_name" ||
              fn == "cpu_cores" || fn == "ram_total_mb" || fn == "ram_free_mb" ||
-             fn == "get_env" || fn == "uptime_sec") {
+             fn == "get_env" || fn == "uptime_sec" ||
+             fn == "system" || fn == "exec" || fn == "shell") {
         requireLib("sys", "!sys!", fn + "()", line);
     }
     // 11. Проверка библиотеки !proc!
@@ -462,7 +498,9 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
              fn == "not_show" || fn == "specSign_show" ||
              fn == "virtual_struct" || fn == "physical_struct" ||
              fn == "bm_exec" || fn == "cat" || fn == "read_file" ||
-             fn == "gui" || fn == "vd" || fn == "vd_desktop") {
+             fn == "gui" || fn == "vd" || fn == "vd_desktop" ||
+             fn == "mouse_init" || fn == "mouse_x" || fn == "mouse_y" ||
+             fn == "mouse_btn" || fn == "mouse_down" || fn == "mouse_poll" || fn == "mouse_cursor") {
         requireLib("baremetal", "!baremetal!", fn + "()", line);
     }
 }
@@ -783,7 +821,12 @@ void BytecodeCompiler::parsePrimary() {
         return;
     }
 
-    if (peek().kind != TOK_EOF) advance();
+    if (peek().kind == TOK_EOF) {
+        reportError(peek().line, "Непредвиденный конец файла: ожидалось выражение!");
+    } else {
+        reportError(peek().line, "Ожидалось выражение, но получен токен '" + peek().text + "'!");
+        advance();
+    }
     emitByte(OP_CONST_NUM);
     emitDouble(0.0);
 }
@@ -1040,7 +1083,12 @@ void BytecodeCompiler::parseWindowBlock() {
 void BytecodeCompiler::parseBlock() {
     if (match(TOK_LBRACE)) {
         while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
+            size_t before = cur;
             parseStatement();
+            if (cur == before && peek().kind != TOK_EOF && peek().kind != TOK_RBRACE) {
+                reportError(peek().line, "Синтаксическая ошибка: непредвиденная инструкция '" + peek().text + "'!");
+                synchronize();
+            }
         }
         match(TOK_RBRACE);
     } else {
@@ -1515,10 +1563,10 @@ void BytecodeCompiler::parseStatement() {
             emitByte(OP_PARAM_EPILOGUE);
         }
 
-        bool prev_inside = inside_function;
-        inside_function = true;
-        parseBlock();
-        inside_function = prev_inside;
+        {
+            FunctionContextGuard func_guard(inside_function, true);
+            parseBlock();
+        }
 
         emitByte(OP_CONST_NUM);
         emitDouble(0.0);
@@ -1537,7 +1585,7 @@ void BytecodeCompiler::parseStatement() {
     // Запрет на выполнение кода вне int main() {} или пользовательских функций
     if (!inside_function && !is_special_file) {
         reportError(peek().line, "Инструкция '" + peek().text + "' находится вне функции! Весь исполняемый код должен быть внутри int main() { ... }.");
-        advance();
+        synchronize();
         return;
     }
 
@@ -2166,6 +2214,7 @@ void BytecodeCompiler::parseStatement() {
 
         patchU32(body_jmp_patch, (uint32_t)code.size());
         break_Fixups.push_back({});
+        continue_Fixups.push_back({});
         parseBlock();
 
         emitByte(OP_JMP);
@@ -2177,6 +2226,11 @@ void BytecodeCompiler::parseStatement() {
             patchU32(patch_pos, (uint32_t)loop_end);
         }
         break_Fixups.pop_back();
+
+        for (size_t patch_pos : continue_Fixups.back()) {
+            patchU32(patch_pos, (uint32_t)step_start);
+        }
+        continue_Fixups.pop_back();
         return;
     }
 
@@ -2195,6 +2249,7 @@ void BytecodeCompiler::parseStatement() {
         emitU32(0);
 
         break_Fixups.push_back({});
+        continue_Fixups.push_back({});
         parseBlock();
 
         emitByte(OP_JMP);
@@ -2206,6 +2261,11 @@ void BytecodeCompiler::parseStatement() {
             patchU32(patch_pos, (uint32_t)loop_end);
         }
         break_Fixups.pop_back();
+
+        for (size_t patch_pos : continue_Fixups.back()) {
+            patchU32(patch_pos, (uint32_t)loop_start);
+        }
+        continue_Fixups.pop_back();
         return;
     }
 
@@ -2248,6 +2308,7 @@ void BytecodeCompiler::parseStatement() {
         }
 
         break_Fixups.push_back({});
+        continue_Fixups.push_back({});
         parseBlock();
 
         emitByte(OP_JMP);
@@ -2259,6 +2320,11 @@ void BytecodeCompiler::parseStatement() {
             patchU32(patch_pos, (uint32_t)loop_end);
         }
         break_Fixups.pop_back();
+
+        for (size_t patch_pos : continue_Fixups.back()) {
+            patchU32(patch_pos, (uint32_t)loop_start);
+        }
+        continue_Fixups.pop_back();
         return;
     }
 
@@ -2271,6 +2337,20 @@ void BytecodeCompiler::parseStatement() {
         if (!break_Fixups.empty()) {
             break_Fixups.back().push_back(patch_pos);
         }
+        return;
+    }
+
+    if (matchIdent("continue") || matchIdent("next")) {
+        if (match(TOK_LPAREN)) match(TOK_RPAREN);
+        match(TOK_SEMI);
+        if (continue_Fixups.empty()) {
+            reportError(peek(-1).line, "Оператор continue может использоваться только внутри циклов!");
+            return;
+        }
+        emitByte(OP_JMP);
+        size_t patch_pos = code.size();
+        emitU32(0);
+        continue_Fixups.back().push_back(patch_pos);
         return;
     }
 
@@ -2376,7 +2456,8 @@ void BytecodeCompiler::parseStatement() {
     match(TOK_SEMI);
     emitByte(OP_POP);
     if (cur == before && peek().kind != TOK_EOF) {
-        advance();
+        reportError(peek().line, "Синтаксическая ошибка: непредвиденная инструкция '" + peek().text + "'!");
+        synchronize();
     }
 }
 
@@ -2436,7 +2517,7 @@ void BytecodeCompiler::parseStructDefinition() {
         // 1. C-style: string name; или int hp;
         // 2. RoadMap-style: hp: u32, или x: u64
         string f_type, f_name;
-        if (peek(1).kind == TOK_ASSIGN) { // ':' транслируется в лексере в TOK_ASSIGN
+        if (peek(1).kind == TOK_ASSIGN || peek(1).kind == TOK_COLON) {
             f_name = advance().text;
             advance(); // consume ':' / '='
             f_type = advance().text;
@@ -2540,10 +2621,8 @@ void BytecodeCompiler::parseVFSBody() {
         } else if (match(TOK_SEMI)) {
             continue;
         } else {
-            bool saved = inside_function;
-            inside_function = true;
+            FunctionContextGuard vfs_guard(inside_function, true);
             parseStatement();
-            inside_function = saved;
         }
     }
 }
