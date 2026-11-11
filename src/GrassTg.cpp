@@ -84,7 +84,7 @@ std::string GrassTg::httpGet(const std::string& url) {
             dup2(devnull, STDERR_FILENO);
             close(devnull);
         }
-        execlp("curl", "curl", "-s", "-k", url.c_str(), (char*)NULL);
+        execlp("curl", "curl", "-s", url.c_str(), (char*)NULL);
         _exit(127);
     } else if (pid > 0) {
         close(pipefd[1]);

@@ -22,6 +22,10 @@
 #include <vector>
 #include <map>
 #include <thread>
+#include <filesystem>
+#include <algorithm>
+
+namespace fs = std::filesystem;
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -822,8 +826,54 @@ void GrassWeb_LoadPage(const string& filename) {
                 if (path == "/") path = "/" + filename;
                 string target_file = path.substr(1);
 
+                // URL decoding to prevent %2e%2e bypass
+                auto url_decode = [](const string& in) -> string {
+                    string out;
+                    for (size_t i = 0; i < in.length(); ++i) {
+                        if (in[i] == '%' && i + 2 < in.length() && isxdigit((unsigned char)in[i+1]) && isxdigit((unsigned char)in[i+2])) {
+                            int ch = 0;
+                            sscanf(in.substr(i+1, 2).c_str(), "%x", &ch);
+                            out += (char)ch;
+                            i += 2;
+                        } else if (in[i] == '+') {
+                            out += ' ';
+                        } else {
+                            out += in[i];
+                        }
+                    }
+                    return out;
+                };
+
+                string decoded_target = url_decode(target_file);
+
                 // Path Traversal Check (SEC-02)
-                if (target_file.find("..") != string::npos || target_file.find(':') != string::npos || target_file.find('\\') != string::npos) {
+                bool is_safe = true;
+                if (decoded_target.empty() ||
+                    decoded_target.find("..") != string::npos ||
+                    decoded_target.find(':') != string::npos ||
+                    decoded_target.find('\\') != string::npos ||
+                    decoded_target.find('/') == 0) {
+                    is_safe = false;
+                } else {
+                    try {
+                        std::error_code ec;
+                        fs::path cur_root = fs::current_path(ec);
+                        fs::path resolved = fs::weakly_canonical(cur_root / decoded_target, ec);
+                        string root_s = cur_root.lexically_normal().string();
+                        string res_s = resolved.lexically_normal().string();
+                        #if defined(_WIN32)
+                        std::transform(root_s.begin(), root_s.end(), root_s.begin(), ::tolower);
+                        std::transform(res_s.begin(), res_s.end(), res_s.begin(), ::tolower);
+                        #endif
+                        if (ec || res_s.rfind(root_s, 0) != 0) {
+                            is_safe = false;
+                        }
+                    } catch (...) {
+                        is_safe = false;
+                    }
+                }
+
+                if (!is_safe) {
                     string http_response =
                         "HTTP/1.1 403 Forbidden\r\n"
                         "Content-Type: text/plain; charset=UTF-8\r\n"

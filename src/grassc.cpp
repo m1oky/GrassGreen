@@ -2945,7 +2945,7 @@ struct CompilerOptions {
     bool emit_kernel = false;        // --kernel (.bin)
     bool emit_sys = false;           // --sys (.sys)
     bool emit_iso = false;           // --iso (.iso)
-    bool run_after_build = true;     // ./!, --run, -r, или по умолчанию для скриптов
+    bool run_after_build = false;    // ./!, --run, -r (по умолчанию false: не запускать автоматически)
     bool explicit_run = false;
     int opt_level = 2;               // -O0, -O1, -O2, -O3 (default: 2)
     bool dump_ast = false;           // --dump-ast
@@ -3210,12 +3210,9 @@ bool ProcessCompilation(CompilerOptions& opt) {
 
     string input_path = opt.input_file;
     if (input_path.empty()) {
-        input_path = FindDefaultGrassFile();
-        if (input_path.empty()) {
-            if (opt.lang_ru) cerr << "[GrassError]: Не указан входной файл .grass. Используйте 'grg -h' для справки.\n";
-            else cerr << "[GrassError]: No .grass input file specified. Use 'grg -h' for help.\n";
-            return false;
-        }
+        if (opt.lang_ru) cerr << "[GrassError]: Не указан входной файл .grass. Используйте 'grg -h' для справки.\n";
+        else cerr << "[GrassError]: No .grass input file specified. Use 'grg -h' for help.\n";
+        return false;
     }
 
     if (input_path.find('.') == string::npos) {
@@ -3405,8 +3402,8 @@ bool ProcessCompilation(CompilerOptions& opt) {
             cout << "[GrassCompiler]: Compiled " << compiler.code.size()
                  << " bytes of pure bytecode -> " << out_file << "\n";
         }
-    } else {
-        // -emit-exe или упаковка в .exe
+    } else if (opt.emit_exe || (!opt.output_file.empty() && opt.output_file.size() >= 4 && opt.output_file.substr(opt.output_file.size() - 4) == ".exe")) {
+        // -emit-exe или явный вывод в .exe
         string out_file = opt.output_file.empty() ? (base_name + ".exe") : opt.output_file;
         bool packed_ok = BuildStandaloneExe(out_file, compiler.code);
         if (packed_ok) {
@@ -3416,6 +3413,17 @@ bool ProcessCompilation(CompilerOptions& opt) {
             } else {
                 cout << "[GrassCompiler]: Compiled " << compiler.code.size()
                      << " bytes of bytecode -> " << out_file << "\n";
+            }
+        }
+    } else {
+        // Обычная компиляция без неявной упаковки в .exe
+        if (!opt.run_after_build) {
+            if (opt.lang_ru) {
+                cout << "[GrassCompiler]: Успешная компиляция (" << compiler.code.size()
+                     << " байт). Для запуска укажите -r, для упаковки .exe укажите -emit-exe.\n";
+            } else {
+                cout << "[GrassCompiler]: Compilation successful (" << compiler.code.size()
+                     << " bytes). Use -r to run, or -emit-exe to package executable.\n";
             }
         }
     }
@@ -3535,6 +3543,7 @@ int main(int argc, char* argv[]) {
                 if (!opt.explicit_run) opt.run_after_build = false;
             } else if (arg == "--dump-ast") {
                 opt.dump_ast = true;
+                opt.run_after_build = false;
             } else if (arg == "--time") {
                 opt.print_timing = true;
             } else if (arg == "--multiboot") {
@@ -3574,7 +3583,8 @@ int main(int argc, char* argv[]) {
                     return 1;
                 }
             } else if (!arg.empty() && arg[0] == '-') {
-                cerr << (opt.lang_ru ? "[GrassWarning]: Неизвестный флаг: " : "[GrassWarning]: Unknown flag: ") << arg << "\n";
+                cerr << (opt.lang_ru ? "[GrassError]: Неизвестный флаг: " : "[GrassError]: Unknown flag: ") << arg << "\n";
+                return 1;
             } else {
                 opt.input_file = arg;
             }
@@ -3593,6 +3603,12 @@ int main(int argc, char* argv[]) {
         if (opt.install) {
             InstallGrassGreenEcosystem();
             return 0;
+        }
+
+        if (opt.input_file.empty()) {
+            cerr << (opt.lang_ru ? "[GrassError]: Не указан входной файл .grass. Используйте 'grg -h' для справки.\n"
+                                 : "[GrassError]: No .grass input file specified. Use 'grg -h' for help.\n");
+            return 1;
         }
 
         bool comp_ok = ProcessCompilation(opt);
