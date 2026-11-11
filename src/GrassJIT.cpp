@@ -311,27 +311,26 @@ namespace GrassJIT {
         return s;
     }
 
-    // Анализ и компиляция цикла в x86_64 машинный код
-    std::shared_ptr<CompiledJitBlock> tryCompileLoop(
+    // BUG-03 / JIT-01 & BUG-04 / JIT-02:
+    // Анализатор допустимости цикла для JIT-компиляции
+    bool isLoopJITCandidate(
         const std::vector<uint8_t>& code,
         uint32_t loop_start,
         uint32_t loop_end,
-        const std::unordered_map<std::string, GrassValue>& current_vars
+        int& max_stack_depth,
+        uint32_t& loop_exit_ip,
+        std::unordered_map<std::string, int>& var_slot_map
     ) {
-        if (!g_jit_enabled) return nullptr;
-        if (loop_start >= loop_end || loop_end > code.size()) return nullptr;
+        if (!g_jit_enabled) return false;
+        if (loop_start >= loop_end || loop_end > code.size()) return false;
 
-        auto t0 = std::chrono::high_resolution_clock::now();
-
-        // 1. Проверка допустимости инструкций внутри цикла
-        std::unordered_map<std::string, int> var_slot_map;
+        var_slot_map.clear();
         int next_slot = 0;
-
         size_t ip = loop_start;
         bool has_back_jump = false;
-        uint32_t loop_exit_ip = 0;
+        loop_exit_ip = 0;
         int stack_depth = 0;
-        int max_stack_depth = 0;
+        max_stack_depth = 0;
 
         while (ip < loop_end) {
             uint8_t op = code[ip++];
@@ -339,27 +338,28 @@ namespace GrassJIT {
                 case OP_NOP:
                     break;
                 case OP_CONST_NUM:
-                    if (ip + 8 > loop_end) return nullptr;
+                    if (ip + 8 > loop_end) return false;
                     ip += 8;
                     stack_depth++;
                     if (stack_depth > max_stack_depth) max_stack_depth = stack_depth;
                     break;
                 case OP_LOAD_VAR: {
                     std::string name = readStringAt(code, ip);
-                    if (name.empty()) return nullptr;
+                    if (name.empty()) return false;
                     if (!var_slot_map.count(name)) {
-                        if (next_slot >= 120) return nullptr; // лимит слотов
+                        if (next_slot >= 120) return false; // лимит слотов
                         var_slot_map[name] = next_slot++;
                     }
                     stack_depth++;
                     if (stack_depth > max_stack_depth) max_stack_depth = stack_depth;
                     break;
                 }
-                case OP_STORE_VAR: {
+                case OP_STORE_VAR:
+                case OP_DEF_VAR: {
                     std::string name = readStringAt(code, ip);
-                    if (name.empty()) return nullptr;
+                    if (name.empty()) return false;
                     if (!var_slot_map.count(name)) {
-                        if (next_slot >= 120) return nullptr;
+                        if (next_slot >= 120) return false;
                         var_slot_map[name] = next_slot++;
                     }
                     if (stack_depth > 0) stack_depth--;
@@ -368,9 +368,9 @@ namespace GrassJIT {
                 case OP_INC_VAR:
                 case OP_DEC_VAR: {
                     std::string name = readStringAt(code, ip);
-                    if (name.empty()) return nullptr;
+                    if (name.empty()) return false;
                     if (!var_slot_map.count(name)) {
-                        if (next_slot >= 120) return nullptr;
+                        if (next_slot >= 120) return false;
                         var_slot_map[name] = next_slot++;
                     }
                     break;
@@ -379,7 +379,7 @@ namespace GrassJIT {
                 case OP_SUB_CONST:
                 case OP_MUL_CONST:
                 case OP_DIV_CONST:
-                    if (ip + 8 > loop_end) return nullptr;
+                    if (ip + 8 > loop_end) return false;
                     ip += 8;
                     break;
                 case OP_ADD:
@@ -389,8 +389,8 @@ namespace GrassJIT {
                     if (stack_depth > 0) stack_depth--;
                     break;
                 case OP_MOD:
-                    // Опкод остатка от деления не поддерживается x86_64 JIT (требует fmod) — отдаем интерпретатору VM
-                    return nullptr;
+                    // BUG-04 / JIT-02: Опкод остатка от деления не поддерживается x86_64 JIT — отклоняем для ВМ
+                    return false;
                 case OP_POP:
                     if (stack_depth > 0) stack_depth--;
                     break;
@@ -403,7 +403,7 @@ namespace GrassJIT {
                     if (stack_depth > 0) stack_depth--;
                     break;
                 case OP_JMP_IF_FALSE: {
-                    if (ip + 4 > loop_end) return nullptr;
+                    if (ip + 4 > loop_end) return false;
                     uint32_t exit_tgt = readU32LE(&code[ip]);
                     ip += 4;
                     if (loop_exit_ip == 0) loop_exit_ip = exit_tgt;
@@ -411,33 +411,57 @@ namespace GrassJIT {
                     break;
                 }
                 case OP_JMP: {
-                    if (ip + 4 > loop_end) return nullptr;
+                    if (ip + 4 > loop_end) return false;
                     uint32_t tgt = readU32LE(&code[ip]);
                     ip += 4;
                     if (tgt == loop_start) {
                         has_back_jump = true;
                     } else if (tgt < loop_start || tgt >= loop_end) {
                         // Прыжок наружу — не является замкнутым циклом while
-                        return nullptr;
+                        return false;
                     }
                     break;
                 }
                 default:
-                    // Если цикл содержит неизвестные или сложные опкоды (IO, UI, системные вызовы)
-                    return nullptr;
+                    // Если цикл содержит неизвестные или не JIT опкоды
+                    return false;
             }
         }
 
-        if (!has_back_jump || loop_exit_ip == 0) return nullptr;
-        // Защита от разрушения вычислений при глубине стека выражений > 2 (лимит xmm0/xmm1)
-        if (max_stack_depth > 2) return nullptr;
+        if (!has_back_jump || loop_exit_ip == 0) return false;
+        // BUG-03 / JIT-01: Защита от разрушения вычислений при глубине стека выражений > 2 (лимит xmm0/xmm1)
+        if (max_stack_depth > 2) return false;
+
+        return true;
+    }
+
+    // Анализ и компиляция цикла в x86_64 машинный код
+    std::shared_ptr<CompiledJitBlock> tryCompileLoop(
+        const std::vector<uint8_t>& code,
+        uint32_t loop_start,
+        uint32_t loop_end,
+        const std::unordered_map<std::string, GrassValue>& current_vars
+    ) {
+        if (!g_jit_enabled) return nullptr;
+        if (loop_start >= loop_end || loop_end > code.size()) return nullptr;
+
+        auto t0 = std::chrono::high_resolution_clock::now();
+
+        // 1. Проверка допустимости инструкций внутри цикла через анализатор isLoopJITCandidate
+        std::unordered_map<std::string, int> var_slot_map;
+        int max_stack_depth = 0;
+        uint32_t loop_exit_ip = 0;
+
+        if (!isLoopJITCandidate(code, loop_start, loop_end, max_stack_depth, loop_exit_ip, var_slot_map)) {
+            return nullptr;
+        }
 
         // 2. Генерация машинного кода x86_64
         X64Assembler x64;
         size_t x64_loop_start = x64.cur_pos();
         std::vector<size_t> exit_jumps;
 
-        ip = loop_start;
+        size_t ip = loop_start;
         uint8_t pending_cmp = 0; // Сохраняем последний оператор сравнения для слияния с jmp_if_false
 
         while (ip < loop_end) {
@@ -460,7 +484,8 @@ namespace GrassJIT {
                     x64.movsd_xmm0_mrcx(slot * 8);
                     break;
                 }
-                case OP_STORE_VAR: {
+                case OP_STORE_VAR:
+                case OP_DEF_VAR: {
                     std::string name = readStringAt(code, ip);
                     int slot = var_slot_map[name];
                     x64.movsd_mrcx_xmm0(slot * 8);

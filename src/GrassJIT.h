@@ -50,6 +50,17 @@ namespace GrassJIT {
     // Освобождение ресурсов JIT
     void shutdown();
 
+    // BUG-03 / JIT-01 & BUG-04 / JIT-02:
+    // Анализатор допустимости цикла для JIT-компиляции (проверка глубины стека <= 2 и запрет OP_MOD)
+    bool isLoopJITCandidate(
+        const std::vector<uint8_t>& code,
+        uint32_t loop_start,
+        uint32_t loop_end,
+        int& max_stack_depth,
+        uint32_t& loop_exit_ip,
+        std::unordered_map<std::string, int>& var_slot_map
+    );
+
     // Включение / выключение JIT в рантайме
     void set_enabled(bool enable);
     bool is_enabled();

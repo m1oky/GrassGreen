@@ -83,8 +83,14 @@ class GrassVM {
     const vector<uint8_t>& code;
     size_t ip = 0;
     vector<GrassValue> stack;
-    vector<size_t> call_stack;
-    vector<unordered_map<string, GrassValue>> local_frames;
+
+    // BUG-02 / VM-01: Стек фреймов вызова CallFrame
+    struct CallFrame {
+        size_t return_ip = 0;
+        unordered_map<string, GrassValue> locals;
+    };
+    vector<CallFrame> frames;
+
     unordered_map<string, GrassValue> vars;
     shared_ptr<GrassSharedEnv> shared_env;
     bool is_root_vm = true;
@@ -97,7 +103,14 @@ class GrassVM {
     bool tryRunJitLoop(uint32_t loop_start, uint32_t loop_end) {
         if (failed_loops.count(loop_start)) return false;
 
-        auto& active_vars = local_frames.empty() ? ((is_root_vm && shared_env) ? shared_env->vars : vars) : local_frames.back();
+        // BUG-17: Защита доступа к shared_env->vars мьютексом
+        bool is_shared = (frames.size() <= 1) && is_root_vm && (shared_env != nullptr);
+        std::unique_lock<std::mutex> lk;
+        if (is_shared) {
+            lk = std::unique_lock<std::mutex>(shared_env->mtx);
+        }
+
+        auto& active_vars = frames.empty() ? ((is_root_vm && shared_env) ? shared_env->vars : vars) : frames.back().locals;
         auto jit_it = jit_cache.find(loop_start);
         if (jit_it != jit_cache.end()) {
             GrassJIT::executeJitBlock(jit_it->second, active_vars);
@@ -216,9 +229,8 @@ public:
             shared_env = make_shared<GrassSharedEnv>();
         }
         stack.reserve(512);
-        call_stack.reserve(128);
-        local_frames.reserve(64);
-        local_frames.push_back({}); // Уровень 0 (глобальная область видимости)
+        frames.reserve(64);
+        frames.push_back({0, {}}); // Уровень 0 (глобальная область видимости)
         vars.reserve(128);
         heap_arrays.reserve(64);
     }
@@ -388,10 +400,10 @@ public:
         {
             string name = readString();
             bool done = false;
-            if (!local_frames.empty() && local_frames.back().count(name)) {
-                double n = local_frames.back()[name].toNumber() + 1.0;
-                local_frames.back()[name] = GrassValue::Num(n);
-                if (is_root_vm && local_frames.size() <= 2 && shared_env) {
+            if (!frames.empty() && frames.back().locals.count(name)) {
+                double n = frames.back().locals[name].toNumber() + 1.0;
+                frames.back().locals[name] = GrassValue::Num(n);
+                if (is_root_vm && frames.size() == 2 && shared_env && name.rfind("g_", 0) == 0) {
                     std::lock_guard<std::mutex> lk(shared_env->mtx);
                     if (shared_env->vars.count(name)) shared_env->vars[name] = GrassValue::Num(n);
                 }
@@ -406,8 +418,8 @@ public:
                 }
             }
             if (!done) {
-                if (!local_frames.empty()) {
-                    local_frames.back()[name] = GrassValue::Num(1.0);
+                if (!frames.empty()) {
+                    frames.back().locals[name] = GrassValue::Num(1.0);
                 } else {
                     vars[name] = GrassValue::Num(1.0);
                 }
@@ -420,10 +432,10 @@ public:
         {
             string name = readString();
             bool done = false;
-            if (!local_frames.empty() && local_frames.back().count(name)) {
-                double n = local_frames.back()[name].toNumber() - 1.0;
-                local_frames.back()[name] = GrassValue::Num(n);
-                if (is_root_vm && local_frames.size() <= 2 && shared_env) {
+            if (!frames.empty() && frames.back().locals.count(name)) {
+                double n = frames.back().locals[name].toNumber() - 1.0;
+                frames.back().locals[name] = GrassValue::Num(n);
+                if (is_root_vm && frames.size() == 2 && shared_env && name.rfind("g_", 0) == 0) {
                     std::lock_guard<std::mutex> lk(shared_env->mtx);
                     if (shared_env->vars.count(name)) shared_env->vars[name] = GrassValue::Num(n);
                 }
@@ -438,8 +450,8 @@ public:
                 }
             }
             if (!done) {
-                if (!local_frames.empty()) {
-                    local_frames.back()[name] = GrassValue::Num(-1.0);
+                if (!frames.empty()) {
+                    frames.back().locals[name] = GrassValue::Num(-1.0);
                 } else {
                     vars[name] = GrassValue::Num(-1.0);
                 }
@@ -476,8 +488,7 @@ public:
 
     do_call_func: {
         uint32_t target_ip = readU32();
-        call_stack.push_back(ip);
-        local_frames.push_back({}); // Создаем новый локальный фрейм вызова
+        frames.push_back({ip, {}}); // Создаем новый локальный фрейм вызова
         ip = target_ip;
         DISPATCH_STEP();
     }
@@ -486,12 +497,9 @@ public:
         if (!stack.empty()) {
             last_return_value = stack.back();
         }
-        if (!call_stack.empty()) {
-            ip = call_stack.back();
-            call_stack.pop_back();
-            if (local_frames.size() > 1) {
-                local_frames.pop_back(); // Уничтожаем локальный фрейм завершенной функции
-            }
+        if (frames.size() > 1) {
+            ip = frames.back().return_ip;
+            frames.pop_back(); // Уничтожаем локальный фрейм завершенной функции
         } else {
             return;
         }
@@ -504,10 +512,10 @@ public:
             bool found = false;
             GrassValue val;
             // 1. Поиск в текущем локальном фрейме функции
-            if (!local_frames.empty()) {
-                auto it = local_frames.back().find(name);
-                if (it != local_frames.back().end()) {
-                    if (is_root_vm && local_frames.size() <= 2 && shared_env) {
+            if (!frames.empty()) {
+                auto it = frames.back().locals.find(name);
+                if (it != frames.back().locals.end()) {
+                    if (is_root_vm && frames.size() == 2 && shared_env && name.rfind("g_", 0) == 0) {
                         std::lock_guard<std::mutex> lk(shared_env->mtx);
                         auto sit = shared_env->vars.find(name);
                         if (sit != shared_env->vars.end()) {
@@ -531,9 +539,9 @@ public:
                 }
             }
             // 3. Поиск в глобальном фрейме (уровень 0)
-            if (!found && !local_frames.empty()) {
-                auto it = local_frames[0].find(name);
-                if (it != local_frames[0].end()) {
+            if (!found && !frames.empty()) {
+                auto it = frames[0].locals.find(name);
+                if (it != frames[0].locals.end()) {
                     val = it->second;
                     found = true;
                 }
@@ -567,15 +575,17 @@ public:
         {
             string name = readString();
             GrassValue val = pop();
-            if (!is_root_vm || local_frames.size() > 2) {
-                if (!local_frames.empty()) {
-                    local_frames.back()[name] = std::move(val);
-                } else {
-                    vars[name] = std::move(val);
+            if (frames.size() > 1) {
+                frames.back().locals[name] = val;
+                if (is_root_vm && frames.size() == 2 && shared_env && name.rfind("g_", 0) == 0) {
+                    std::lock_guard<std::mutex> lk(shared_env->mtx);
+                    shared_env->vars[name] = val;
                 }
             } else {
-                if (!local_frames.empty()) {
-                    local_frames.back()[name] = val;
+                if (!frames.empty()) {
+                    frames[0].locals[name] = val;
+                } else {
+                    vars[name] = val;
                 }
                 if (shared_env) {
                     std::lock_guard<std::mutex> lk(shared_env->mtx);
@@ -591,9 +601,9 @@ public:
             string name = readString();
             GrassValue val = pop();
             // 1. Если переменная есть в текущем локальном фрейме функции
-            if (!local_frames.empty() && local_frames.back().count(name)) {
-                local_frames.back()[name] = val;
-                if (is_root_vm && local_frames.size() <= 2 && shared_env) {
+            if (!frames.empty() && frames.back().locals.count(name)) {
+                frames.back().locals[name] = val;
+                if (is_root_vm && frames.size() == 2 && shared_env && name.rfind("g_", 0) == 0) {
                     std::lock_guard<std::mutex> lk(shared_env->mtx);
                     if (shared_env->vars.count(name)) {
                         shared_env->vars[name] = val;
@@ -611,16 +621,16 @@ public:
                     }
                 }
                 if (!in_shared) {
-                    if (!local_frames.empty()) {
-                        local_frames.back()[name] = std::move(val);
+                    if (!frames.empty()) {
+                        frames.back().locals[name] = std::move(val);
                     } else {
                         vars[name] = std::move(val);
                     }
                 }
             } else {
                 // 3. Fallback в локальный фрейм
-                if (!local_frames.empty()) {
-                    local_frames.back()[name] = std::move(val);
+                if (!frames.empty()) {
+                    frames.back().locals[name] = std::move(val);
                 } else {
                     vars[name] = std::move(val);
                 }
