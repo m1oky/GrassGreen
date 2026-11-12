@@ -19,3 +19,7 @@ installer/payload_data.h
 tools/*.exe
 *.tmp
 *.log
+*.bmp
+*.ppm
+*.iso
+*.grassc

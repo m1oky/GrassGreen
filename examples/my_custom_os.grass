@@ -1,0 +1,70 @@
+!GrassGreen!
+!interface!
+!baremetal!
+!sys!
+
+int main() {
+    window {
+        surface("freestanding");
+        auto_size_display();
+        title("Моя кастомная ОС");
+        color("#09090b");
+        theme("emerald");
+        border-radius-app(16);
+
+        header("dots") {
+            title("My Sovereign OS — v1.0");
+            color("#0f172a");
+            text-color("#22c55e");
+        }
+
+        tab = "desktop" {
+            label "Добро пожаловать в мою ОС!" {
+                window-ob(50, 60);
+                size(500, 36);
+                text-color("#22c55e");
+                font-size(20);
+                font-style("Segoe UI");
+                glow("#22c55e", 8);
+            }
+
+            button "Открыть терминал" {
+                window-ob(50, 120);
+                size(240, 44);
+                button-color("#162b2e");
+                text-color("#00ffcc");
+                radius(12);
+                click-switch("terminal");
+            }
+
+            button "Файловый менеджер" {
+                window-ob(310, 120);
+                size(240, 44);
+                button-color("#1e2230");
+                text-color("#38bdf8");
+                radius(12);
+                click-switch("files");
+            }
+        }
+
+        tab = "terminal" {
+            label "Терминал ядра GrassGreen" {
+                window-ob(50, 60);
+                size(400, 30);
+                text-color("#f8fafc");
+            }
+
+            button "Назад на рабочий стол" {
+                window-ob(50, 380);
+                size(220, 40);
+                button-color("#2a1820");
+                text-color("#ef4444");
+                radius(10);
+                click-switch("desktop");
+            }
+        }
+
+        show();
+    }
+    return 0;
+}

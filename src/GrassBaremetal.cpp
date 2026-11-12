@@ -572,12 +572,12 @@ namespace GrassBaremetal {
 
     void vd_desktop() {
         clear();
-        std::cout << " [ GrassGreen VD+ Desktop Engine v4.3.0 | RQWos Core ] \n";
+        std::cout << " [ GrassGreen VD+ Desktop Engine v4.3.0 | GrassGreen Core ] \n";
         std::cout << "╔══════════════════════════════════════════════════════════════════════════════╗\n";
         std::cout << "║  [* 1. СИСТЕМА *]       [ 2. ФАЙЛЫ ]       [ 3. ЖЕЛЕЗО ]                     ║\n";
         std::cout << "╠══════════════════════════════════════════════════════════════════════════════╣\n";
         std::cout << "║                                                                              ║\n";
-        std::cout << "║  Операционная система:  RQWos (GrassGreen Kernel v4.3.0)                     ║\n";
+        std::cout << "║  Операционная система:  GrassGreen Sovereign OS (Kernel v4.4.0)                     ║\n";
         std::cout << "║  Графическая среда:     VD+ (Vector Display Plus TUI/GUI Engine)             ║\n";
         std::cout << "║  Файловая система:      RamFS (Виртуальная структура активна)                ║\n";
         std::cout << "║  Текущий путь:          " << vfs_pwd() << "\n";
@@ -596,7 +596,7 @@ namespace GrassBaremetal {
         if (trimmed.empty()) return true;
 
         if (trimmed == "help") {
-            std::cout << "Команды системы RQWos (GrassGreen Baremetal v4.3.0):\n";
+            std::cout << "Команды системы GrassGreen (Baremetal v4.4.0):\n";
             std::cout << "  ls [-a]     - Список файлов и папок в директории\n";
             std::cout << "  cd <папка>  - Перейти в папку (напр.: cd system, cd .., cd /)\n";
             std::cout << "  pwd         - Показать текущую рабочую директорию\n";

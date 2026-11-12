@@ -12,8 +12,242 @@
 #include <iomanip>
 #include <cstring>
 #include <algorithm>
+#include <sstream>
 
 namespace GrassBoot {
+
+    struct KernelWidget {
+        std::string type;       // "button", "label", "enter"
+        std::string tab_name;   // к какой вкладке принадлежит
+        std::string text;       // текст
+        int x = 0;              // координата X
+        int y = 0;              // координата Y
+        int w = 100;            // ширина
+        int h = 30;             // высота
+        uint32_t bg_color = 0x00162B2E;    // цвет фона
+        uint32_t text_color = 0x00FFFFFF;  // цвет текста
+        int radius = 0;                    // скругление
+        int font_size = 16;                // размер шрифта
+        std::string click_tab;             // имя вкладки для click-switch
+    };
+
+    struct KernelWindow {
+        bool has_window = false;
+        std::string title = "GrassGreen OS";
+        int width = 1024;
+        int height = 768;
+        uint32_t bg_color = 0x0009090B;
+        std::string header_style = "dots";
+        std::string header_title = "";
+        uint32_t header_bg = 0x000F172A;
+        uint32_t header_text_col = 0x0022C55E;
+        int header_height = 38;
+        std::string current_tab = "";
+        std::vector<KernelWidget> widgets;
+        std::vector<std::string> tabs;
+    };
+
+    static inline std::string extract_bracket_content(const std::string& str, const std::string& open_tag = "!!", const std::string& close_tag = "!!") {
+        size_t start = str.find(open_tag);
+        if (start != std::string::npos) {
+            size_t end = str.rfind(close_tag);
+            if (end != std::string::npos && end > start) {
+                return str.substr(start + open_tag.length(), end - start - open_tag.length());
+            }
+        }
+        size_t p1 = str.find('(');
+        size_t p2 = str.rfind(')');
+        if (p1 != std::string::npos && p2 != std::string::npos && p2 > p1) {
+            std::string inside = str.substr(p1 + 1, p2 - p1 - 1);
+            while (!inside.empty() && (inside.front() == '"' || inside.front() == '\'')) inside.erase(0, 1);
+            while (!inside.empty() && (inside.back() == '"' || inside.back() == '\'')) inside.pop_back();
+            return inside;
+        }
+        return "";
+    }
+
+    static inline uint32_t parse_color_str(std::string str) {
+        while (!str.empty() && (str.front() == ' ' || str.front() == '(' || str.front() == '"' || str.front() == '\'')) str.erase(0, 1);
+        while (!str.empty() && (str.back() == ' ' || str.back() == ')' || str.back() == '"' || str.back() == '\'')) str.pop_back();
+        if (str.empty()) return 0x00FFFFFF;
+
+        if (str == "emerald") return 0x0010B981;
+        if (str == "dark")    return 0x0009090B;
+        if (str == "green")   return 0x0022C55E;
+        if (str == "blue")    return 0x0038BDF8;
+        if (str == "white")   return 0x00FFFFFF;
+        if (str == "black")   return 0x00000000;
+        if (str == "red")     return 0x00EF4444;
+        if (str == "yellow")  return 0x00F59E0B;
+        if (str == "gray")    return 0x0064748B;
+        if (str == "slate")   return 0x000F172A;
+
+        if (str[0] == '#') str = str.substr(1);
+        if (str.length() == 3) {
+            std::string exp = "";
+            for (char c : str) { exp += c; exp += c; }
+            str = exp;
+        }
+        if (str.length() == 6) {
+            try {
+                unsigned long val = std::stoul(str, nullptr, 16);
+                return (uint32_t)(val & 0x00FFFFFF);
+            } catch (...) {}
+        }
+        return 0x00FFFFFF;
+    }
+
+    static inline void parse_two_ints(const std::string& str, int& a, int& b) {
+        size_t l = str.find('(');
+        size_t r = str.find(')');
+        std::string s = (l != std::string::npos && r != std::string::npos && r > l) ? str.substr(l + 1, r - l - 1) : str;
+        for (char& c : s) if (c == ',') c = ' ';
+        std::stringstream ss(s);
+        ss >> a >> b;
+    }
+
+    static void parse_gui_command_into_window(KernelWindow& kwin, const std::string& cmd_line) {
+        if (cmd_line.empty()) return;
+        kwin.has_window = true;
+
+        if (cmd_line.find("surface(") == 0) return;
+        if (cmd_line.find("auto_size_display") == 0) {
+            kwin.width = 1024;
+            kwin.height = 768;
+            return;
+        }
+        if (cmd_line.find("title(") == 0 || cmd_line.find("name(") == 0) {
+            std::string t = extract_bracket_content(cmd_line);
+            if (!t.empty()) kwin.title = t;
+            return;
+        }
+        if (cmd_line.find("color(") == 0 || cmd_line.find("bg(") == 0 || cmd_line.find("background(") == 0) {
+            std::string c = extract_bracket_content(cmd_line);
+            if (!c.empty()) kwin.bg_color = parse_color_str(c);
+            return;
+        }
+        if (cmd_line.find("theme(") == 0) {
+            std::string th = extract_bracket_content(cmd_line);
+            if (th == "emerald" || th == "dark") {
+                kwin.bg_color = 0x0009090B;
+            }
+            return;
+        }
+        if (cmd_line.find("border-radius-app(") == 0) return;
+
+        if (cmd_line.find("header-title(") == 0) {
+            std::string ht = extract_bracket_content(cmd_line);
+            if (!ht.empty()) kwin.header_title = ht;
+            return;
+        }
+        if (cmd_line.find("header-color(") == 0) {
+            std::string hc = extract_bracket_content(cmd_line);
+            if (!hc.empty()) kwin.header_bg = parse_color_str(hc);
+            return;
+        }
+        if (cmd_line.find("header-text-color(") == 0) {
+            std::string htc = extract_bracket_content(cmd_line);
+            if (!htc.empty()) kwin.header_text_col = parse_color_str(htc);
+            return;
+        }
+        if (cmd_line.find("header-height(") == 0) {
+            std::string hh = extract_bracket_content(cmd_line);
+            try { kwin.header_height = std::stoi(hh); } catch(...) {}
+            return;
+        }
+        if (cmd_line.find("header(") == 0) {
+            std::string hs = extract_bracket_content(cmd_line);
+            if (!hs.empty()) kwin.header_style = hs;
+            return;
+        }
+        if (cmd_line.find("tab(") == 0) {
+            std::string tb = extract_bracket_content(cmd_line);
+            if (tb == "main") {
+                kwin.current_tab = "";
+            } else if (!tb.empty()) {
+                if (std::find(kwin.tabs.begin(), kwin.tabs.end(), tb) == kwin.tabs.end()) {
+                    kwin.tabs.push_back(tb);
+                }
+                kwin.current_tab = tb;
+            }
+            return;
+        }
+        if (cmd_line.find("button ") == 0 || cmd_line.find("button!!") == 0) {
+            std::string txt = extract_bracket_content(cmd_line);
+            KernelWidget kw;
+            kw.type = "button";
+            kw.text = txt;
+            kw.tab_name = kwin.current_tab.empty() ? (!kwin.tabs.empty() ? kwin.tabs.back() : "desktop") : kwin.current_tab;
+            kw.x = 50; kw.y = 100; kw.w = 200; kw.h = 40;
+            kw.bg_color = 0x00162B2E;
+            kw.text_color = 0x0000FFCC;
+            kw.radius = 8;
+            kw.font_size = 16;
+            kwin.widgets.push_back(kw);
+            return;
+        }
+        if (cmd_line.find("label ") == 0 || cmd_line.find("label!!") == 0) {
+            std::string txt = extract_bracket_content(cmd_line);
+            KernelWidget kw;
+            kw.type = "label";
+            kw.text = txt;
+            kw.tab_name = kwin.current_tab.empty() ? (!kwin.tabs.empty() ? kwin.tabs.back() : "desktop") : kwin.current_tab;
+            kw.x = 50; kw.y = 60; kw.w = 400; kw.h = 30;
+            kw.bg_color = 0;
+            kw.text_color = 0x0022C55E;
+            kw.font_size = 18;
+            kwin.widgets.push_back(kw);
+            return;
+        }
+        if (cmd_line.find("enter ") == 0 || cmd_line.find("enter!!") == 0) {
+            std::string txt = extract_bracket_content(cmd_line);
+            KernelWidget kw;
+            kw.type = "enter";
+            kw.text = txt;
+            kw.tab_name = kwin.current_tab.empty() ? (!kwin.tabs.empty() ? kwin.tabs.back() : "desktop") : kwin.current_tab;
+            kw.x = 50; kw.y = 150; kw.w = 300; kw.h = 36;
+            kw.bg_color = 0x001E2230;
+            kw.text_color = 0x00F8FAFC;
+            kwin.widgets.push_back(kw);
+            return;
+        }
+
+        if (!kwin.widgets.empty()) {
+            auto& last = kwin.widgets.back();
+            if (cmd_line.find("window-ob(") == 0 || cmd_line.find("pos(") == 0) {
+                parse_two_ints(cmd_line, last.x, last.y);
+                return;
+            }
+            if (cmd_line.find("size(") == 0) {
+                parse_two_ints(cmd_line, last.w, last.h);
+                return;
+            }
+            if (cmd_line.find("button-color(") == 0) {
+                last.bg_color = parse_color_str(extract_bracket_content(cmd_line));
+                return;
+            }
+            if (cmd_line.find("text-color(") == 0) {
+                last.text_color = parse_color_str(extract_bracket_content(cmd_line));
+                return;
+            }
+            if (cmd_line.find("radius(") == 0) {
+                try { last.radius = std::stoi(extract_bracket_content(cmd_line)); } catch(...) {}
+                return;
+            }
+            if (cmd_line.find("font-size(") == 0) {
+                try { last.font_size = std::stoi(extract_bracket_content(cmd_line)); } catch(...) {}
+                return;
+            }
+            if (cmd_line.find("click-switch(") == 0) {
+                std::string sw = extract_bracket_content(cmd_line);
+                last.click_tab = sw;
+                if (!sw.empty() && std::find(kwin.tabs.begin(), kwin.tabs.end(), sw) == kwin.tabs.end()) {
+                    kwin.tabs.push_back(sw);
+                }
+                return;
+            }
+        }
+    }
 
     static inline void append_u8(std::vector<uint8_t>& buf, uint8_t val) {
         buf.push_back(val);
@@ -76,6 +310,77 @@ namespace GrassBoot {
         std::vector<uint8_t> bin_data;
         bin_data.reserve(65536);
 
+        KernelWindow g_kwin;
+        {
+            size_t ip = 0;
+            auto readU8_scan = [&]() -> uint8_t {
+                return (ip < bytecode.size()) ? bytecode[ip++] : 0;
+            };
+            auto readU32_scan = [&]() -> uint32_t {
+                if (ip + 4 > bytecode.size()) { ip = bytecode.size(); return 0; }
+                uint32_t val = (uint32_t)bytecode[ip] |
+                               ((uint32_t)bytecode[ip + 1] << 8) |
+                               ((uint32_t)bytecode[ip + 2] << 16) |
+                               ((uint32_t)bytecode[ip + 3] << 24);
+                ip += 4;
+                return val;
+            };
+            auto readString_scan = [&]() -> std::string {
+                uint32_t len = readU32_scan();
+                if (ip + len > bytecode.size()) { ip = bytecode.size(); return ""; }
+                std::string s((const char*)&bytecode[ip], len);
+                ip += len;
+                return s;
+            };
+            while (ip < bytecode.size()) {
+                uint8_t op = readU8_scan();
+                if (op == 0x70) { // OP_UI_INIT
+                    std::string t = readString_scan();
+                    uint32_t w = readU32_scan();
+                    uint32_t h = readU32_scan();
+                    std::string bg = readString_scan();
+                    std::string fon = readString_scan();
+                    g_kwin.has_window = true;
+                    if (!t.empty()) g_kwin.title = t;
+                    if (w > 0) g_kwin.width = w;
+                    if (h > 0) g_kwin.height = h;
+                    if (!bg.empty()) g_kwin.bg_color = parse_color_str(bg);
+                } else if (op == 0x73) { // OP_UI_CMD
+                    std::string cmd = readString_scan();
+                    parse_gui_command_into_window(g_kwin, cmd);
+                } else if (op == 0x71) { // OP_UI_ADD_ELEM
+                    std::string type = readString_scan();
+                    std::string id = readString_scan();
+                    std::string text = readString_scan();
+                    uint32_t x = readU32_scan();
+                    uint32_t y = readU32_scan();
+                    uint32_t w = readU32_scan();
+                    uint32_t h = readU32_scan();
+                    uint32_t align = readU32_scan();
+                    std::string color = readString_scan();
+                    uint32_t fsize = readU32_scan();
+                    std::string fstyle = readString_scan();
+                    uint8_t glass = readU8_scan();
+                    std::string run = readString_scan();
+                } else if (op == 0x01) {
+                    ip += 8;
+                } else if (op == 0x02 || op == 0x03 || op == 0x04 || op == 0x06 || op == 0x85 || op == 0x86 || op == 0x87) {
+                    readString_scan();
+                } else if (op == 0x10 || op == 0x11 || op == 0x12 || op == 0x30 || op == 0x31 || op == 0xF0 || op == 0xF1) {
+                    readU32_scan();
+                } else if (op == 0x32) {
+                    readU32_scan();
+                    readU8_scan();
+                } else if (op == 0x80) {
+                    readU32_scan();
+                } else if (op >= 0x90 && op <= 0x93) {
+                    ip += 8;
+                } else if (op >= 0x94 && op <= 0x95) {
+                    readString_scan();
+                }
+            }
+        }
+
         // 1.1. Multiboot 1 Header (32 байта)
         const uint32_t MULTIBOOT_MAGIC = 0x1BADB002;
         const uint32_t MULTIBOOT_FLAGS = 0x00010003;
@@ -127,6 +432,14 @@ namespace GrassBoot {
         // mov [0x00090004], ebx (Multiboot Info)
         append_u8(bin_data, 0x89); append_u8(bin_data, 0x1D);
         append_u32(bin_data, 0x00090004);
+
+        // --- 1.4. Dynamic Heap Initialization (0x00200000..0x07FFFFFF, 126 MB) ---
+        // KernelBlockHeader: magic (0x47474D4D), size (0x07DFFFF8), is_free (1), next (0), prev (0)
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00200000); append_u32(bin_data, 0x47474D4D);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00200004); append_u32(bin_data, 0x07DFFFE8);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00200008); append_u32(bin_data, 1);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0020000C); append_u32(bin_data, 0);
+        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00200010); append_u32(bin_data, 0);
 
         // --- Hardware Subsystem Auto-Detection (0x00091020..0x000910FF) ---
         // 1. RAM Detection from Multiboot Info
@@ -1383,17 +1696,17 @@ namespace GrassBoot {
                 };
                 static const DefaultFSEntry s_initial_fs[12] = {
                     { "system", "/", 1, 0, 0, "" },
-                    { "kernel.sys", "/system", 0, 0, 24, "GrassGreen Kernel v4.3.0" },
+                    { "kernel.sys", "/system", 0, 0, 24, "GrassGreen Kernel v4.4.0" },
                     { "config.sys", "/system", 0, 0, 35, "DISPLAY=VGA;MODE=TEXT_80X25;GUI=VD+" },
                     { "users", "/", 1, 0, 0, "" },
-                    { "readme.txt", "/users", 0, 0, 41, "Welcome to RQWos on GrassGreen Bare-Metal!" },
+                    { "readme.txt", "/users", 0, 0, 44, "Welcome to GrassGreen Sovereign Bare-Metal OS!" },
                     { "user_profile.json", "/users", 0, 0, 52, "{\"user\":\"m1oky\",\"theme\":\"dark\",\"accent\":\"#22c55e\"}" },
                     { "apps", "/", 1, 0, 0, "" },
                     { "calc.app", "/apps", 0, 0, 32, "GrassGreen Calculator v1.0" },
-                    { "notes.app", "/apps", 0, 0, 28, "RQWos Notes Editor v1.0" },
+                    { "editor.app", "/apps", 0, 0, 26, "GrassGreen Editor v1.0" },
                     { "data", "/", 1, 0, 0, "" },
                     { "user_profile.json", "/data", 0, 0, 68, "{\"user\":\"m1oky\",\"storage\":\"ata_persistent\",\"sound\":\"sb16\"}" },
-                    { "notes.txt", "/data", 0, 0, 62, "RQWos Baremetal OS Notes: ATA LBA28, RTL8139, SB16, CMOS RTC Active" }
+                    { "notes.txt", "/data", 0, 0, 68, "GrassGreen Sovereign Baremetal OS: ATA LBA28, RTL8139, SB16, CMOS RTC" }
                 };
                 for (int i = 0; i < 12; ++i) {
                     uint8_t buf[256];
@@ -2423,36 +2736,191 @@ namespace GrassBoot {
                 append_u32(bin_data, addr_draw_str - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
             };
 
-            // Entry point for helper_vd_desktop
+            // --- 8.20. Helper: addr_kmalloc (First-Fit Heap Allocator, ECX = requested bytes, returns EAX = payload ptr) ---
+            uint32_t addr_kmalloc = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x53); // push ebx
+            append_u8(bin_data, 0x56); // push esi
+            append_u8(bin_data, 0x57); // push edi
+            append_u8(bin_data, 0x52); // push edx
+
+            // Align requested size in ECX up to 8 bytes, min 8
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xC1); append_u8(bin_data, 0x07); // add ecx, 7
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xE1); append_u8(bin_data, 0xF8); // and ecx, ~7
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xF9); append_u8(bin_data, 0x08); // cmp ecx, 8
+            size_t jae_sz_ok = bin_data.size(); append_u8(bin_data, 0x73); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xB9); append_u32(bin_data, 8); // mov ecx, 8
+            size_t pos_sz_ok = bin_data.size();
+            bin_data[jae_sz_ok + 1] = (uint8_t)(pos_sz_ok - (jae_sz_ok + 2));
+
+            // ESI = Heap Start = 0x00200000
+            append_u8(bin_data, 0xBE); append_u32(bin_data, 0x00200000);
+
+            size_t loop_kmalloc_search = bin_data.size();
+            // Check magic == 0x47474D4D
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0x3E); append_u32(bin_data, 0x47474D4D);
+            size_t jne_kmalloc_fail = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            // Check if is_free == 1
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0x7E); append_u8(bin_data, 0x08); append_u8(bin_data, 1);
+            size_t jne_kmalloc_next = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            // EAX = block size
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x46); append_u8(bin_data, 0x04);
+            // cmp eax, ecx
+            append_u8(bin_data, 0x39); append_u8(bin_data, 0xC8);
+            size_t jb_kmalloc_next = bin_data.size(); append_u8(bin_data, 0x72); append_u8(bin_data, 0x00);
+
+            // Candidate found! Check if split: remaining = eax - ecx >= 40
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0xC2); // mov edx, eax
+            append_u8(bin_data, 0x29); append_u8(bin_data, 0xCA); // sub edx, ecx
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xFA); append_u8(bin_data, 40); // cmp edx, 40
+            size_t jb_kmalloc_nosplit = bin_data.size(); append_u8(bin_data, 0x72); append_u8(bin_data, 0x00);
+
+            // Split: EDI = ESI + 24 + ECX
+            append_u8(bin_data, 0x8D); append_u8(bin_data, 0x7C); append_u8(bin_data, 0x0E); append_u8(bin_data, 24);
+            // new->magic = 0x47474D4D
+            append_u8(bin_data, 0xC7); append_u8(bin_data, 0x07); append_u32(bin_data, 0x47474D4D);
+            // new->size = edx - 24
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xEA); append_u8(bin_data, 24);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0x57); append_u8(bin_data, 0x04);
+            // new->is_free = 1
+            append_u8(bin_data, 0xC7); append_u8(bin_data, 0x47); append_u8(bin_data, 0x08); append_u32(bin_data, 1);
+            // eax = cur->next
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x46); append_u8(bin_data, 0x0C);
+            // new->next = eax
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0x47); append_u8(bin_data, 0x0C);
+            // new->prev = esi
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0x77); append_u8(bin_data, 0x10);
+            // if (eax != 0) eax->prev = edi
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0);
+            size_t jz_no_old_next = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0x78); append_u8(bin_data, 0x10);
+            size_t pos_no_old_next = bin_data.size();
+            bin_data[jz_no_old_next + 1] = (uint8_t)(pos_no_old_next - (jz_no_old_next + 2));
+
+            // cur->next = edi
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0x7E); append_u8(bin_data, 0x0C);
+            // cur->size = ecx
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0x4E); append_u8(bin_data, 0x04);
+
+            size_t pos_kmalloc_nosplit = bin_data.size();
+            bin_data[jb_kmalloc_nosplit + 1] = (uint8_t)(pos_kmalloc_nosplit - (jb_kmalloc_nosplit + 2));
+            // cur->is_free = 0
+            append_u8(bin_data, 0xC7); append_u8(bin_data, 0x46); append_u8(bin_data, 0x08); append_u32(bin_data, 0);
+            // return ESI + 24
+            append_u8(bin_data, 0x8D); append_u8(bin_data, 0x46); append_u8(bin_data, 24);
+            append_u8(bin_data, 0x5A); append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E); append_u8(bin_data, 0x5B);
+            append_u8(bin_data, 0xC3);
+
+            // next_block:
+            size_t pos_kmalloc_next = bin_data.size();
+            bin_data[jne_kmalloc_next + 1] = (uint8_t)(pos_kmalloc_next - (jne_kmalloc_next + 2));
+            bin_data[jb_kmalloc_next + 1] = (uint8_t)(pos_kmalloc_next - (jb_kmalloc_next + 2));
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x76); append_u8(bin_data, 0x0C); // esi = cur->next
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xF6); // test esi, esi
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85); // jnz loop_kmalloc_search
+            append_u32(bin_data, (uint32_t)((int32_t)loop_kmalloc_search - (int32_t)(bin_data.size() + 4)));
+
+            // fail:
+            size_t pos_kmalloc_fail = bin_data.size();
+            bin_data[jne_kmalloc_fail + 1] = (uint8_t)(pos_kmalloc_fail - (jne_kmalloc_fail + 2));
+            append_u8(bin_data, 0x31); append_u8(bin_data, 0xC0); // xor eax, eax
+            append_u8(bin_data, 0x5A); append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E); append_u8(bin_data, 0x5B);
+            append_u8(bin_data, 0xC3);
+
+            // --- 8.21. Helper: addr_kfree (Bidirectional Coalescing Free, EAX = payload ptr) ---
+            uint32_t addr_kfree = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
+            append_u8(bin_data, 0x53); // push ebx
+            append_u8(bin_data, 0x56); // push esi
+            append_u8(bin_data, 0x57); // push edi
+            append_u8(bin_data, 0x52); // push edx
+
+            // Validate pointer: >= 0x00200018 and < 0x08000000
+            append_u8(bin_data, 0x3D); append_u32(bin_data, 0x00200018); // cmp eax, 0x00200018
+            size_t jb_kfree_done = bin_data.size(); append_u8(bin_data, 0x72); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x3D); append_u32(bin_data, 0x08000000); // cmp eax, 0x08000000
+            size_t jae_kfree_done = bin_data.size(); append_u8(bin_data, 0x73); append_u8(bin_data, 0x00);
+
+            // ESI = header = EAX - 24
+            append_u8(bin_data, 0x8D); append_u8(bin_data, 0x70); append_u8(bin_data, 0xE8); // lea esi, [eax - 24]
+            // cmp [esi], 0x47474D4D
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0x3E); append_u32(bin_data, 0x47474D4D);
+            size_t jne_kfree_done = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            // Mark free: mov dword ptr [esi + 8], 1
+            append_u8(bin_data, 0xC7); append_u8(bin_data, 0x46); append_u8(bin_data, 0x08); append_u32(bin_data, 1);
+
+            // 1. Coalesce with next block if free
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x7E); append_u8(bin_data, 0x0C); // edi = esi->next
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xFF); // test edi, edi
+            size_t jz_chk_prev = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0x3F); append_u32(bin_data, 0x47474D4D); // cmp [edi], magic
+            size_t jne_chk_prev = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0x7F); append_u8(bin_data, 0x08); append_u8(bin_data, 1); // cmp [edi+8], 1
+            size_t jne_chk_prev2 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            // esi->size += edi->size + 24
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x47); append_u8(bin_data, 0x04); // mov eax, [edi+4]
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xC0); append_u8(bin_data, 24);   // add eax, 24
+            append_u8(bin_data, 0x01); append_u8(bin_data, 0x46); append_u8(bin_data, 0x04); // add [esi+4], eax
+            // esi->next = edi->next
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x47); append_u8(bin_data, 0x0C); // mov eax, [edi+12]
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0x46); append_u8(bin_data, 0x0C); // mov [esi+12], eax
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0); // test eax, eax
+            size_t jz_chk_prev3 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0x70); append_u8(bin_data, 0x10); // mov [eax+16], esi (next->prev = esi)
+            size_t pos_chk_prev3 = bin_data.size();
+            bin_data[jz_chk_prev3 + 1] = (uint8_t)(pos_chk_prev3 - (jz_chk_prev3 + 2));
+
+            // check_prev:
+            size_t pos_chk_prev = bin_data.size();
+            bin_data[jz_chk_prev + 1] = (uint8_t)(pos_chk_prev - (jz_chk_prev + 2));
+            bin_data[jne_chk_prev + 1] = (uint8_t)(pos_chk_prev - (jne_chk_prev + 2));
+            bin_data[jne_chk_prev2 + 1] = (uint8_t)(pos_chk_prev - (jne_chk_prev2 + 2));
+
+            // 2. Coalesce with prev block if free
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x5E); append_u8(bin_data, 0x10); // ebx = esi->prev
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xDB); // test ebx, ebx
+            size_t jz_kfree_exit = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x81); append_u8(bin_data, 0x3B); append_u32(bin_data, 0x47474D4D); // cmp [ebx], magic
+            size_t jne_kfree_exit = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0x7B); append_u8(bin_data, 0x08); append_u8(bin_data, 1); // cmp [ebx+8], 1
+            size_t jne_kfree_exit2 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+
+            // ebx->size += esi->size + 24
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x46); append_u8(bin_data, 0x04); // mov eax, [esi+4]
+            append_u8(bin_data, 0x83); append_u8(bin_data, 0xC0); append_u8(bin_data, 24);   // add eax, 24
+            append_u8(bin_data, 0x01); append_u8(bin_data, 0x43); append_u8(bin_data, 0x04); // add [ebx+4], eax
+            // ebx->next = esi->next
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x46); append_u8(bin_data, 0x0C); // mov eax, [esi+12]
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0x43); append_u8(bin_data, 0x0C); // mov [ebx+12], eax
+            append_u8(bin_data, 0x85); append_u8(bin_data, 0xC0); // test eax, eax
+            size_t jz_kfree_exit3 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x89); append_u8(bin_data, 0x58); append_u8(bin_data, 0x10); // mov [eax+16], ebx (next->prev = ebx)
+            size_t pos_kfree_exit3 = bin_data.size();
+            bin_data[jz_kfree_exit3 + 1] = (uint8_t)(pos_kfree_exit3 - (jz_kfree_exit3 + 2));
+
+            size_t pos_kfree_done = bin_data.size();
+            bin_data[jb_kfree_done + 1] = (uint8_t)(pos_kfree_done - (jb_kfree_done + 2));
+            bin_data[jae_kfree_done + 1] = (uint8_t)(pos_kfree_done - (jae_kfree_done + 2));
+            bin_data[jne_kfree_done + 1] = (uint8_t)(pos_kfree_done - (jne_kfree_done + 2));
+            bin_data[jz_kfree_exit + 1] = (uint8_t)(pos_kfree_done - (jz_kfree_exit + 2));
+            bin_data[jne_kfree_exit + 1] = (uint8_t)(pos_kfree_done - (jne_kfree_exit + 2));
+            bin_data[jne_kfree_exit2 + 1] = (uint8_t)(pos_kfree_done - (jne_kfree_exit2 + 2));
+
+            append_u8(bin_data, 0x5A); append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E); append_u8(bin_data, 0x5B);
+            append_u8(bin_data, 0xC3);
+
+            // --- Dynamic Bare-Metal Desktop UI Helper (driven by g_kwin) ---
             uint32_t addr_vd_desktop = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
             append_u8(bin_data, 0x50); append_u8(bin_data, 0x53); append_u8(bin_data, 0x51);
             append_u8(bin_data, 0x52); append_u8(bin_data, 0x56); append_u8(bin_data, 0x57);
 
             // 1. Initialize Baremetal Hardware Subsystems
-            // RTL8139 PCI Fast Ethernet
-            append_u8(bin_data, 0xE8);
-            append_u32(bin_data, addr_rtl8139_init - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-
-            // Sound Blaster 16 DSP
-            append_u8(bin_data, 0xE8);
-            append_u32(bin_data, addr_sb16_init - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-
-            // CMOS RTC Hardware Clock
-            append_u8(bin_data, 0xE8);
-            append_u32(bin_data, addr_read_cmos_rtc - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-
-            // ATA Primary Master LBA28 Micro-FS Sync
-            append_u8(bin_data, 0xE8);
-            append_u32(bin_data, addr_ata_sync_fs - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-
-            // Play Boot Chime (Sound ID 4)
-            append_u8(bin_data, 0xB0); append_u8(bin_data, 4);
-            append_u8(bin_data, 0xE8);
-            append_u32(bin_data, addr_play_sound - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-
-            // Set Toast Notification active (1) and timer ticks (120)
-            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000913A0); append_u8(bin_data, 1);
-            append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x000913A4); append_u32(bin_data, 120);
+            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_rtl8139_init - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_sb16_init - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_read_cmos_rtc - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_ata_sync_fs - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
 
             // Read PCI BAR0 for BGA Linear Framebuffer (Bus 0, Dev 2, Func 0, Reg 0x10)
             append_u8(bin_data, 0xB8); append_u32(bin_data, 0x80001010);
@@ -2463,656 +2931,262 @@ namespace GrassBoot {
             append_u8(bin_data, 0x25); append_u32(bin_data, 0xFFFFFFF0);
             append_u8(bin_data, 0xA3); append_u32(bin_data, 0x00091390);
 
-            // Perfectly assembled Multiboot cmdline scan and BGA resolution select (bga_boot.bin)
-            static const uint8_t s_bga_boot_bin[146] = {
-                0xB8, 0x00, 0x04, 0x00, 0x00, 0xBA, 0x00, 0x03, 0x00, 0x00, 0x8B, 0x0D, 0x04, 0x00, 0x09, 0x00, 0x85, 0xC9, 0x74, 0x7E, 0xF6, 0x01, 0x04, 0x74, 0x79, 0x8B, 0x71, 0x10, 0x85, 0xF6, 0x74, 0x72, 0x8A, 0x1E, 0x84, 0xDB, 0x74, 0x6C, 0x80, 0x3E, 0x32, 0x75, 0x1E, 0x80, 0x7E, 0x01, 0x35, 0x75, 0x18, 0x80, 0x7E, 0x02, 0x36, 0x75, 0x12, 0x80, 0x7E, 0x03, 0x30, 0x75, 0x0C, 0xB8, 0x00, 0x0A, 0x00, 0x00, 0xBA, 0xA0, 0x05, 0x00, 0x00, 0xEB, 0x49, 0x80, 0x3E, 0x31, 0x75, 0x1E, 0x80, 0x7E, 0x01, 0x39, 0x75, 0x18, 0x80, 0x7E, 0x02, 0x32, 0x75, 0x12, 0x80, 0x7E, 0x03, 0x30, 0x75, 0x0C, 0xB8, 0x80, 0x07, 0x00, 0x00, 0xBA, 0x38, 0x04, 0x00, 0x00, 0xEB, 0x26, 0x80, 0x3E, 0x31, 0x75, 0x1E, 0x80, 0x7E, 0x01, 0x34, 0x75, 0x18, 0x80, 0x7E, 0x02, 0x34, 0x75, 0x12, 0x80, 0x7E, 0x03, 0x30, 0x75, 0x0C, 0xB8, 0x00, 0x0A, 0x00, 0x00, 0xBA, 0xA0, 0x05, 0x00, 0x00, 0xEB, 0x03, 0x46, 0xEB, 0x8E
-            };
-            for (size_t i = 0; i < sizeof(s_bga_boot_bin); ++i) {
-                append_u8(bin_data, s_bga_boot_bin[i]);
+            // Set BGA Mode (width x height)
+            append_u8(bin_data, 0xB8); append_u32(bin_data, g_kwin.width);
+            append_u8(bin_data, 0xBA); append_u32(bin_data, g_kwin.height);
+            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_bga_set_mode - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+            // Initialize PS/2 Mouse Driver
+            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_mouse_init - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+            // Set default tab index in [0x00091380]
+            if (g_kwin.tabs.empty()) g_kwin.tabs.push_back("desktop");
+            uint8_t init_tab_idx = 0;
+            if (!g_kwin.current_tab.empty()) {
+                for (size_t i = 0; i < g_kwin.tabs.size(); ++i) {
+                    if (g_kwin.tabs[i] == g_kwin.current_tab) { init_tab_idx = (uint8_t)i; break; }
+                }
             }
-            // Call addr_bga_set_mode(eax=width, edx=height)
-            append_u8(bin_data, 0xE8);
-            append_u32(bin_data, addr_bga_set_mode - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, init_tab_idx);
 
-            // PS/2 Mouse Subsystem (initializes mouse position at center of screen width/height)
-            append_u8(bin_data, 0xE8);
-            append_u32(bin_data, addr_mouse_init - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-
-            // Set default tab = 1
-            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, 1);
-
+            // Full Redraw Loop
             size_t loop_gui_full_redraw = bin_data.size();
-            // 1. Wallpaper (Deep obsidian)
-            emit_draw_rect(0, 0, 1024, 768, 0x0009090B);
+            // Clear entire screen with window background
+            emit_draw_rect(0, 0, g_kwin.width, g_kwin.height, g_kwin.bg_color);
 
-            // 2. macOS Top Menu Bar
-            emit_draw_rect(0, 0, 1024, 38, 0x000F172A);
-            emit_draw_rect(0, 37, 1024, 1, 0x001E293B);
+            // Draw Header if style is "dots" or "modern"
+            int hdr_h = g_kwin.header_height;
+            if (g_kwin.header_style == "dots" || g_kwin.header_style == "modern") {
+                emit_draw_rect(0, 0, g_kwin.width, hdr_h, g_kwin.header_bg);
+                emit_draw_rect(0, hdr_h, g_kwin.width, 1, 0x001E293B);
+                if (g_kwin.header_style == "dots") {
+                    emit_draw_rect(16, (hdr_h - 10) / 2, 10, 10, 0x00EF4444);
+                    emit_draw_rect(32, (hdr_h - 10) / 2, 10, 10, 0x00F59E0B);
+                    emit_draw_rect(48, (hdr_h - 10) / 2, 10, 10, 0x0022C55E);
+                    std::string ht = g_kwin.header_title.empty() ? g_kwin.title : g_kwin.header_title;
+                    if (!ht.empty()) {
+                        uint32_t s_a = emit_inline_str(ht);
+                        emit_draw_str(68, (hdr_h - 16) / 2, s_a, g_kwin.header_text_col, 1);
+                    }
+                } else {
+                    std::string ht = g_kwin.header_title.empty() ? g_kwin.title : g_kwin.header_title;
+                    if (!ht.empty()) {
+                        uint32_t s_a = emit_inline_str(ht);
+                        emit_draw_str(20, (hdr_h - 16) / 2, s_a, g_kwin.header_text_col, 1);
+                    }
+                }
+            }
 
-            // Window Dots (Red, Yellow, Green)
-            emit_draw_rect(14, 13, 12, 12, 0x00EF4444);
-            emit_draw_rect(32, 13, 12, 12, 0x00F59E0B);
-            emit_draw_rect(50, 13, 12, 12, 0x0022C55E);
-
-            // Emerald Logo & Menu pills
-            emit_draw_str(74, 11, emit_inline_str("RQWos"), 0x0022C55E, 1);
-            emit_draw_rect(145, 8, 48, 22, 0x001E293B);
-            emit_draw_str(152, 11, emit_inline_str("Файл"), 0x00E2E8F0, 1);
-            emit_draw_rect(200, 8, 55, 22, 0x001E293B);
-            emit_draw_str(205, 11, emit_inline_str("Правка"), 0x00E2E8F0, 1);
-            emit_draw_rect(262, 8, 45, 22, 0x001E293B);
-            emit_draw_str(272, 11, emit_inline_str("Вид"), 0x00E2E8F0, 1);
-            emit_draw_rect(314, 8, 65, 22, 0x001E293B);
-            emit_draw_str(320, 11, emit_inline_str("Справка"), 0x00E2E8F0, 1);
-
-            // Center: Live CMOS RTC Date & Time
-            emit_draw_str(420, 11, 0x00091140, 0x0094A3B8, 1);
-
-            // Right Tray (LAN, Sound, User)
-            emit_draw_rect(730, 8, 140, 22, 0x001E293B);
-            emit_draw_str(738, 11, emit_inline_str("LAN: 10.0.2.15"), 0x0038BDF8, 1);
-            emit_draw_rect(880, 8, 130, 22, 0x001E293B);
-            emit_draw_str(890, 11, emit_inline_str("m1oky (Root)"), 0x0022C55E, 1);
-
-            // 3. Central Window Card (928x626)
-            emit_draw_rect(48, 56, 928, 626, 0x0018181B);
-            emit_draw_rect(48, 56, 928, 1, 0x00334155);
-            emit_draw_rect(48, 681, 928, 1, 0x00334155);
-            emit_draw_rect(48, 56, 1, 626, 0x00334155);
-            emit_draw_rect(975, 56, 1, 626, 0x00334155);
-
-            // Window Header Bar
-            emit_draw_rect(49, 57, 926, 42, 0x000F172A);
-            emit_draw_str(68, 70, emit_inline_str("RQWos Desktop Environment - GrassGreen v4.3.0 Engine"), 0x0022C55E, 1);
-
-            // 4. Floating Modern Dock at Bottom (7 App Tiles)
-            emit_draw_rect(296, 700, 432, 52, 0x000F172A);
-            emit_draw_rect(296, 700, 432, 1, 0x00334155);
-            emit_draw_rect(296, 751, 432, 1, 0x00334155);
-            emit_draw_rect(296, 700, 1, 52, 0x00334155);
-            emit_draw_rect(727, 700, 1, 52, 0x00334155);
-
-            // 1. Terminal (>_)
-            emit_draw_rect(304, 706, 48, 40, 0x001E293B);
-            emit_draw_rect(304, 706, 48, 1, 0x0022C55E);
-            emit_draw_rect(304, 745, 48, 1, 0x0022C55E);
-            emit_draw_rect(304, 706, 1, 40, 0x0022C55E);
-            emit_draw_rect(351, 706, 1, 40, 0x0022C55E);
-            emit_draw_str(320, 718, emit_inline_str(">_"), 0x0022C55E, 1);
-
-            // 2. Files (FS)
-            emit_draw_rect(360, 706, 48, 40, 0x001E293B);
-            emit_draw_rect(360, 706, 48, 1, 0x0038BDF8);
-            emit_draw_rect(360, 745, 48, 1, 0x0038BDF8);
-            emit_draw_rect(360, 706, 1, 40, 0x0038BDF8);
-            emit_draw_rect(407, 706, 1, 40, 0x0038BDF8);
-            emit_draw_str(376, 718, emit_inline_str("FS"), 0x0038BDF8, 1);
-
-            // 3. Calculator (CAL)
-            emit_draw_rect(416, 706, 48, 40, 0x001E293B);
-            emit_draw_rect(416, 706, 48, 1, 0x00F97316);
-            emit_draw_rect(416, 745, 48, 1, 0x00F97316);
-            emit_draw_rect(416, 706, 1, 40, 0x00F97316);
-            emit_draw_rect(463, 706, 1, 40, 0x00F97316);
-            emit_draw_str(428, 718, emit_inline_str("123"), 0x00F97316, 1);
-
-            // 4. Hardware Monitor (CPU)
-            emit_draw_rect(472, 706, 48, 40, 0x001E293B);
-            emit_draw_rect(472, 706, 48, 1, 0x00A855F7);
-            emit_draw_rect(472, 745, 48, 1, 0x00A855F7);
-            emit_draw_rect(472, 706, 1, 40, 0x00A855F7);
-            emit_draw_rect(519, 706, 1, 40, 0x00A855F7);
-            emit_draw_str(484, 718, emit_inline_str("CPU"), 0x00A855F7, 1);
-
-            // 5. Notes Editor (TXT)
-            emit_draw_rect(528, 706, 48, 40, 0x001E293B);
-            emit_draw_rect(528, 706, 48, 1, 0x00F59E0B);
-            emit_draw_rect(528, 745, 48, 1, 0x00F59E0B);
-            emit_draw_rect(528, 706, 1, 40, 0x00F59E0B);
-            emit_draw_rect(575, 706, 1, 40, 0x00F59E0B);
-            emit_draw_str(540, 718, emit_inline_str("TXT"), 0x00F59E0B, 1);
-
-            // 6. Clock / Calendar (RTC)
-            emit_draw_rect(584, 706, 48, 40, 0x001E293B);
-            emit_draw_rect(584, 706, 48, 1, 0x0014B8A6);
-            emit_draw_rect(584, 745, 48, 1, 0x0014B8A6);
-            emit_draw_rect(584, 706, 1, 40, 0x0014B8A6);
-            emit_draw_rect(631, 706, 1, 40, 0x0014B8A6);
-            emit_draw_str(596, 718, emit_inline_str("RTC"), 0x0014B8A6, 1);
-
-            // 7. Power (OFF)
-            emit_draw_rect(640, 706, 48, 40, 0x001E293B);
-            emit_draw_rect(640, 706, 48, 1, 0x00EF4444);
-            emit_draw_rect(640, 745, 48, 1, 0x00EF4444);
-            emit_draw_rect(640, 706, 1, 40, 0x00EF4444);
-            emit_draw_rect(687, 706, 1, 40, 0x00EF4444);
-            emit_draw_str(652, 718, emit_inline_str("OFF"), 0x00EF4444, 1);
-
-            // ══════════════════════════════════════════════════════════
-            // TAB CONTENT REDRAW LOOP (Triggered on tab change 1..6)
-            // ══════════════════════════════════════════════════════════
+            // Tab Redraw Loop
             size_t loop_gui_tab_redraw = bin_data.size();
+            int work_y = (g_kwin.header_style.empty()) ? 0 : (hdr_h + 1);
+            int work_h = g_kwin.height - work_y;
+            emit_draw_rect(0, work_y, g_kwin.width, work_h, g_kwin.bg_color);
 
-            // Clear tabs row and cards body inside central window
-            emit_draw_rect(49, 102, 926, 578, 0x0018181B);
+            // Draw widgets for active tab:
+            std::vector<size_t> jmp_tab_dones;
+            for (size_t t = 0; t < g_kwin.tabs.size(); ++t) {
+                const std::string& tab_name = g_kwin.tabs[t];
+                append_u8(bin_data, 0x80); append_u8(bin_data, 0x3D);
+                append_u32(bin_data, 0x00091380); append_u8(bin_data, (uint8_t)t);
+                append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85);
+                size_t jne_next_tab = bin_data.size();
+                append_u32(bin_data, 0);
 
-            // Floating Toast Notification Card in Top-Right
-            emit_draw_rect(712, 44, 260, 48, 0x0018181B);
-            emit_draw_rect(712, 44, 260, 1, 0x0022C55E);
-            emit_draw_rect(712, 91, 260, 1, 0x0022C55E);
-            emit_draw_rect(712, 44, 1, 48, 0x0022C55E);
-            emit_draw_rect(971, 44, 1, 48, 0x0022C55E);
-            emit_draw_str(724, 52, emit_inline_str("[i] RQWos v1.0.0"), 0x0022C55E, 1);
-            emit_draw_str(724, 70, emit_inline_str("ATA SSD & RTL8139 OK"), 0x0094A3B8, 1);
+                for (const auto& w : g_kwin.widgets) {
+                    if (w.tab_name != tab_name) continue;
+                    if (w.type == "button") {
+                        emit_draw_rect(w.x, w.y, w.w, w.h, w.bg_color);
+                        if (!w.text.empty()) {
+                            uint32_t str_val_addr = emit_inline_str(w.text);
+                            int tx = w.x + 14;
+                            int ty = w.y + (w.h - 16) / 2;
+                            if (ty < w.y) ty = w.y;
+                            emit_draw_str(tx, ty, str_val_addr, w.text_color, 1);
+                        }
+                    } else if (w.type == "label") {
+                        if (!w.text.empty()) {
+                            uint32_t str_val_addr = emit_inline_str(w.text);
+                            int scale = (w.font_size >= 24) ? 2 : 1;
+                            emit_draw_str(w.x, w.y, str_val_addr, w.text_color, scale);
+                        }
+                    } else if (w.type == "enter") {
+                        emit_draw_rect(w.x, w.y, w.w, w.h, w.bg_color);
+                        if (!w.text.empty()) {
+                            uint32_t str_val_addr = emit_inline_str(w.text);
+                            int tx = w.x + 10;
+                            int ty = w.y + (w.h - 16) / 2;
+                            emit_draw_str(tx, ty, str_val_addr, w.text_color, 1);
+                        }
+                    }
+                }
 
-            // Check Tab: [0x00091380]
-            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380);
+                append_u8(bin_data, 0xE9);
+                size_t j_done = bin_data.size();
+                append_u32(bin_data, 0);
+                jmp_tab_dones.push_back(j_done);
 
-            // ───────────── TAB 1: СИСТЕМА ─────────────
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 1);
-            size_t jne_tab2 = bin_data.size(); append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85); append_u32(bin_data, 0);
+                size_t pos_next = bin_data.size();
+                write_u32_le(bin_data, jne_next_tab, (uint32_t)((int32_t)pos_next - (int32_t)(jne_next_tab + 4)));
+            }
+            size_t pos_all_tabs_done = bin_data.size();
+            for (size_t jd : jmp_tab_dones) {
+                write_u32_le(bin_data, jd, (uint32_t)((int32_t)pos_all_tabs_done - (int32_t)(jd + 4)));
+            }
 
-            // Tab 1 Active Button (Emerald)
-            emit_draw_rect(68, 112, 142, 32, 0x0022C55E);
-            emit_draw_str(80, 120, emit_inline_str("1. СИСТЕМА"), 0x000F172A, 1);
-            emit_draw_rect(218, 112, 142, 32, 0x001E293B);
-            emit_draw_str(238, 120, emit_inline_str("2. ФАЙЛЫ"), 0x0094A3B8, 1);
-            emit_draw_rect(368, 112, 142, 32, 0x001E293B);
-            emit_draw_str(388, 120, emit_inline_str("3. ЖЕЛЕЗО"), 0x0094A3B8, 1);
-            emit_draw_rect(518, 112, 142, 32, 0x001E293B);
-            emit_draw_str(540, 120, emit_inline_str("4. КАЛЬК"), 0x0094A3B8, 1);
-            emit_draw_rect(668, 112, 142, 32, 0x001E293B);
-            emit_draw_str(686, 120, emit_inline_str("5. БЛОКНОТ"), 0x0094A3B8, 1);
-            emit_draw_rect(818, 112, 142, 32, 0x001E293B);
-            emit_draw_str(846, 120, emit_inline_str("6. ЧАСЫ"), 0x0094A3B8, 1);
-
-            // Card 1: System Info
-            emit_draw_rect(68, 160, 888, 140, 0x001E293B);
-            emit_draw_str(88, 180, emit_inline_str("Операционная система:  RQWos v1.0.0 (Protected Mode Multiboot Kernel)"), 0x00F8FAFC, 1);
-            // Dynamic resolution string for Tab 1
-            uint32_t str_gfx_1024 = emit_inline_str("Графическая подсистема: Bochs BGA 32-bit Linear Framebuffer (1024x768 1:1)");
-            uint32_t str_gfx_1080 = emit_inline_str("Графическая подсистема: Bochs BGA 32-bit Linear Framebuffer (1920x1080 1:1)");
-            uint32_t str_gfx_1440 = emit_inline_str("Графическая подсистема: Bochs BGA 32-bit Linear Framebuffer (2560x1440 1:1)");
-            append_u8(bin_data, 0xB8); append_u32(bin_data, str_gfx_1024);
-            append_u8(bin_data, 0x81); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x000913C0); append_u32(bin_data, 1920);
-            size_t jne_g1 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xB8); append_u32(bin_data, str_gfx_1080);
-            size_t jmp_gd = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
-            size_t pos_g1 = bin_data.size();
-            bin_data[jne_g1 + 1] = (uint8_t)(pos_g1 - (jne_g1 + 2));
-            append_u8(bin_data, 0x81); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x000913C0); append_u32(bin_data, 2560);
-            size_t jne_g2 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xB8); append_u32(bin_data, str_gfx_1440);
-            size_t pos_g2 = bin_data.size();
-            bin_data[jne_g2 + 1] = (uint8_t)(pos_g2 - (jne_g2 + 2));
-            bin_data[jmp_gd + 1] = (uint8_t)(pos_g2 - (jmp_gd + 2));
-            append_u8(bin_data, 0x68); append_u32(bin_data, 1);
-            append_u8(bin_data, 0x50); // push eax
-            append_u8(bin_data, 0x68); append_u32(bin_data, 210);
-            append_u8(bin_data, 0x68); append_u32(bin_data, 88);
-            append_u8(bin_data, 0x68); append_u32(bin_data, 0x0038BDF8);
+            // Restore & draw mouse cursor
             append_u8(bin_data, 0xE8);
-            append_u32(bin_data, addr_draw_str - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-            emit_draw_str(88, 240, emit_inline_str("Хранилище данных:       RamFS + ATA Primary Master SSD (RQFS LBA 100)"), 0x00A1A1AA, 1);
-
-            // Card 2: Memory Bar
-            emit_draw_rect(68, 316, 888, 90, 0x001E293B);
-            emit_draw_str(88, 328, emit_inline_str("Состояние памяти ОЗУ:"), 0x00F8FAFC, 1);
-            emit_draw_rect(88, 350, 848, 26, 0x000F172A);
-            emit_draw_rect(88, 350, 180, 26, 0x0022C55E);
-            emit_draw_str(88, 382, emit_inline_str("Занято: 4 МБ / Свободно: 124 МБ (Всего: 128 МБ DIMM)"), 0x0022C55E, 1);
-
-            // Card 3: Shortcuts & Network
-            emit_draw_rect(68, 422, 888, 160, 0x001E293B);
-            emit_draw_str(88, 442, emit_inline_str("Горячие клавиши: [1] Система  [2] Файлы  [3] Железо  [4] Кальк  [5] Заметки  [6] Часы"), 0x00FBBF24, 1);
-            emit_draw_str(88, 472, emit_inline_str("Управление:      [Tab] Цикл  [7] 1024x768  [8] Full HD  [9] QHD  [0] Режим  [ESC] Консоль"), 0x00FBBF24, 1);
-            emit_draw_str(88, 502, emit_inline_str("Сетевой адаптер: Realtek RTL8139 (IP 10.0.2.15 -> Gateway 10.0.2.2 ARP OK)"), 0x00E2E8F0, 1);
-            emit_draw_str(88, 532, emit_inline_str("Пользователь:    m1oky (Root) | Аудио: Sound Blaster 16 (0x220) + Beep"), 0x0022C55E, 1);
-
-            append_u8(bin_data, 0xE9);
-            size_t jmp_tab1_done = bin_data.size(); append_u32(bin_data, 0);
-
-            // ───────────── TAB 2: ФАЙЛЫ ─────────────
-            size_t pos_tab2 = bin_data.size();
-            write_u32_le(bin_data, jne_tab2 + 2, (uint32_t)((int32_t)pos_tab2 - (int32_t)(jne_tab2 + 6)));
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 2);
-            size_t jne_tab3 = bin_data.size(); append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85); append_u32(bin_data, 0);
-
-            // Tab 2 Active Button (Emerald)
-            emit_draw_rect(68, 112, 142, 32, 0x001E293B);
-            emit_draw_str(80, 120, emit_inline_str("1. СИСТЕМА"), 0x0094A3B8, 1);
-            emit_draw_rect(218, 112, 142, 32, 0x0022C55E);
-            emit_draw_str(238, 120, emit_inline_str("2. ФАЙЛЫ"), 0x000F172A, 1);
-            emit_draw_rect(368, 112, 142, 32, 0x001E293B);
-            emit_draw_str(388, 120, emit_inline_str("3. ЖЕЛЕЗО"), 0x0094A3B8, 1);
-            emit_draw_rect(518, 112, 142, 32, 0x001E293B);
-            emit_draw_str(540, 120, emit_inline_str("4. КАЛЬК"), 0x0094A3B8, 1);
-            emit_draw_rect(668, 112, 142, 32, 0x001E293B);
-            emit_draw_str(686, 120, emit_inline_str("5. БЛОКНОТ"), 0x0094A3B8, 1);
-            emit_draw_rect(818, 112, 142, 32, 0x001E293B);
-            emit_draw_str(846, 120, emit_inline_str("6. ЧАСЫ"), 0x0094A3B8, 1);
-
-            // Card 1: Directory List
-            emit_draw_rect(68, 160, 888, 140, 0x001E293B);
-            emit_draw_str(88, 180, emit_inline_str("Проводник файлов RamFS & ATA Primary Master (RQFS Micro-FS):"), 0x00F8FAFC, 1);
-            emit_draw_str(88, 210, emit_inline_str("[DIR]  system      [DIR]  users      [DIR]  apps      [DIR]  data"), 0x0038BDF8, 1);
-            emit_draw_str(88, 240, emit_inline_str("[FILE] readme.txt (41 Б) [FILE] user_profile.json (240 Б) [FILE] notes.txt (184 Б)"), 0x0022C55E, 1);
-
-            // Card 2: File Preview
-            emit_draw_rect(68, 316, 888, 90, 0x001E293B);
-            emit_draw_str(88, 328, emit_inline_str("Просмотр конфигурации /data/user_profile.json:"), 0x00F8FAFC, 1);
-            emit_draw_str(88, 355, emit_inline_str("{\"user\":\"m1oky\", \"theme\":\"dark\", \"storage\":\"ata_persistent\", \"audio\":\"sb16\"}"), 0x00FBBF24, 1);
-
-            // Card 3: Storage details
-            emit_draw_rect(68, 422, 888, 160, 0x001E293B);
-            emit_draw_str(88, 442, emit_inline_str("Накопитель SSD:   ATA Primary Master (512 GB) - LBA28 R/W [СИНХРОНИЗИРОВАНО]"), 0x00F8FAFC, 1);
-            emit_draw_str(88, 472, emit_inline_str("Микро-ФС:         Суперблок 'RQFS' LBA 100 | Таблица файлов LBA 101..102"), 0x0038BDF8, 1);
-            emit_draw_str(88, 502, emit_inline_str("Консольные команды: cd, ls, cat, disk, net, rtc, sound, calc, notes, gui"), 0x00E2E8F0, 1);
-            emit_draw_str(88, 532, emit_inline_str("Для перехода в терминал нажмите [ESC], для возврата введите 'gui'"), 0x00A1A1AA, 1);
-
-            append_u8(bin_data, 0xE9);
-            size_t jmp_tab2_done = bin_data.size(); append_u32(bin_data, 0);
-
-            // ───────────── TAB 3: ЖЕЛЕЗО ─────────────
-            size_t pos_tab3 = bin_data.size();
-            write_u32_le(bin_data, jne_tab3 + 2, (uint32_t)((int32_t)pos_tab3 - (int32_t)(jne_tab3 + 6)));
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 3);
-            size_t jne_tab4 = bin_data.size(); append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85); append_u32(bin_data, 0);
-
-            // Tab 3 Active Button (Emerald)
-            emit_draw_rect(68, 112, 142, 32, 0x001E293B);
-            emit_draw_str(80, 120, emit_inline_str("1. СИСТЕМА"), 0x0094A3B8, 1);
-            emit_draw_rect(218, 112, 142, 32, 0x001E293B);
-            emit_draw_str(238, 120, emit_inline_str("2. ФАЙЛЫ"), 0x0094A3B8, 1);
-            emit_draw_rect(368, 112, 142, 32, 0x0022C55E);
-            emit_draw_str(388, 120, emit_inline_str("3. ЖЕЛЕЗО"), 0x000F172A, 1);
-            emit_draw_rect(518, 112, 142, 32, 0x001E293B);
-            emit_draw_str(540, 120, emit_inline_str("4. КАЛЬК"), 0x0094A3B8, 1);
-            emit_draw_rect(668, 112, 142, 32, 0x001E293B);
-            emit_draw_str(686, 120, emit_inline_str("5. БЛОКНОТ"), 0x0094A3B8, 1);
-            emit_draw_rect(818, 112, 142, 32, 0x001E293B);
-            emit_draw_str(846, 120, emit_inline_str("6. ЧАСЫ"), 0x0094A3B8, 1);
-
-            // Card 1: CPU specs
-            emit_draw_rect(68, 160, 888, 140, 0x001E293B);
-            emit_draw_str(88, 180, emit_inline_str("Аппаратный монитор процессора и материнской платы:"), 0x00F8FAFC, 1);
-            emit_draw_str(88, 210, emit_inline_str("ЦПУ:   AuthenticAMD / Intel Virtual CPU (2900 МГц, 16 потоков)"), 0x0038BDF8, 1);
-            emit_draw_str(88, 240, emit_inline_str("Кэш:   L1: 256 КБ | L2: 2048 КБ | L3: 16384 КБ | Нагрузка: 12% (39 C)"), 0x0022C55E, 1);
-
-            // Card 2: Devices
-            emit_draw_rect(68, 316, 888, 90, 0x001E293B);
-            emit_draw_str(88, 328, emit_inline_str("Аппаратные контроллеры шины PCI:"), 0x00F8FAFC, 1);
-            emit_draw_str(88, 355, emit_inline_str("Плата: QEMU i440FX | SeaBIOS | Звук: Sound Blaster 16 (0x220) | Таймер: PIT 1024 Hz"), 0x00FBBF24, 1);
-
-            // Card 3: Network & Storage
-            emit_draw_rect(68, 422, 888, 160, 0x001E293B);
-            emit_draw_str(88, 442, emit_inline_str("Сетевой чип:     Realtek RTL8139 (PCI Dev 0x8139, I/O Port 0xC000)"), 0x00F8FAFC, 1);
-            emit_draw_str(88, 472, emit_inline_str("Контроллер ATA:  Primary Master 0x1F0 SSD (512 GB) LBA28 Mode Active"), 0x0038BDF8, 1);
-            emit_draw_str(88, 502, emit_inline_str("ОЗУ системное:   128 МБ DIMM 3200 МГц DDR4 (W^X Защита включена)"), 0x00E2E8F0, 1);
-            // Dynamic resolution string for Tab 3
-            uint32_t str_vbe_1024 = emit_inline_str("Видеокарта:      Bochs VBE Linear Framebuffer 1024x768x32bpp (1:1 Ratio)");
-            uint32_t str_vbe_1080 = emit_inline_str("Видеокарта:      Bochs VBE Linear Framebuffer 1920x1080x32bpp (1:1 Ratio)");
-            uint32_t str_vbe_1440 = emit_inline_str("Видеокарта:      Bochs VBE Linear Framebuffer 2560x1440x32bpp (1:1 Ratio)");
-            append_u8(bin_data, 0xB8); append_u32(bin_data, str_vbe_1024);
-            append_u8(bin_data, 0x81); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x000913C0); append_u32(bin_data, 1920);
-            size_t jne_v1 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xB8); append_u32(bin_data, str_vbe_1080);
-            size_t jmp_vd = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
-            size_t pos_v1 = bin_data.size();
-            bin_data[jne_v1 + 1] = (uint8_t)(pos_v1 - (jne_v1 + 2));
-            append_u8(bin_data, 0x81); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x000913C0); append_u32(bin_data, 2560);
-            size_t jne_v2 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xB8); append_u32(bin_data, str_vbe_1440);
-            size_t pos_v2 = bin_data.size();
-            bin_data[jne_v2 + 1] = (uint8_t)(pos_v2 - (jne_v2 + 2));
-            bin_data[jmp_vd + 1] = (uint8_t)(pos_v2 - (jmp_vd + 2));
-            append_u8(bin_data, 0x68); append_u32(bin_data, 1);
-            append_u8(bin_data, 0x50); // push eax
-            append_u8(bin_data, 0x68); append_u32(bin_data, 532);
-            append_u8(bin_data, 0x68); append_u32(bin_data, 88);
-            append_u8(bin_data, 0x68); append_u32(bin_data, 0x00A1A1AA);
-            append_u8(bin_data, 0xE8);
-            append_u32(bin_data, addr_draw_str - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-
-            append_u8(bin_data, 0xE9);
-            size_t jmp_tab3_done = bin_data.size(); append_u32(bin_data, 0);
-
-            // ───────────── TAB 4: КАЛЬКУЛЯТОР ─────────────
-            size_t pos_tab4 = bin_data.size();
-            write_u32_le(bin_data, jne_tab4 + 2, (uint32_t)((int32_t)pos_tab4 - (int32_t)(jne_tab4 + 6)));
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 4);
-            size_t jne_tab5 = bin_data.size(); append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85); append_u32(bin_data, 0);
-
-            // Tab 4 Active Button (Emerald)
-            emit_draw_rect(68, 112, 142, 32, 0x001E293B);
-            emit_draw_str(80, 120, emit_inline_str("1. СИСТЕМА"), 0x0094A3B8, 1);
-            emit_draw_rect(218, 112, 142, 32, 0x001E293B);
-            emit_draw_str(238, 120, emit_inline_str("2. ФАЙЛЫ"), 0x0094A3B8, 1);
-            emit_draw_rect(368, 112, 142, 32, 0x001E293B);
-            emit_draw_str(388, 120, emit_inline_str("3. ЖЕЛЕЗО"), 0x0094A3B8, 1);
-            emit_draw_rect(518, 112, 142, 32, 0x0022C55E);
-            emit_draw_str(540, 120, emit_inline_str("4. КАЛЬК"), 0x000F172A, 1);
-            emit_draw_rect(668, 112, 142, 32, 0x001E293B);
-            emit_draw_str(686, 120, emit_inline_str("5. БЛОКНОТ"), 0x0094A3B8, 1);
-            emit_draw_rect(818, 112, 142, 32, 0x001E293B);
-            emit_draw_str(846, 120, emit_inline_str("6. ЧАСЫ"), 0x0094A3B8, 1);
-
-            // Card 1: Calculator Display
-            emit_draw_rect(68, 160, 888, 110, 0x001E293B);
-            emit_draw_str(88, 175, emit_inline_str("GrassGreen Vector Calculator v1.0 [RQWos/app/calc.grass]:"), 0x0094A3B8, 1);
-            emit_draw_rect(88, 200, 848, 52, 0x000F172A);
-            emit_draw_str(104, 216, emit_inline_str("ВЫРАЖЕНИЕ: (1024 * 768 * 4) / 1024  =  3072 КБ (VRAM Buffer)"), 0x00F97316, 1);
-
-            // Card 2: Interactive Keypad Layout
-            emit_draw_rect(68, 286, 430, 296, 0x001E293B);
-            emit_draw_str(88, 302, emit_inline_str("Клавиатура калькулятора:"), 0x00F8FAFC, 1);
-            emit_draw_str(88, 335, emit_inline_str("[  7  ]     [  8  ]     [  9  ]     [  /  ]     [  C  ]"), 0x00E2E8F0, 1);
-            emit_draw_str(88, 385, emit_inline_str("[  4  ]     [  5  ]     [  6  ]     [  *  ]     [  (  ]"), 0x00E2E8F0, 1);
-            emit_draw_str(88, 435, emit_inline_str("[  1  ]     [  2  ]     [  3  ]     [  -  ]     [  )  ]"), 0x00E2E8F0, 1);
-            emit_draw_str(88, 485, emit_inline_str("[  0  ]     [  .  ]     [  =  ]     [  +  ]     [  %  ]"), 0x0022C55E, 1);
-            emit_draw_str(88, 540, emit_inline_str("Нажмите 'C' в терминале для запуска calc"), 0x00FBBF24, 1);
-
-            // Card 3: Calculation History Tape
-            emit_draw_rect(516, 286, 440, 296, 0x001E293B);
-            emit_draw_str(536, 302, emit_inline_str("Журнал операций (Calculation History):"), 0x00F8FAFC, 1);
-            emit_draw_str(536, 335, emit_inline_str("1) 128 * 1024 = 131072 КБ (Размер системного ОЗУ)"), 0x0038BDF8, 1);
-            emit_draw_str(536, 375, emit_inline_str("2) 512 * 1024 = 524288 МБ (Ёмкость SSD ATA Master)"), 0x0022C55E, 1);
-            emit_draw_str(536, 415, emit_inline_str("3) 1024 * 768 = 786432 пикселей (Bochs Framebuffer)"), 0x00FBBF24, 1);
-            emit_draw_str(536, 455, emit_inline_str("4) 1048576 * 512 = 536870912 байт (Секторы RQFS)"), 0x00E2E8F0, 1);
-            emit_draw_str(536, 495, emit_inline_str("5) 1193180 / 1193 = 1000 Гц (Частота PIT Beep клика)"), 0x00A855F7, 1);
-            emit_draw_str(536, 540, emit_inline_str("Статус вычислений: УСПЕШНО | Ошибок деления на 0: 0"), 0x0022C55E, 1);
-
-            append_u8(bin_data, 0xE9);
-            size_t jmp_tab4_done = bin_data.size(); append_u32(bin_data, 0);
-
-            // ───────────── TAB 5: БЛОКНОТ ─────────────
-            size_t pos_tab5 = bin_data.size();
-            write_u32_le(bin_data, jne_tab5 + 2, (uint32_t)((int32_t)pos_tab5 - (int32_t)(jne_tab5 + 6)));
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 5);
-            size_t jne_tab6 = bin_data.size(); append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85); append_u32(bin_data, 0);
-
-            // Tab 5 Active Button (Emerald)
-            emit_draw_rect(68, 112, 142, 32, 0x001E293B);
-            emit_draw_str(80, 120, emit_inline_str("1. СИСТЕМА"), 0x0094A3B8, 1);
-            emit_draw_rect(218, 112, 142, 32, 0x001E293B);
-            emit_draw_str(238, 120, emit_inline_str("2. ФАЙЛЫ"), 0x0094A3B8, 1);
-            emit_draw_rect(368, 112, 142, 32, 0x001E293B);
-            emit_draw_str(388, 120, emit_inline_str("3. ЖЕЛЕЗО"), 0x0094A3B8, 1);
-            emit_draw_rect(518, 112, 142, 32, 0x001E293B);
-            emit_draw_str(540, 120, emit_inline_str("4. КАЛЬК"), 0x0094A3B8, 1);
-            emit_draw_rect(668, 112, 142, 32, 0x0022C55E);
-            emit_draw_str(686, 120, emit_inline_str("5. БЛОКНОТ"), 0x000F172A, 1);
-            emit_draw_rect(818, 112, 142, 32, 0x001E293B);
-            emit_draw_str(846, 120, emit_inline_str("6. ЧАСЫ"), 0x0094A3B8, 1);
-
-            // Card 1: Notes Document Editor
-            emit_draw_rect(68, 160, 888, 350, 0x001E293B);
-            emit_draw_rect(68, 160, 888, 32, 0x000F172A);
-            emit_draw_str(88, 168, emit_inline_str("Редактор заметок: /data/notes.txt  [Сохранено на ATA Master SSD]"), 0x0022C55E, 1);
-
-            // Document Text
-            emit_draw_str(88, 206, emit_inline_str("1: ========================================================"), 0x0064748B, 1);
-            emit_draw_str(88, 236, emit_inline_str("2:   Добро пожаловать в текстовый редактор RQWos Notes!"), 0x00F8FAFC, 1);
-            emit_draw_str(88, 266, emit_inline_str("3: * Физический драйвер ATA LBA28 сохраняет файлы на диск"), 0x0022C55E, 1);
-            emit_draw_str(88, 296, emit_inline_str("4: * Сетевая карта RTL8139 шлёт ARP на шлюз 10.0.2.2"), 0x0038BDF8, 1);
-            emit_draw_str(88, 326, emit_inline_str("5: * Звуковая карта Sound Blaster 16 воспроизводит эффекты"), 0x00F59E0B, 1);
-            emit_draw_str(88, 356, emit_inline_str("6: * Часы CMOS RTC читают точное аппаратное время 0x70/0x71"), 0x00A855F7, 1);
-            emit_draw_str(88, 386, emit_inline_str("7: * Профиль пользователя загружен из /data/user_profile.json"), 0x00FBBF24, 1);
-            emit_draw_str(88, 416, emit_inline_str("8: ========================================================"), 0x0064748B, 1);
-            emit_draw_str(88, 456, emit_inline_str("Курсор: Строка 8, Столбец 58  |  Режим: Вставка (INS)  |  UTF-8"), 0x0094A3B8, 1);
-
-            // Card 2: Editor Status Details
-            emit_draw_rect(68, 526, 888, 56, 0x001E293B);
-            emit_draw_str(88, 544, emit_inline_str("Файл: data/notes.txt (184 байта) | Строк: 8 | Символов: 412 | Доступ: Чтение/Запись"), 0x0022C55E, 1);
-
-            append_u8(bin_data, 0xE9);
-            size_t jmp_tab5_done = bin_data.size(); append_u32(bin_data, 0);
-
-            // ───────────── TAB 6: ЧАСЫ / CMOS RTC ─────────────
-            size_t pos_tab6 = bin_data.size();
-            write_u32_le(bin_data, jne_tab6 + 2, (uint32_t)((int32_t)pos_tab6 - (int32_t)(jne_tab6 + 6)));
-
-            // Tab 6 Active Button (Emerald)
-            emit_draw_rect(68, 112, 142, 32, 0x001E293B);
-            emit_draw_str(80, 120, emit_inline_str("1. СИСТЕМА"), 0x0094A3B8, 1);
-            emit_draw_rect(218, 112, 142, 32, 0x001E293B);
-            emit_draw_str(238, 120, emit_inline_str("2. ФАЙЛЫ"), 0x0094A3B8, 1);
-            emit_draw_rect(368, 112, 142, 32, 0x001E293B);
-            emit_draw_str(388, 120, emit_inline_str("3. ЖЕЛЕЗО"), 0x0094A3B8, 1);
-            emit_draw_rect(518, 112, 142, 32, 0x001E293B);
-            emit_draw_str(540, 120, emit_inline_str("4. КАЛЬК"), 0x0094A3B8, 1);
-            emit_draw_rect(668, 112, 142, 32, 0x001E293B);
-            emit_draw_str(686, 120, emit_inline_str("5. БЛОКНОТ"), 0x0094A3B8, 1);
-            emit_draw_rect(818, 112, 142, 32, 0x0022C55E);
-            emit_draw_str(846, 120, emit_inline_str("6. ЧАСЫ"), 0x000F172A, 1);
-
-            // Card 1: Large Digital Clock
-            emit_draw_rect(68, 160, 888, 110, 0x001E293B);
-            emit_draw_str(88, 176, emit_inline_str("Аппаратное время CMOS RTC (порты ввода-вывода 0x70 / 0x71):"), 0x0094A3B8, 1);
-            emit_draw_rect(88, 202, 848, 52, 0x000F172A);
-            emit_draw_str(110, 218, 0x00091140, 0x0022C55E, 2);
-
-            // Card 2: Calendar Card
-            emit_draw_rect(68, 286, 430, 296, 0x001E293B);
-            emit_draw_str(88, 302, emit_inline_str("Календарь (Ноябрь 2026):"), 0x00F8FAFC, 1);
-            emit_draw_str(88, 335, emit_inline_str("Пн    Вт    Ср    Чт    Пт    Сб    Вс"), 0x0038BDF8, 1);
-            emit_draw_str(88, 375, emit_inline_str(" 2     3     4     5     6     7     8"), 0x0094A3B8, 1);
-            emit_draw_str(88, 415, emit_inline_str("[9]   10    11    12    13    14    15"), 0x0022C55E, 1);
-            emit_draw_str(88, 455, emit_inline_str("16    17    18    19    20    21    22"), 0x0094A3B8, 1);
-            emit_draw_str(88, 495, emit_inline_str("23    24    25    26    27    28    29"), 0x0094A3B8, 1);
-            emit_draw_str(88, 535, emit_inline_str("30     1     2     3     4     5     6"), 0x0064748B, 1);
-
-            // Card 3: RTC Timer & Uptime
-            emit_draw_rect(516, 286, 440, 296, 0x001E293B);
-            emit_draw_str(536, 302, emit_inline_str("Статус часов и таймеров ядра:"), 0x00F8FAFC, 1);
-            emit_draw_str(536, 335, emit_inline_str("Режим RTC:        Двоичный / BCD (Автоопределение)"), 0x0038BDF8, 1);
-            emit_draw_str(536, 375, emit_inline_str("Частота PIT IRQ0: 1024 Гц (Программный квант времени)"), 0x0022C55E, 1);
-            emit_draw_str(536, 415, emit_inline_str("Время работы:     00:14:32 (Стабильный аптайм)"), 0x00FBBF24, 1);
-            emit_draw_str(536, 455, emit_inline_str("Статус батареи:   CR2032 OK (Регистр D CMOS = 0x80)"), 0x00E2E8F0, 1);
-            emit_draw_str(536, 495, emit_inline_str("Синхронизация:    Аппаратный опрос при каждом тике"), 0x00A855F7, 1);
-            emit_draw_str(536, 540, emit_inline_str("Часовой пояс:     UTC+3 (Москва / RT-Online)"), 0x0022C55E, 1);
-
-            size_t pos_tabs_done = bin_data.size();
-            write_u32_le(bin_data, jmp_tab1_done, (uint32_t)((int32_t)pos_tabs_done - (int32_t)(jmp_tab1_done + 4)));
-            write_u32_le(bin_data, jmp_tab2_done, (uint32_t)((int32_t)pos_tabs_done - (int32_t)(jmp_tab2_done + 4)));
-            write_u32_le(bin_data, jmp_tab3_done, (uint32_t)((int32_t)pos_tabs_done - (int32_t)(jmp_tab3_done + 4)));
-            write_u32_le(bin_data, jmp_tab4_done, (uint32_t)((int32_t)pos_tabs_done - (int32_t)(jmp_tab4_done + 4)));
-            write_u32_le(bin_data, jmp_tab5_done, (uint32_t)((int32_t)pos_tabs_done - (int32_t)(jmp_tab5_done + 4)));
-
-            // ══════════════════════════════════════════════════════════
-            // INTERACTIVE EVENT LOOP (Keys 1..6, C, N, T, Tab, R, P, ESC, Mouse)
-            // ══════════════════════════════════════════════════════════
-            // Ensure mouse cursor is drawn onto screen
+            append_u32(bin_data, addr_cursor_restore - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
             append_u8(bin_data, 0xE8);
             append_u32(bin_data, addr_cursor_draw - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
 
+            // GUI Interactive Event Loop
             size_t loop_gui_event = bin_data.size();
             append_u8(bin_data, 0xE8);
             append_u32(bin_data, addr_read_char - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
 
-            // Check for Left Click Event (AL == 0xFE)
+            // Mouse Click Event (AL == 0xFE)
             append_u8(bin_data, 0x3C); append_u8(bin_data, 0xFE);
-            size_t jne_not_mouse = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85);
+            size_t jne_not_mouse = bin_data.size(); append_u32(bin_data, 0);
 
-            // Call addr_gui_mouse_click -> returns in EAX:
-            // 0 = none/outside, 1..6 = tab 1..6, 7 = exit GUI (console), 8 = poweroff
-            append_u8(bin_data, 0xE8);
-            append_u32(bin_data, addr_gui_mouse_click - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            // Left click happened! Load mouse coords:
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091400); // mov eax, [0x00091400] (mouse_x)
+            append_u8(bin_data, 0x8B); append_u8(bin_data, 0x15); append_u32(bin_data, 0x00091404); // mov edx, [0x00091404] (mouse_y)
 
-            // EAX == 7 -> exit GUI (console)
-            append_u8(bin_data, 0x83); append_u8(bin_data, 0xF8); append_u8(bin_data, 7);
-            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x84);
-            size_t je_mouse_exit = bin_data.size(); append_u32(bin_data, 0);
+            // Hit test buttons of active tab:
+            std::vector<size_t> mouse_click_redraw_jmps;
+            for (size_t t = 0; t < g_kwin.tabs.size(); ++t) {
+                const std::string& tab_name = g_kwin.tabs[t];
+                append_u8(bin_data, 0x80); append_u8(bin_data, 0x3D);
+                append_u32(bin_data, 0x00091380); append_u8(bin_data, (uint8_t)t);
+                append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85);
+                size_t jne_skip_tab_click = bin_data.size(); append_u32(bin_data, 0);
 
-            // EAX == 8 -> poweroff
-            append_u8(bin_data, 0x83); append_u8(bin_data, 0xF8); append_u8(bin_data, 8);
-            size_t jne_not_pwr = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xE8);
-            append_u32(bin_data, addr_poweroff - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-            size_t pos_not_pwr = bin_data.size();
-            bin_data[jne_not_pwr + 1] = (uint8_t)(pos_not_pwr - (jne_not_pwr + 2));
+                for (const auto& w : g_kwin.widgets) {
+                    if (w.tab_name != tab_name || w.type != "button" || w.click_tab.empty()) continue;
+                    int tgt_idx = -1;
+                    for (size_t k = 0; k < g_kwin.tabs.size(); ++k) {
+                        if (g_kwin.tabs[k] == w.click_tab) { tgt_idx = (int)k; break; }
+                    }
+                    if (tgt_idx == -1) continue;
 
-            // 1 <= EAX <= 6 -> Tab click!
-            append_u8(bin_data, 0x83); append_u8(bin_data, 0xF8); append_u8(bin_data, 1);
-            size_t jl_mouse_none = bin_data.size(); append_u8(bin_data, 0x7C); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0x83); append_u8(bin_data, 0xF8); append_u8(bin_data, 6);
-            size_t jg_mouse_none = bin_data.size(); append_u8(bin_data, 0x7F); append_u8(bin_data, 0x00);
+                    // Test bounds: w.x <= eax < w.x + w.w && w.y <= edx < w.y + w.h
+                    append_u8(bin_data, 0x3D); append_u32(bin_data, (uint32_t)w.x);
+                    append_u8(bin_data, 0x0F); append_u8(bin_data, 0x8C);
+                    size_t jl_btn = bin_data.size(); append_u32(bin_data, 0);
 
-            // Play sound 1 (click)
-            append_u8(bin_data, 0x50); // save eax (tab idx)
-            append_u8(bin_data, 0xB0); append_u8(bin_data, 1);
-            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_play_sound - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-            append_u8(bin_data, 0x58); // restore eax
+                    append_u8(bin_data, 0x3D); append_u32(bin_data, (uint32_t)(w.x + w.w));
+                    append_u8(bin_data, 0x0F); append_u8(bin_data, 0x8D);
+                    size_t jge_btn = bin_data.size(); append_u32(bin_data, 0);
 
-            // Set current tab = AL
-            append_u8(bin_data, 0xA2); append_u32(bin_data, 0x00091380); // mov [0x00091380], al
+                    append_u8(bin_data, 0x81); append_u8(bin_data, 0xFA); append_u32(bin_data, (uint32_t)w.y);
+                    append_u8(bin_data, 0x0F); append_u8(bin_data, 0x8C);
+                    size_t jl_btn_y = bin_data.size(); append_u32(bin_data, 0);
 
-            // Jump to loop_gui_tab_redraw
+                    append_u8(bin_data, 0x81); append_u8(bin_data, 0xFA); append_u32(bin_data, (uint32_t)(w.y + w.h));
+                    append_u8(bin_data, 0x0F); append_u8(bin_data, 0x8D);
+                    size_t jge_btn_y = bin_data.size(); append_u32(bin_data, 0);
+
+                    // Button Hit! Play sound 1 (click)
+                    append_u8(bin_data, 0xB0); append_u8(bin_data, 1);
+                    append_u8(bin_data, 0xE8); append_u32(bin_data, addr_play_sound - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+                    // Switch active tab: mov [0x00091380], tgt_idx
+                    append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, (uint8_t)tgt_idx);
+
+                    // Jump to tab redraw
+                    append_u8(bin_data, 0xE9);
+                    size_t j_m_redraw = bin_data.size();
+                    append_u32(bin_data, 0);
+                    mouse_click_redraw_jmps.push_back(j_m_redraw);
+
+                    size_t pos_btn_miss = bin_data.size();
+                    write_u32_le(bin_data, jl_btn, (uint32_t)((int32_t)pos_btn_miss - (int32_t)(jl_btn + 4)));
+                    write_u32_le(bin_data, jge_btn, (uint32_t)((int32_t)pos_btn_miss - (int32_t)(jge_btn + 4)));
+                    write_u32_le(bin_data, jl_btn_y, (uint32_t)((int32_t)pos_btn_miss - (int32_t)(jl_btn_y + 4)));
+                    write_u32_le(bin_data, jge_btn_y, (uint32_t)((int32_t)pos_btn_miss - (int32_t)(jge_btn_y + 4)));
+                }
+
+                size_t pos_skip_tab = bin_data.size();
+                write_u32_le(bin_data, jne_skip_tab_click, (uint32_t)((int32_t)pos_skip_tab - (int32_t)(jne_skip_tab_click + 4)));
+            }
+
+            // If mouse click didn't trigger a button, poll again
             append_u8(bin_data, 0xE9);
-            size_t jmp_mouse_tab_redraw = bin_data.size(); append_u32(bin_data, 0);
-
-            // If click was outside, ignore and poll again
-            size_t pos_mouse_none = bin_data.size();
-            bin_data[jl_mouse_none + 1] = (uint8_t)(pos_mouse_none - (jl_mouse_none + 2));
-            bin_data[jg_mouse_none + 1] = (uint8_t)(pos_mouse_none - (jg_mouse_none + 2));
-            append_u8(bin_data, 0xEB);
-            size_t jmp_mouse_to_event = bin_data.size(); append_u8(bin_data, 0x00);
+            append_u32(bin_data, (uint32_t)((int32_t)loop_gui_event - (int32_t)(bin_data.size() + 4)));
 
             size_t pos_not_mouse = bin_data.size();
-            bin_data[jne_not_mouse + 1] = (uint8_t)(pos_not_mouse - (jne_not_mouse + 2));
-            bin_data[jmp_mouse_to_event] = (uint8_t)(bin_data.size() - (jmp_mouse_to_event + 1));
+            write_u32_le(bin_data, jne_not_mouse, (uint32_t)((int32_t)pos_not_mouse - (int32_t)(jne_not_mouse + 4)));
 
-            // Helper macro for key to tab jump
-            auto emit_key_to_tab = [&](uint8_t key, uint8_t tab_idx, size_t& jmp_out) {
-                append_u8(bin_data, 0x3C); append_u8(bin_data, key);
-                size_t jne_next = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-                // Play sound 1 (click)
-                append_u8(bin_data, 0xB0); append_u8(bin_data, 1);
-                append_u8(bin_data, 0xE8); append_u32(bin_data, addr_play_sound - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-                append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, tab_idx);
-                append_u8(bin_data, 0xE9);
-                jmp_out = bin_data.size(); append_u32(bin_data, 0);
-                size_t pos_next = bin_data.size();
-                bin_data[jne_next + 1] = (uint8_t)(pos_next - (jne_next + 2));
-            };
-
-            size_t jmp_re1 = 0, jmp_re2 = 0, jmp_re3 = 0, jmp_re4 = 0, jmp_re5 = 0, jmp_re6 = 0;
-            size_t jmp_rec = 0, jmp_ren = 0, jmp_ret = 0;
-
-            emit_key_to_tab('1', 1, jmp_re1);
-            emit_key_to_tab('2', 2, jmp_re2);
-            emit_key_to_tab('3', 3, jmp_re3);
-            emit_key_to_tab('4', 4, jmp_re4);
-            emit_key_to_tab('5', 5, jmp_re5);
-            emit_key_to_tab('6', 6, jmp_re6);
-
-            // 'c' / 'C' -> Tab 4 (Calc)
-            emit_key_to_tab('c', 4, jmp_rec);
-            // 'n' / 'N' -> Tab 5 (Notes)
-            emit_key_to_tab('n', 5, jmp_ren);
-            // 't' / 'T' -> Tab 6 (Clock / Time)
-            emit_key_to_tab('t', 6, jmp_ret);
-
-            // Resolution hotkeys: '7' (1024x768), '8' (1920x1080), '9' (2560x1440), '0' (Cycle)
-            size_t jmp_re7 = 0, jmp_re8 = 0, jmp_re9 = 0;
-            auto emit_key_to_res = [&](uint8_t key, uint32_t w, uint32_t h, size_t& jmp_out) {
-                append_u8(bin_data, 0x3C); append_u8(bin_data, key);
-                size_t jne_next = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-                append_u8(bin_data, 0xB0); append_u8(bin_data, 1);
-                append_u8(bin_data, 0xE8); append_u32(bin_data, addr_play_sound - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-                append_u8(bin_data, 0xB8); append_u32(bin_data, w);
-                append_u8(bin_data, 0xBA); append_u32(bin_data, h);
-                append_u8(bin_data, 0xE8); append_u32(bin_data, addr_bga_set_mode - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-                append_u8(bin_data, 0xE9);
-                jmp_out = bin_data.size(); append_u32(bin_data, 0);
-                size_t pos_next = bin_data.size();
-                bin_data[jne_next + 1] = (uint8_t)(pos_next - (jne_next + 2));
-            };
-
-            emit_key_to_res('7', 1024, 768, jmp_re7);
-            emit_key_to_res('8', 1920, 1080, jmp_re8);
-            emit_key_to_res('9', 2560, 1440, jmp_re9);
-
-            // '0' -> Cycle resolution (1024 -> 1920 -> 2560 -> 1024)
-            append_u8(bin_data, 0x3C); append_u8(bin_data, '0');
-            size_t jne_k0 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xB0); append_u8(bin_data, 1);
-            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_play_sound - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-            append_u8(bin_data, 0x81); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x000913C0); append_u32(bin_data, 1024);
-            size_t jne_not1024 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xB8); append_u32(bin_data, 1920);
-            append_u8(bin_data, 0xBA); append_u32(bin_data, 1080);
-            size_t jmp_dm1 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
-            size_t pos_n1 = bin_data.size();
-            bin_data[jne_not1024 + 1] = (uint8_t)(pos_n1 - (jne_not1024 + 2));
-            append_u8(bin_data, 0x81); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x000913C0); append_u32(bin_data, 1920);
-            size_t jne_not1920 = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xB8); append_u32(bin_data, 2560);
-            append_u8(bin_data, 0xBA); append_u32(bin_data, 1440);
-            size_t jmp_dm2 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
-            size_t pos_n2 = bin_data.size();
-            bin_data[jne_not1920 + 1] = (uint8_t)(pos_n2 - (jne_not1920 + 2));
-            append_u8(bin_data, 0xB8); append_u32(bin_data, 1024);
-            append_u8(bin_data, 0xBA); append_u32(bin_data, 768);
-            size_t pos_dm = bin_data.size();
-            bin_data[jmp_dm1 + 1] = (uint8_t)(pos_dm - (jmp_dm1 + 2));
-            bin_data[jmp_dm2 + 1] = (uint8_t)(pos_dm - (jmp_dm2 + 2));
-            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_bga_set_mode - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-            append_u8(bin_data, 0xE9);
-            size_t jmp_re0 = bin_data.size(); append_u32(bin_data, 0);
-            size_t pos_k0 = bin_data.size();
-            bin_data[jne_k0 + 1] = (uint8_t)(pos_k0 - (jne_k0 + 2));
-
-            // Tab Key (0x09) -> Cycle 1..6
+            // Keyboard navigation:
+            // TAB (0x09) -> Next Tab
             append_u8(bin_data, 0x3C); append_u8(bin_data, 0x09);
-            size_t jne_kr = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xB0); append_u8(bin_data, 2); // Sound 2 (tab chime)
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85);
+            size_t jne_gui_not_tab = bin_data.size(); append_u32(bin_data, 0);
+            append_u8(bin_data, 0xB0); append_u8(bin_data, 2); // Sound 2
             append_u8(bin_data, 0xE8); append_u32(bin_data, addr_play_sound - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-            append_u8(bin_data, 0xFE); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380);
-            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x00091380); append_u8(bin_data, 6);
-            size_t jbe_tok = bin_data.size(); append_u8(bin_data, 0x76); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, 1);
-            size_t pos_tok = bin_data.size();
-            bin_data[jbe_tok + 1] = (uint8_t)(pos_tok - (jbe_tok + 2));
+            append_u8(bin_data, 0xFE); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); // inc [0x00091380]
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3D); append_u32(bin_data, 0x00091380); append_u8(bin_data, (uint8_t)g_kwin.tabs.size());
+            size_t jb_tab_ok = bin_data.size(); append_u8(bin_data, 0x72); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, 0);
+            size_t pos_tab_ok = bin_data.size();
+            bin_data[jb_tab_ok + 1] = (uint8_t)(pos_tab_ok - (jb_tab_ok + 2));
             append_u8(bin_data, 0xE9);
-            size_t jmp_retab = bin_data.size(); append_u32(bin_data, 0);
+            size_t j_tab_k_redraw = bin_data.size(); append_u32(bin_data, 0);
+            mouse_click_redraw_jmps.push_back(j_tab_k_redraw);
 
-            size_t pos_kr = bin_data.size();
-            bin_data[jne_kr + 1] = (uint8_t)(pos_kr - (jne_kr + 2));
+            size_t pos_not_tab = bin_data.size();
+            write_u32_le(bin_data, jne_gui_not_tab, (uint32_t)((int32_t)pos_not_tab - (int32_t)(jne_gui_not_tab + 4)));
+
+            // Numbers '1'..'9' for direct tab jump
+            for (size_t t = 0; t < g_kwin.tabs.size() && t < 9; ++t) {
+                append_u8(bin_data, 0x3C); append_u8(bin_data, (uint8_t)('1' + t));
+                append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85);
+                size_t jne_not_num = bin_data.size(); append_u32(bin_data, 0);
+                append_u8(bin_data, 0xB0); append_u8(bin_data, 1);
+                append_u8(bin_data, 0xE8); append_u32(bin_data, addr_play_sound - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+                append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, (uint8_t)t);
+                append_u8(bin_data, 0xE9);
+                size_t j_num_redraw = bin_data.size(); append_u32(bin_data, 0);
+                mouse_click_redraw_jmps.push_back(j_num_redraw);
+                size_t pos_not_num = bin_data.size();
+                write_u32_le(bin_data, jne_not_num, (uint32_t)((int32_t)pos_not_num - (int32_t)(jne_not_num + 4)));
+            }
 
             // 'r' / 'R' -> Reboot
             append_u8(bin_data, 0x3C); append_u8(bin_data, 'r');
+            size_t jne_kr = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_reboot - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            size_t pos_kr = bin_data.size();
+            bin_data[jne_kr + 1] = (uint8_t)(pos_kr - (jne_kr + 2));
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 'R');
             size_t jne_kR = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
             append_u8(bin_data, 0xE8); append_u32(bin_data, addr_reboot - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
             size_t pos_kR = bin_data.size();
             bin_data[jne_kR + 1] = (uint8_t)(pos_kR - (jne_kR + 2));
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 'R');
-            size_t jne_kp = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_reboot - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
 
-            size_t pos_kp = bin_data.size();
-            bin_data[jne_kp + 1] = (uint8_t)(pos_kp - (jne_kp + 2));
             // 'p' / 'P' -> Poweroff
             append_u8(bin_data, 0x3C); append_u8(bin_data, 'p');
+            size_t jne_kp = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_poweroff - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+            size_t pos_kp = bin_data.size();
+            bin_data[jne_kp + 1] = (uint8_t)(pos_kp - (jne_kp + 2));
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 'P');
             size_t jne_kP = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
             append_u8(bin_data, 0xE8); append_u32(bin_data, addr_poweroff - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
             size_t pos_kP = bin_data.size();
             bin_data[jne_kP + 1] = (uint8_t)(pos_kP - (jne_kP + 2));
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 'P');
-            size_t jne_kesc = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0xE8); append_u32(bin_data, addr_poweroff - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
 
-            size_t pos_kesc = bin_data.size();
-            bin_data[jne_kesc + 1] = (uint8_t)(pos_kesc - (jne_kesc + 2));
             // ESC (0x1B) -> Exit to Terminal Shell
             append_u8(bin_data, 0x3C); append_u8(bin_data, 0x1B);
-            size_t jne_loop = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85);
+            size_t jne_loop = bin_data.size(); append_u32(bin_data, 0);
 
             // Exit GUI: Disable BGA mode (revert VGA to text mode 80x25)
             size_t pos_gui_exit = bin_data.size();
             append_u8(bin_data, 0xE8);
             append_u32(bin_data, addr_cursor_restore - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-
             emit_bga_write(4, 0);
 
             // Clear VGA text mode buffer (0xB8000)
@@ -3121,34 +3195,21 @@ namespace GrassBoot {
             append_u8(bin_data, 0xB8); append_u32(bin_data, 0x07200720);
             append_u8(bin_data, 0xFC); append_u8(bin_data, 0xF3); append_u8(bin_data, 0xAB);
             append_u8(bin_data, 0xC7); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091000); append_u32(bin_data, 0);
-
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0A);
-            emit_print_str_lit("[VD+] Возврат в командную строку RQWos.\\n");
+            emit_print_str_lit("[GUI] Возврат в командную строку GrassGreen.\n");
             append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E); append_u8(bin_data, 0x5A);
             append_u8(bin_data, 0x59); append_u8(bin_data, 0x5B); append_u8(bin_data, 0x58);
-            append_u8(bin_data, 0xC3); // ret
+            append_u8(bin_data, 0xC3);
 
-            size_t pos_loop = bin_data.size();
-            bin_data[jne_loop + 1] = (uint8_t)(pos_loop - (jne_loop + 2));
-            append_u8(bin_data, 0xE9); append_u32(bin_data, (uint32_t)((int32_t)loop_gui_event - (int32_t)(bin_data.size() + 4)));
+            size_t pos_gui_continue = bin_data.size();
+            write_u32_le(bin_data, jne_loop, (uint32_t)((int32_t)pos_gui_continue - (int32_t)(jne_loop + 4)));
+            append_u8(bin_data, 0xE9);
+            append_u32(bin_data, (uint32_t)((int32_t)loop_gui_event - (int32_t)(bin_data.size() + 4)));
 
-            // Fixup rel32 jumps back to loop_gui_tab_redraw
-            write_u32_le(bin_data, jmp_re1, (uint32_t)((int32_t)loop_gui_tab_redraw - (int32_t)(jmp_re1 + 4)));
-            write_u32_le(bin_data, jmp_re2, (uint32_t)((int32_t)loop_gui_tab_redraw - (int32_t)(jmp_re2 + 4)));
-            write_u32_le(bin_data, jmp_re3, (uint32_t)((int32_t)loop_gui_tab_redraw - (int32_t)(jmp_re3 + 4)));
-            write_u32_le(bin_data, jmp_re4, (uint32_t)((int32_t)loop_gui_tab_redraw - (int32_t)(jmp_re4 + 4)));
-            write_u32_le(bin_data, jmp_re5, (uint32_t)((int32_t)loop_gui_tab_redraw - (int32_t)(jmp_re5 + 4)));
-            write_u32_le(bin_data, jmp_re6, (uint32_t)((int32_t)loop_gui_tab_redraw - (int32_t)(jmp_re6 + 4)));
-            write_u32_le(bin_data, jmp_rec, (uint32_t)((int32_t)loop_gui_tab_redraw - (int32_t)(jmp_rec + 4)));
-            write_u32_le(bin_data, jmp_ren, (uint32_t)((int32_t)loop_gui_tab_redraw - (int32_t)(jmp_ren + 4)));
-            write_u32_le(bin_data, jmp_ret, (uint32_t)((int32_t)loop_gui_tab_redraw - (int32_t)(jmp_ret + 4)));
-            write_u32_le(bin_data, jmp_re7, (uint32_t)((int32_t)loop_gui_full_redraw - (int32_t)(jmp_re7 + 4)));
-            write_u32_le(bin_data, jmp_re8, (uint32_t)((int32_t)loop_gui_full_redraw - (int32_t)(jmp_re8 + 4)));
-            write_u32_le(bin_data, jmp_re9, (uint32_t)((int32_t)loop_gui_full_redraw - (int32_t)(jmp_re9 + 4)));
-            write_u32_le(bin_data, jmp_re0, (uint32_t)((int32_t)loop_gui_full_redraw - (int32_t)(jmp_re0 + 4)));
-            write_u32_le(bin_data, jmp_retab, (uint32_t)((int32_t)loop_gui_tab_redraw - (int32_t)(jmp_retab + 4)));
-            write_u32_le(bin_data, jmp_mouse_tab_redraw, (uint32_t)((int32_t)loop_gui_tab_redraw - (int32_t)(jmp_mouse_tab_redraw + 4)));
-            write_u32_le(bin_data, je_mouse_exit, (uint32_t)((int32_t)pos_gui_exit - (int32_t)(je_mouse_exit + 4)));
+            // Fixup tab redraw jumps
+            for (size_t jr : mouse_click_redraw_jmps) {
+                write_u32_le(bin_data, jr, (uint32_t)((int32_t)loop_gui_tab_redraw - (int32_t)(jr + 4)));
+            }
 
             // 8.22. Helper: helper_bm_exec (ESI = command string)
             uint32_t addr_bm_exec = KERNEL_LOAD_ADDR + (uint32_t)bin_data.size();
@@ -3186,7 +3247,7 @@ namespace GrassBoot {
             size_t jz_bm_chk_ls = 0;
             emit_cmd_check("help", jz_bm_chk_ls);
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0E); // Yellow
-            emit_print_str_lit("Команды системы RQWos (GrassGreen Baremetal v4.3.0):\n");
+            emit_print_str_lit("Команды системы GrassGreen (Baremetal v4.4.0):\n");
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0A); // Green
             emit_print_str_lit("  ls [-a]     - Список файлов и папок в директории\n");
             emit_print_str_lit("  cd <папка>  - Перейти в папку (cd system, cd .., cd /)\n");
@@ -3360,7 +3421,7 @@ namespace GrassBoot {
             size_t jz_bm_chk_notes = 0;
             emit_cmd_check("calc", jz_bm_chk_notes);
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0B);
-            emit_print_str_lit("=== GrassGreen Vector Calculator (RQWos/app/calc.grass) ===\n");
+            emit_print_str_lit("=== GrassGreen Vector Calculator ===\n");
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0A);
             emit_print_str_lit("  Тест операций: 1024 * 768 / 2 = 393216 [OK]\n");
             emit_print_str_lit("  Память ОЗУ:    128 * 1024 * 1024 = 134217728 байт [OK]\n");
@@ -3373,9 +3434,9 @@ namespace GrassBoot {
             size_t jz_bm_chk_disp = 0;
             emit_cmd_check("notes", jz_bm_chk_disp);
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0B);
-            emit_print_str_lit("=== Текстовый редактор RQWos Notes (data/notes.txt) ===\n");
+            emit_print_str_lit("=== Текстовый редактор GrassGreen Editor (data/notes.txt) ===\n");
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0A);
-            emit_print_str_lit("  Заметка: RQWos Baremetal Operating System\n");
+            emit_print_str_lit("  Заметка: GrassGreen Sovereign Baremetal Operating System\n");
             emit_print_str_lit("  Драйверы: ATA SSD LBA28, RTL8139 Ethernet, SB16 Audio, CMOS RTC\n");
             emit_print_str_lit("  Нажмите клавишу '5' или 'N' в графическом интерфейсе Desktop\n");
             append_u8(bin_data, 0xE9); size_t jmp_bm_ok_notes = bin_data.size(); append_u32(bin_data, 0);
@@ -3553,6 +3614,7 @@ namespace GrassBoot {
 
             std::unordered_map<uint32_t, size_t> bc_to_mc;
             std::unordered_map<std::string, uint32_t> var_slots;
+            std::unordered_map<std::string, uint32_t> struct_field_offsets;
             uint32_t next_var_addr = 0x00098000;
 
             size_t ip = 0;
@@ -4313,58 +4375,148 @@ namespace GrassBoot {
                         break;
                     }
                     case 0x72: { // OP_UI_SHOW
-                        // Launch freestanding interactive TUI/GUI Desktop
                         append_u8(bin_data, 0xE8);
                         append_u32(bin_data, addr_vd_desktop - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
                         break;
                     }
                     case 0x73: { // OP_UI_CMD
                         std::string cmd_line = readString();
+                        parse_gui_command_into_window(g_kwin, cmd_line);
                         break;
                     }
                     case 0x80: { // OP_NEW_ARRAY
                         uint32_t count = readU32();
-                        for (uint32_t i = 0; i < count; ++i) append_u8(bin_data, 0x58);
-                        append_u8(bin_data, 0x68); append_u32(bin_data, 0x00098000);
+                        // Allocate count * 8 + 8 bytes via kmalloc
+                        uint32_t alloc_bytes = count * 8 + 8;
+                        append_u8(bin_data, 0xB9); append_u32(bin_data, alloc_bytes); // mov ecx, alloc_bytes
+                        append_u8(bin_data, 0xE8); append_u32(bin_data, addr_kmalloc - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+                        // eax points to array buffer
+                        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x00); append_u32(bin_data, count); // mov [eax], count
+                        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x40); append_u8(bin_data, 0x04); append_u32(bin_data, count); // mov [eax+4], count (capacity)
+                        for (int i = (int)count - 1; i >= 0; --i) {
+                            append_u8(bin_data, 0x5A); // pop edx (val)
+                            append_u8(bin_data, 0x89); append_u8(bin_data, 0x90); append_u32(bin_data, 8 + i * 8); // mov [eax + 8 + i*8], edx
+                            append_u8(bin_data, 0xC7); append_u8(bin_data, 0x80); append_u32(bin_data, 8 + i * 8 + 4); append_u32(bin_data, 0);
+                        }
+                        append_u8(bin_data, 0x50); // push eax
                         break;
                     }
                     case 0x81: { // OP_GET_INDEX
-                        append_u8(bin_data, 0x5B); // pop idx
-                        append_u8(bin_data, 0x58); // pop arr
-                        append_u8(bin_data, 0x6A); append_u8(bin_data, 0); // push 0
+                        append_u8(bin_data, 0x5B); // pop ebx (idx)
+                        append_u8(bin_data, 0x5A); // pop edx (arr_ptr)
+                        append_u8(bin_data, 0x85); append_u8(bin_data, 0xD2); // test edx, edx
+                        size_t jz_null1 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+                        append_u8(bin_data, 0x3B); append_u8(bin_data, 0x1A); // cmp ebx, [edx]
+                        size_t jae_oob1 = bin_data.size(); append_u8(bin_data, 0x73); append_u8(bin_data, 0x00);
+                        append_u8(bin_data, 0x8B); append_u8(bin_data, 0x44); append_u8(bin_data, 0xDA); append_u8(bin_data, 0x08); // mov eax, [edx + 8 + ebx * 8]
+                        size_t jmp_push1 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+                        size_t pos_oob1 = bin_data.size();
+                        bin_data[jz_null1 + 1] = (uint8_t)(pos_oob1 - (jz_null1 + 2));
+                        bin_data[jae_oob1 + 1] = (uint8_t)(pos_oob1 - (jae_oob1 + 2));
+                        append_u8(bin_data, 0x31); append_u8(bin_data, 0xC0); // xor eax, eax
+                        size_t pos_push1 = bin_data.size();
+                        bin_data[jmp_push1 + 1] = (uint8_t)(pos_push1 - (jmp_push1 + 2));
+                        append_u8(bin_data, 0x50); // push eax
                         break;
                     }
                     case 0x82: { // OP_SET_INDEX
-                        append_u8(bin_data, 0x58); // pop val
-                        append_u8(bin_data, 0x5B); // pop idx
-                        append_u8(bin_data, 0x5E); // pop arr
+                        append_u8(bin_data, 0x58); // pop eax (val)
+                        append_u8(bin_data, 0x5B); // pop ebx (idx)
+                        append_u8(bin_data, 0x5A); // pop edx (arr_ptr)
+                        append_u8(bin_data, 0x85); append_u8(bin_data, 0xD2); // test edx, edx
+                        size_t jz_null2 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+                        append_u8(bin_data, 0x3B); append_u8(bin_data, 0x1A); // cmp ebx, [edx]
+                        size_t jae_oob2 = bin_data.size(); append_u8(bin_data, 0x73); append_u8(bin_data, 0x00);
+                        append_u8(bin_data, 0x89); append_u8(bin_data, 0x44); append_u8(bin_data, 0xDA); append_u8(bin_data, 0x08); // mov [edx + 8 + ebx * 8], eax
+                        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x44); append_u8(bin_data, 0xDA); append_u8(bin_data, 0x0C); append_u32(bin_data, 0);
+                        size_t pos_oob2 = bin_data.size();
+                        bin_data[jz_null2 + 1] = (uint8_t)(pos_oob2 - (jz_null2 + 2));
+                        bin_data[jae_oob2 + 1] = (uint8_t)(pos_oob2 - (jae_oob2 + 2));
                         break;
                     }
                     case 0x83: { // OP_ARRAY_PUSH
-                        append_u8(bin_data, 0x58); // pop val
-                        append_u8(bin_data, 0x5E); // pop arr
+                        append_u8(bin_data, 0x58); // pop eax (val)
+                        append_u8(bin_data, 0x5A); // pop edx (arr_ptr)
+                        append_u8(bin_data, 0x85); append_u8(bin_data, 0xD2); // test edx, edx
+                        size_t jz_null3 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+                        append_u8(bin_data, 0x8B); append_u8(bin_data, 0x1A); // mov ebx, [edx] (count)
+                        append_u8(bin_data, 0x89); append_u8(bin_data, 0x44); append_u8(bin_data, 0xDA); append_u8(bin_data, 0x08); // mov [edx + 8 + ebx * 8], eax
+                        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x44); append_u8(bin_data, 0xDA); append_u8(bin_data, 0x0C); append_u32(bin_data, 0);
+                        append_u8(bin_data, 0xFF); append_u8(bin_data, 0x02); // inc dword ptr [edx]
+                        size_t pos_null3 = bin_data.size();
+                        bin_data[jz_null3 + 1] = (uint8_t)(pos_null3 - (jz_null3 + 2));
                         break;
                     }
                     case 0x84: { // OP_ARRAY_POP
-                        append_u8(bin_data, 0x5E); // pop arr
-                        append_u8(bin_data, 0x6A); append_u8(bin_data, 0); // push 0
+                        append_u8(bin_data, 0x5A); // pop edx (arr_ptr)
+                        append_u8(bin_data, 0x85); append_u8(bin_data, 0xD2); // test edx, edx
+                        size_t jz_null4 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+                        append_u8(bin_data, 0x83); append_u8(bin_data, 0x3A); append_u8(bin_data, 0); // cmp dword ptr [edx], 0
+                        size_t jbe_zero4 = bin_data.size(); append_u8(bin_data, 0x76); append_u8(bin_data, 0x00);
+                        append_u8(bin_data, 0xFF); append_u8(bin_data, 0x0A); // dec dword ptr [edx]
+                        append_u8(bin_data, 0x8B); append_u8(bin_data, 0x1A); // mov ebx, [edx]
+                        append_u8(bin_data, 0x8B); append_u8(bin_data, 0x44); append_u8(bin_data, 0xDA); append_u8(bin_data, 0x08); // mov eax, [edx + 8 + ebx * 8]
+                        size_t jmp_push4 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+                        size_t pos_zero4 = bin_data.size();
+                        bin_data[jz_null4 + 1] = (uint8_t)(pos_zero4 - (jz_null4 + 2));
+                        bin_data[jbe_zero4 + 1] = (uint8_t)(pos_zero4 - (jbe_zero4 + 2));
+                        append_u8(bin_data, 0x31); append_u8(bin_data, 0xC0); // xor eax, eax
+                        size_t pos_push4 = bin_data.size();
+                        bin_data[jmp_push4 + 1] = (uint8_t)(pos_push4 - (jmp_push4 + 2));
+                        append_u8(bin_data, 0x50); // push eax
                         break;
                     }
                     case 0x85: { // OP_NEW_STRUCT
                         std::string sname = readString();
-                        append_u8(bin_data, 0x68); append_u32(bin_data, 0x00098000);
+                        // Allocate 264 bytes via kmalloc
+                        append_u8(bin_data, 0xB9); append_u32(bin_data, 264); // mov ecx, 264
+                        append_u8(bin_data, 0xE8); append_u32(bin_data, addr_kmalloc - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+                        // Zero 264 bytes: edi = eax, ecx = 66, eax = 0, rep stosd
+                        append_u8(bin_data, 0x57); // push edi
+                        append_u8(bin_data, 0x89); append_u8(bin_data, 0xC7); // mov edi, eax
+                        append_u8(bin_data, 0xB9); append_u32(bin_data, 66);  // mov ecx, 66
+                        append_u8(bin_data, 0x31); append_u8(bin_data, 0xC0); // xor eax, eax
+                        append_u8(bin_data, 0xFC); // cld
+                        append_u8(bin_data, 0xF3); append_u8(bin_data, 0xAB); // rep stosd
+                        append_u8(bin_data, 0x89); append_u8(bin_data, 0xF8); // mov eax, edi
+                        append_u8(bin_data, 0x2D); append_u32(bin_data, 264); // sub eax, 264
+                        append_u8(bin_data, 0x5F); // pop edi
+                        append_u8(bin_data, 0x50); // push eax
                         break;
                     }
                     case 0x86: { // OP_GET_FIELD
                         std::string fname = readString();
-                        append_u8(bin_data, 0x58); // pop struct
-                        append_u8(bin_data, 0x6A); append_u8(bin_data, 0); // push 0
+                        if (struct_field_offsets.find(fname) == struct_field_offsets.end()) {
+                            struct_field_offsets[fname] = (uint32_t)struct_field_offsets.size();
+                        }
+                        uint32_t f_off = 8 + (struct_field_offsets[fname] % 31) * 8;
+                        append_u8(bin_data, 0x5A); // pop edx (struct_ptr)
+                        append_u8(bin_data, 0x85); append_u8(bin_data, 0xD2);
+                        size_t jz_null5 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+                        append_u8(bin_data, 0x8B); append_u8(bin_data, 0x82); append_u32(bin_data, f_off); // mov eax, [edx + f_off]
+                        size_t jmp_push5 = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+                        size_t pos_null5 = bin_data.size();
+                        bin_data[jz_null5 + 1] = (uint8_t)(pos_null5 - (jz_null5 + 2));
+                        append_u8(bin_data, 0x31); append_u8(bin_data, 0xC0); // xor eax, eax
+                        size_t pos_push5 = bin_data.size();
+                        bin_data[jmp_push5 + 1] = (uint8_t)(pos_push5 - (jmp_push5 + 2));
+                        append_u8(bin_data, 0x50); // push eax
                         break;
                     }
                     case 0x87: { // OP_SET_FIELD
                         std::string fname = readString();
-                        append_u8(bin_data, 0x58); // pop val
-                        append_u8(bin_data, 0x5E); // pop struct
+                        if (struct_field_offsets.find(fname) == struct_field_offsets.end()) {
+                            struct_field_offsets[fname] = (uint32_t)struct_field_offsets.size();
+                        }
+                        uint32_t f_off = 8 + (struct_field_offsets[fname] % 31) * 8;
+                        append_u8(bin_data, 0x58); // pop eax (val)
+                        append_u8(bin_data, 0x5A); // pop edx (struct_ptr)
+                        append_u8(bin_data, 0x85); append_u8(bin_data, 0xD2);
+                        size_t jz_null6 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+                        append_u8(bin_data, 0x89); append_u8(bin_data, 0x82); append_u32(bin_data, f_off); // mov [edx + f_off], eax
+                        append_u8(bin_data, 0xC7); append_u8(bin_data, 0x82); append_u32(bin_data, f_off + 4); append_u32(bin_data, 0);
+                        size_t pos_null6 = bin_data.size();
+                        bin_data[jz_null6 + 1] = (uint8_t)(pos_null6 - (jz_null6 + 2));
                         break;
                     }
                     case 0x90: { // OP_ADD_CONST

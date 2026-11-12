@@ -1074,6 +1074,43 @@ bool BytecodeCompiler::parseSingleGuiDirective() {
             else if (arg == "right") emitUICmd("right");
         } else if (cmd == "title" || cmd == "name") {
             emitUICmd(cmd + "(!!" + arg + "!!)");
+        } else if (cmd == "header") {
+            emitUICmd("header(" + arg + ")");
+            if (match(TOK_LBRACE)) {
+                while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
+                    if (peek().kind == TOK_IDENT) {
+                        string hsub = peek().text;
+                        if (hsub == "title" || hsub == "name") {
+                            advance();
+                            string harg = extractParenArgsAsString();
+                            match(TOK_SEMI);
+                            emitUICmd("header-title(!!" + harg + "!!)");
+                            continue;
+                        } else if (hsub == "color" || hsub == "bg" || hsub == "background") {
+                            advance();
+                            string harg = extractParenArgsAsString();
+                            match(TOK_SEMI);
+                            emitUICmd("header-color(" + harg + ")");
+                            continue;
+                        } else if (hsub == "text-color" || hsub == "text_color") {
+                            advance();
+                            string harg = extractParenArgsAsString();
+                            match(TOK_SEMI);
+                            emitUICmd("header-text-color(" + harg + ")");
+                            continue;
+                        } else if (hsub == "height") {
+                            advance();
+                            string harg = extractParenArgsAsString();
+                            match(TOK_SEMI);
+                            emitUICmd("header-height(" + harg + ")");
+                            continue;
+                        }
+                    }
+                    if (!parseSingleGuiDirective()) advance();
+                }
+                consume(TOK_RBRACE, "Ожидалась закрывающая фигурная скобка '}' блока 'header'!");
+                match(TOK_SEMI);
+            }
         } else {
             emitUICmd(cmd + "(" + arg + ")");
         }
