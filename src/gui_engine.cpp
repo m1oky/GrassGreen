@@ -1,4 +1,5 @@
 #include "gui_engine.h"
+#include "GrassHardware.h"
 #include "GrassAudio.h"
 #include "GrassHAL.h"
 #include "GrassMMIO.h"
@@ -654,16 +655,70 @@ using namespace std;
             if (end != wstring::npos) {
                 wstring var_name = text.substr(start + 1, end - start - 1);
                 string utf8_var = wstring_to_utf8(var_name);
-                if (variables_cache.count(utf8_var)) {
+                string clean_var = utf8_var;
+                if (clean_var.size() > 2 && clean_var.substr(clean_var.size() - 2) == "()") {
+                    clean_var = clean_var.substr(0, clean_var.size() - 2);
+                }
+                if (clean_var == "to_str" || clean_var == "to_string" || clean_var == "to_num") {
+                    text.replace(start, (end - start) + 1, L"");
+                    start = text.find(L"{", start);
+                } else if (variables_cache.count(utf8_var)) {
                     wstring val = variables_cache[utf8_var];
                     text.replace(start, (end - start) + 1, val);
                     start = text.find(L"{", start + val.length());
+                } else if (variables_cache.count(clean_var)) {
+                    wstring val = variables_cache[clean_var];
+                    text.replace(start, (end - start) + 1, val);
+                    start = text.find(L"{", start + val.length());
                 } else {
-                    start = text.find(L"{", end + 1);
+                    string hw_val = "";
+                    if (clean_var == "hw_cpu_brand" || clean_var == "cpu_brand" || clean_var == "cpu_name") hw_val = GrassHardware::cpu_brand();
+                    else if (clean_var == "hw_cpu_vendor" || clean_var == "cpu_vendor") hw_val = GrassHardware::cpu_vendor();
+                    else if (clean_var == "hw_cpu_cores" || clean_var == "cpu_cores") hw_val = to_string(GrassHardware::cpu_cores());
+                    else if (clean_var == "hw_cpu_threads" || clean_var == "cpu_threads") hw_val = to_string(GrassHardware::cpu_threads());
+                    else if (clean_var == "hw_cpu_freq" || clean_var == "cpu_freq") hw_val = to_string(GrassHardware::cpu_freq_mhz());
+                    else if (clean_var == "hw_cpu_temp" || clean_var == "cpu_temp") hw_val = to_string(GrassHardware::cpu_temp());
+                    else if (clean_var == "hw_cpu_virt" || clean_var == "cpu_virt") hw_val = GrassHardware::cpu_virt();
+                    else if (clean_var == "hw_ram_total" || clean_var == "ram_total") hw_val = to_string(GrassHardware::ram_total_mb());
+                    else if (clean_var == "hw_ram_used" || clean_var == "ram_used" || clean_var == "proc_mem") hw_val = to_string(GrassHardware::ram_used_mb());
+                    else if (clean_var == "hw_ram_free" || clean_var == "ram_free") hw_val = to_string(GrassHardware::ram_free_mb());
+                    else if (clean_var == "hw_ram_cached" || clean_var == "ram_cached") hw_val = to_string(GrassHardware::ram_cached_mb());
+                    else if (clean_var == "hw_ram_speed" || clean_var == "ram_speed") hw_val = to_string(GrassHardware::ram_speed_mhz());
+                    else if (clean_var == "hw_ram_form" || clean_var == "ram_form") hw_val = GrassHardware::ram_form();
+                    else if (clean_var == "hw_disk_model" || clean_var == "disk_model") hw_val = GrassHardware::disk_model();
+                    else if (clean_var == "hw_disk_size" || clean_var == "disk_size") hw_val = to_string(GrassHardware::disk_size_gb());
+                    else if (clean_var == "hw_disk_free" || clean_var == "disk_free") hw_val = to_string(GrassHardware::disk_free_gb());
+                    else if (clean_var == "hw_disk_type" || clean_var == "disk_type") hw_val = GrassHardware::disk_type();
+                    else if (clean_var == "hw_net_adapter" || clean_var == "net_adapter") hw_val = GrassHardware::net_adapter();
+                    else if (clean_var == "hw_net_ipv4" || clean_var == "net_ipv4" || clean_var == "net_ip") hw_val = GrassHardware::net_ipv4();
+                    else if (clean_var == "hw_net_ipv6" || clean_var == "net_ipv6") hw_val = GrassHardware::net_ipv6();
+                    else if (clean_var == "hw_gpu_name" || clean_var == "gpu_name") hw_val = GrassHardware::gpu_name();
+                    else if (clean_var == "hw_gpu_vram_total" || clean_var == "gpu_vram") hw_val = to_string(GrassHardware::gpu_vram_total_mb());
+                    else if (clean_var == "hw_gpu_temp" || clean_var == "gpu_temp") hw_val = to_string(GrassHardware::gpu_temp());
+                    else if (clean_var == "hw_uptime_str" || clean_var == "uptime_str") hw_val = GrassHardware::uptime_str();
+                    else if (clean_var == "hw_uptime_sec" || clean_var == "uptime_sec") hw_val = to_string(GrassHardware::uptime_sec());
+                    else if (clean_var == "hw_board_vendor" || clean_var == "board_vendor") hw_val = GrassHardware::board_vendor();
+                    else if (clean_var == "hw_board_model" || clean_var == "board_model") hw_val = GrassHardware::board_model();
+                    else if (clean_var == "hw_bios_vendor" || clean_var == "bios_vendor") hw_val = GrassHardware::bios_vendor();
+                    else if (clean_var == "hw_bios_date" || clean_var == "bios_date") hw_val = GrassHardware::bios_date();
+                    else if (clean_var == "hw_bios_version" || clean_var == "bios_version") hw_val = GrassHardware::bios_version();
+                    else if (clean_var == "hw_pci_count" || clean_var == "pci_count") hw_val = to_string(GrassHardware::pci_count());
+
+                    if (!hw_val.empty()) {
+                        wstring val = utf8_to_wstring(hw_val);
+                        text.replace(start, (end - start) + 1, val);
+                        start = text.find(L"{", start + val.length());
+                    } else {
+                        start = text.find(L"{", end + 1);
+                    }
                 }
             } else {
                 break;
             }
+        }
+        string full_u8 = wstring_to_utf8(text);
+        if (variables_cache.count(full_u8)) {
+            text = variables_cache[full_u8];
         }
     }
 
@@ -2656,10 +2711,11 @@ using namespace std;
             }
         }
 
-        // Инициализация отображения времени для всех виджетов часов перед показом
+        // Распаковка переменных и инициализация отображения времени для виджетов
         SYSTEMTIME init_st;
         GetLocalTime(&init_st);
         for (auto& elem : elements) {
+            unpack_cached_vars(elem.text);
             if (elem.is_clock) {
                 elem.text = format_current_time(init_st, elem.clock_format);
             }

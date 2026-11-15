@@ -925,16 +925,88 @@ bool BytecodeCompiler::parseSingleGuiDirective() {
         string txt = "";
         if (cmd == "clock" && peek().kind == TOK_LBRACE) {
             txt = "HH:mm:ss";
-        } else if (match(TOK_LPAREN)) {
-            bool first = true;
-            while (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
-                if (!first) txt += " ";
-                txt += advance().text;
-                first = false;
+        } else if (cmd == "icon" || cmd == "video" || cmd == "svg") {
+            if (match(TOK_LPAREN)) {
+                if (peek().kind == TOK_STRING || peek().kind == TOK_IDENT) txt = advance().text;
+                consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
+            } else if (peek().kind == TOK_STRING || peek().kind == TOK_IDENT) {
+                txt = advance().text;
             }
-            consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
-        } else if (peek().kind == TOK_STRING || peek().kind == TOK_IDENT || peek().kind == TOK_NUMBER) {
-            txt = advance().text;
+        } else if (match(TOK_LPAREN)) {
+            vector<GrassToken> expr_tokens;
+            int paren_depth = 1;
+            while (paren_depth > 0 && peek().kind != TOK_EOF) {
+                if (peek().kind == TOK_LPAREN) paren_depth++;
+                else if (peek().kind == TOK_RPAREN) {
+                    paren_depth--;
+                    if (paren_depth == 0) {
+                        advance();
+                        break;
+                    }
+                }
+                expr_tokens.push_back(advance());
+            }
+            if (expr_tokens.size() == 1 && expr_tokens[0].kind == TOK_STRING) {
+                string s = expr_tokens[0].text;
+                if (s.size() >= 2 && s.front() == '"' && s.back() == '"') s = s.substr(1, s.size() - 2);
+                txt = s;
+            } else if (expr_tokens.size() == 1 && expr_tokens[0].kind == TOK_IDENT) {
+                txt = "{" + expr_tokens[0].text + "}";
+            } else {
+                for (size_t ti = 0; ti < expr_tokens.size(); ++ti) {
+                    const auto& tk = expr_tokens[ti];
+                    if (tk.kind == TOK_STRING) {
+                        string s = tk.text;
+                        if (s.size() >= 2 && s.front() == '"' && s.back() == '"') s = s.substr(1, s.size() - 2);
+                        txt += s;
+                    } else if (tk.kind == TOK_IDENT) {
+                        if (tk.text == "to_str" || tk.text == "to_string" || tk.text == "to_num") {
+                            continue;
+                        }
+                        if (ti + 2 < expr_tokens.size() && expr_tokens[ti+1].kind == TOK_LPAREN && expr_tokens[ti+2].kind == TOK_RPAREN) {
+                            txt += "{" + tk.text + "}";
+                            ti += 2;
+                        } else {
+                            txt += "{" + tk.text + "}";
+                        }
+                    } else if (tk.kind == TOK_NUMBER) {
+                        txt += tk.text;
+                    }
+                }
+            }
+        } else {
+            vector<GrassToken> expr_tokens;
+            while (peek().kind != TOK_LBRACE && peek().kind != TOK_SEMI && peek().kind != TOK_EOF) {
+                expr_tokens.push_back(advance());
+            }
+            if (expr_tokens.size() == 1 && expr_tokens[0].kind == TOK_STRING) {
+                string s = expr_tokens[0].text;
+                if (s.size() >= 2 && s.front() == '"' && s.back() == '"') s = s.substr(1, s.size() - 2);
+                txt = s;
+            } else if (expr_tokens.size() == 1 && expr_tokens[0].kind == TOK_IDENT) {
+                txt = "{" + expr_tokens[0].text + "}";
+            } else {
+                for (size_t ti = 0; ti < expr_tokens.size(); ++ti) {
+                    const auto& tk = expr_tokens[ti];
+                    if (tk.kind == TOK_STRING) {
+                        string s = tk.text;
+                        if (s.size() >= 2 && s.front() == '"' && s.back() == '"') s = s.substr(1, s.size() - 2);
+                        txt += s;
+                    } else if (tk.kind == TOK_IDENT) {
+                        if (tk.text == "to_str" || tk.text == "to_string" || tk.text == "to_num") {
+                            continue;
+                        }
+                        if (ti + 2 < expr_tokens.size() && expr_tokens[ti+1].kind == TOK_LPAREN && expr_tokens[ti+2].kind == TOK_RPAREN) {
+                            txt += "{" + tk.text + "}";
+                            ti += 2;
+                        } else {
+                            txt += "{" + tk.text + "}";
+                        }
+                    } else if (tk.kind == TOK_NUMBER) {
+                        txt += tk.text;
+                    }
+                }
+            }
         }
 
         if (cmd == "icon" || cmd == "video" || cmd == "svg") {

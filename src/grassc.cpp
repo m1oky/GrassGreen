@@ -649,7 +649,8 @@ public:
 
     do_add: {
         GrassValue b = pop(), a = pop();
-        if (a.isNumeric() && b.isNumeric()) push(GrassValue::Num(a.toNumber() + b.toNumber()));
+        if (a.is_str() && b.is_str()) push(GrassValue::Str(a.toString() + b.toString()));
+        else if (a.isNumeric() && b.isNumeric()) push(GrassValue::Num(a.toNumber() + b.toNumber()));
         else if (a.is_str() || b.is_str()) push(GrassValue::Str(a.toString() + b.toString()));
         else push(GrassValue::Num(a.toNumber() + b.toNumber()));
         DISPATCH_STEP();
@@ -2269,6 +2270,7 @@ public:
 
     do_ui_cmd: {
         {
+            syncVarsToGUI();
             string cmd_line = readString();
             GrassGUI::exec_command(cmd_line);
         }
