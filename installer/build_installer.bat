@@ -5,7 +5,7 @@ echo [GrassInstaller] Building GrassGreen v4.2.0 Sovereign Setup...
 if not exist "bin" mkdir bin
 
 echo [GrassInstaller] 1. Compiling and running C++ payload builder...
-g++ -std=c++20 -O2 installer\make_payload.cpp -o installer\make_payload.exe
+g++ -std=c++20 -O2 -static -static-libgcc -static-libstdc++ installer\make_payload.cpp -o installer\make_payload.exe
 if %ERRORLEVEL% neq 0 (
     echo [GrassInstaller] ERROR: Failed to compile make_payload.cpp!
     exit /b %ERRORLEVEL%
@@ -20,16 +20,17 @@ if not exist "installer\payload_data.h" (
 )
 
 echo [GrassInstaller] 2. Compiling installer\setup.cpp into setup.exe...
-g++ -std=c++20 -O2 -s -mwindows ^
+g++ -std=c++20 -O2 -s -mwindows -static -static-libgcc -static-libstdc++ ^
     installer\setup.cpp ^
     -o setup.exe ^
     -lcomctl32 -lshlwapi -lole32 -lshell32 -ladvapi32 -lgdi32
 
 if %ERRORLEVEL% equ 0 (
     copy /Y setup.exe bin\setup.exe >nul
+    copy /Y setup.exe installer\setup.exe >nul
     echo [GrassInstaller] ========================================
     echo [GrassInstaller] Setup successfully built: setup.exe
-    echo [GrassInstaller] Dual copy: bin\setup.exe
+    echo [GrassInstaller] Triple copy: setup.exe, bin\setup.exe, installer\setup.exe
     echo [GrassInstaller] ========================================
 ) else (
     echo [GrassInstaller] ERROR: Failed to compile setup.exe (Code %ERRORLEVEL%)

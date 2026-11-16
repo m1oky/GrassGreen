@@ -3,7 +3,7 @@ setlocal
 echo [GrassCompiler] Building GrassGreen v4.3...
 if not exist "bin" mkdir bin
 
-g++ -std=c++20 -O3 -s ^
+g++ -std=c++20 -O3 -s -static -static-libgcc -static-libstdc++ ^
   src/grassc.cpp ^
   src/GrassHAL.cpp ^
   src/GrassMMIO.cpp ^

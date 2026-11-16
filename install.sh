@@ -167,7 +167,7 @@ mkdir -p bin
 # ------------------------------------------------------------------------------
 echo -e "${CYAN}[*] Compiling GrassGreen v4.3 (Single Compilation Unit / C++20 -O3)...${NC}"
 
-g++ -std=c++20 -O3 -s \
+g++ -std=c++20 -O3 -s -static-libgcc -static-libstdc++ \
   src/grassc.cpp \
   src/GrassHAL.cpp \
   src/GrassMMIO.cpp \

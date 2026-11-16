@@ -5,17 +5,19 @@
 # Локальные базы данных тестов
 storage.gdb
 
-# Внутренние файлы агентов
+# Внутренние файлы агентов и планы
 AGENTS.md
 STATE.md
 AUDIT_PROMPT.md
 PROMPT_FIX_V4.md
 BUGS.md
+plans/
 
 # Сгенерированные данные инсталлятора
 installer/payload_data.h
+installer/make_payload.exe
 
-# Вспомогательные утилиты разработки и логи
+# Вспомогательные утилиты разработки, дампы и логи
 tools/*.exe
 *.tmp
 *.log
@@ -23,3 +25,12 @@ tools/*.exe
 *.ppm
 *.iso
 *.grassc
+
+# Временные тестовые скрипты и дампы
+test_dir/
+test_*.exe
+test_*.grass
+test_*.py
+trace_*.py
+__pycache__/
+*.py[cod]

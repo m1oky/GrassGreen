@@ -29,13 +29,15 @@ namespace GrassBoot {
         int radius = 0;                    // скругление
         int font_size = 16;                // размер шрифта
         std::string click_tab;             // имя вкладки для click-switch
+        uint32_t border_color = 0;
+        int border_width = 0;
     };
 
     struct KernelWindow {
         bool has_window = false;
         std::string title = "GrassGreen OS";
-        int width = 1024;
-        int height = 768;
+        int width = 1280;
+        int height = 720;
         uint32_t bg_color = 0x0009090B;
         std::string header_style = "dots";
         std::string header_title = "";
@@ -160,9 +162,31 @@ namespace GrassBoot {
         kwin.has_window = true;
 
         if (cmd_line.find("surface(") == 0) return;
+        if (cmd_line.find("size(") == 0 && kwin.widgets.empty()) {
+            parse_two_ints(cmd_line, kwin.width, kwin.height);
+            return;
+        }
+        if (cmd_line.find("fullscrean") == 0 || cmd_line.find("fullscreen") == 0) {
+            if (kwin.width <= 0) kwin.width = 1280;
+            if (kwin.height <= 0) kwin.height = 720;
+            return;
+        }
         if (cmd_line.find("auto_size_display") == 0) {
-            kwin.width = 1024;
-            kwin.height = 768;
+            if (kwin.width <= 0 || kwin.height <= 0) {
+                kwin.width = 1280;
+                kwin.height = 720;
+            }
+            return;
+        }
+        if (cmd_line.find("svg(") == 0 || cmd_line.find("icon(") == 0 || cmd_line.find("video(") == 0) {
+            std::string asset_path = extract_bracket_content(cmd_line);
+            KernelWidget kw;
+            kw.type = "svg";
+            kw.text = asset_path;
+            kw.tab_name = (kwin.current_tab.empty() || kwin.current_tab == "main") ? "main" : kwin.current_tab;
+            kw.x = 0; kw.y = 0; kw.w = 20; kw.h = 20;
+            kw.bg_color = 0;
+            kwin.widgets.push_back(kw);
             return;
         }
         if (cmd_line.find("title(") == 0 || cmd_line.find("name(") == 0) {
@@ -211,8 +235,8 @@ namespace GrassBoot {
         }
         if (cmd_line.find("tab(") == 0) {
             std::string tb = extract_bracket_content(cmd_line);
-            if (tb == "main") {
-                kwin.current_tab = "";
+            if (tb == "main" || tb.empty()) {
+                kwin.current_tab = "main";
             } else if (!tb.empty()) {
                 if (std::find(kwin.tabs.begin(), kwin.tabs.end(), tb) == kwin.tabs.end()) {
                     kwin.tabs.push_back(tb);
@@ -221,12 +245,24 @@ namespace GrassBoot {
             }
             return;
         }
+        if (cmd_line.find("clock ") == 0 || cmd_line.find("clock!!") == 0 || cmd_line.find("clock(") == 0) {
+            KernelWidget kw;
+            kw.type = "label";
+            kw.text = "14:35:20";
+            kw.tab_name = (kwin.current_tab.empty() || kwin.current_tab == "main") ? "main" : kwin.current_tab;
+            kw.x = 580; kw.y = 7; kw.w = 120; kw.h = 22;
+            kw.bg_color = 0;
+            kw.text_color = 0x00F8FAFC;
+            kw.font_size = 14;
+            kwin.widgets.push_back(kw);
+            return;
+        }
         if (cmd_line.find("button ") == 0 || cmd_line.find("button!!") == 0) {
             std::string txt = extract_bracket_content(cmd_line);
             KernelWidget kw;
             kw.type = "button";
             kw.text = resolve_baremetal_vars(txt);
-            kw.tab_name = kwin.current_tab.empty() ? (!kwin.tabs.empty() ? kwin.tabs.back() : "desktop") : kwin.current_tab;
+            kw.tab_name = (kwin.current_tab.empty() || kwin.current_tab == "main") ? "main" : kwin.current_tab;
             kw.x = 50; kw.y = 100; kw.w = 200; kw.h = 40;
             kw.bg_color = 0x00162B2E;
             kw.text_color = 0x0000FFCC;
@@ -240,7 +276,7 @@ namespace GrassBoot {
             KernelWidget kw;
             kw.type = "label";
             kw.text = resolve_baremetal_vars(txt);
-            kw.tab_name = kwin.current_tab.empty() ? (!kwin.tabs.empty() ? kwin.tabs.back() : "desktop") : kwin.current_tab;
+            kw.tab_name = (kwin.current_tab.empty() || kwin.current_tab == "main") ? "main" : kwin.current_tab;
             kw.x = 50; kw.y = 60; kw.w = 400; kw.h = 30;
             kw.bg_color = 0;
             kw.text_color = 0x0022C55E;
@@ -253,7 +289,7 @@ namespace GrassBoot {
             KernelWidget kw;
             kw.type = "enter";
             kw.text = resolve_baremetal_vars(txt);
-            kw.tab_name = kwin.current_tab.empty() ? (!kwin.tabs.empty() ? kwin.tabs.back() : "desktop") : kwin.current_tab;
+            kw.tab_name = (kwin.current_tab.empty() || kwin.current_tab == "main") ? "main" : kwin.current_tab;
             kw.x = 50; kw.y = 150; kw.w = 300; kw.h = 36;
             kw.bg_color = 0x001E2230;
             kw.text_color = 0x00F8FAFC;
@@ -271,7 +307,7 @@ namespace GrassBoot {
                 parse_two_ints(cmd_line, last.w, last.h);
                 return;
             }
-            if (cmd_line.find("button-color(") == 0) {
+            if (cmd_line.find("button-color(") == 0 || cmd_line.find("color(") == 0 || cmd_line.find("bg(") == 0 || cmd_line.find("background(") == 0) {
                 last.bg_color = parse_color_str(extract_bracket_content(cmd_line));
                 return;
             }
@@ -285,6 +321,18 @@ namespace GrassBoot {
             }
             if (cmd_line.find("font-size(") == 0) {
                 try { last.font_size = std::stoi(extract_bracket_content(cmd_line)); } catch(...) {}
+                return;
+            }
+            if (cmd_line.find("border(") == 0) {
+                std::string bcontent = extract_bracket_content(cmd_line);
+                size_t cpos = bcontent.find(',');
+                if (cpos != std::string::npos) {
+                    try { last.border_width = std::stoi(bcontent.substr(0, cpos)); } catch(...) {}
+                    std::string cstr = bcontent.substr(cpos + 1);
+                    while (!cstr.empty() && (cstr.front() == ' ' || cstr.front() == '"')) cstr.erase(0, 1);
+                    while (!cstr.empty() && (cstr.back() == ' ' || cstr.back() == '"')) cstr.pop_back();
+                    last.border_color = parse_color_str(cstr);
+                }
                 return;
             }
             if (cmd_line.find("click-switch(") == 0) {
@@ -407,7 +455,6 @@ namespace GrassBoot {
                     case 0x32:   // OP_CALL_FUNC
                     case 0xF1: { // OP_CALL_USER
                         readU32_scan();
-                        readU8_scan();
                         break;
                     }
                     case 0x50: { // OP_CALL_BUILTIN
@@ -2376,7 +2423,8 @@ namespace GrassBoot {
             append_u8(bin_data, 0x89); append_u8(bin_data, 0xC6);
             size_t loop_jg_outer = bin_data.size();
             append_u8(bin_data, 0x80); append_u8(bin_data, 0x3E); append_u8(bin_data, 0);
-            size_t jz_jg_nf = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x84);
+            size_t jz_jg_nf = bin_data.size(); append_u32(bin_data, 0);
             append_u8(bin_data, 0x89); append_u8(bin_data, 0xF7);
             append_u8(bin_data, 0x89); append_u8(bin_data, 0xDA);
             size_t loop_jg_cmp = bin_data.size();
@@ -2393,79 +2441,106 @@ namespace GrassBoot {
             append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(loop_jg_outer - (bin_data.size() + 1)));
             size_t pos_jg_matched = bin_data.size();
             bin_data[jz_jg_matched + 1] = (uint8_t)(pos_jg_matched - (jz_jg_matched + 2));
-            size_t loop_jg_skip = bin_data.size();
-            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x07);
-            append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0);
-            size_t jz_jg_nf2 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0x3C); append_u8(bin_data, '"');
-            size_t je_jg_sk1 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+
+            // Key matched! Now advance EDI until ':'
+            size_t loop_jg_find_colon = bin_data.size();
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x07); // mov al, [edi]
+            append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0); // test al, al
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x84);
+            size_t jz_jg_nf_c = bin_data.size(); append_u32(bin_data, 0); // jz pos_jg_nf
+            append_u8(bin_data, 0x3C); append_u8(bin_data, ':');   // cmp al, ':'
+            size_t je_jg_colon_found = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x47); // inc edi
+            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(loop_jg_find_colon - (bin_data.size() + 1)));
+
+            size_t pos_jg_colon_found = bin_data.size();
+            bin_data[je_jg_colon_found + 1] = (uint8_t)(pos_jg_colon_found - (je_jg_colon_found + 2));
+            append_u8(bin_data, 0x47); // inc edi (skip ':')
+
+            // Skip whitespace after ':'
+            size_t loop_jg_skip_ws = bin_data.size();
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x07); // mov al, [edi]
+            append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0); // test al, al
+            append_u8(bin_data, 0x0F); append_u8(bin_data, 0x84);
+            size_t jz_jg_nf_ws = bin_data.size(); append_u32(bin_data, 0); // jz pos_jg_nf
             append_u8(bin_data, 0x3C); append_u8(bin_data, ' ');
-            size_t je_jg_sk2 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            size_t je_ws1 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
             append_u8(bin_data, 0x3C); append_u8(bin_data, 9);
-            size_t je_jg_sk3 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0x3C); append_u8(bin_data, ':');
-            size_t je_jg_sk4 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
-            size_t jmp_jg_val_start = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
-            size_t pos_jg_sk = bin_data.size();
-            bin_data[je_jg_sk1 + 1] = (uint8_t)(pos_jg_sk - (je_jg_sk1 + 2));
-            bin_data[je_jg_sk2 + 1] = (uint8_t)(pos_jg_sk - (je_jg_sk2 + 2));
-            bin_data[je_jg_sk3 + 1] = (uint8_t)(pos_jg_sk - (je_jg_sk3 + 2));
-            bin_data[je_jg_sk4 + 1] = (uint8_t)(pos_jg_sk - (je_jg_sk4 + 2));
-            append_u8(bin_data, 0x47);
-            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(loop_jg_skip - (bin_data.size() + 1)));
-            size_t pos_jg_val_start = bin_data.size();
-            bin_data[jmp_jg_val_start + 1] = (uint8_t)(pos_jg_val_start - (jmp_jg_val_start + 2));
-            append_u8(bin_data, 0xBA); append_u32(bin_data, 0x00095800);
-            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3F); append_u8(bin_data, '"');
-            size_t jne_jg_unquoted = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0x47);
-            size_t loop_jg_q = bin_data.size();
-            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x07);
-            append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0);
-            size_t jz_jg_cp_done1 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0x3C); append_u8(bin_data, '"');
-            size_t je_jg_cp_done2 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0x88); append_u8(bin_data, 0x02);
-            append_u8(bin_data, 0x47); append_u8(bin_data, 0x42);
-            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(loop_jg_q - (bin_data.size() + 1)));
-            size_t pos_jg_unquoted = bin_data.size();
-            bin_data[jne_jg_unquoted + 1] = (uint8_t)(pos_jg_unquoted - (jne_jg_unquoted + 2));
-            size_t loop_jg_uq = bin_data.size();
-            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x07);
-            append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0);
-            size_t jz_jg_cp_done3 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0x3C); append_u8(bin_data, ',');
-            size_t je_jg_cp_done4 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0x3C); append_u8(bin_data, '}');
-            size_t je_jg_cp_done5 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0x3C); append_u8(bin_data, ' ');
-            size_t je_jg_cp_done6 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
-            append_u8(bin_data, 0x3C); append_u8(bin_data, 9);
-            size_t je_jg_cp_done7 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            size_t je_ws2 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
             append_u8(bin_data, 0x3C); append_u8(bin_data, 10);
-            size_t je_jg_cp_done8 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            size_t je_ws3 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
             append_u8(bin_data, 0x3C); append_u8(bin_data, 13);
-            size_t je_jg_cp_done9 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            size_t je_ws4 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            size_t jmp_val_begin = bin_data.size(); append_u8(bin_data, 0xEB); append_u8(bin_data, 0x00);
+
+            size_t pos_is_ws = bin_data.size();
+            bin_data[je_ws1 + 1] = (uint8_t)(pos_is_ws - (je_ws1 + 2));
+            bin_data[je_ws2 + 1] = (uint8_t)(pos_is_ws - (je_ws2 + 2));
+            bin_data[je_ws3 + 1] = (uint8_t)(pos_is_ws - (je_ws3 + 2));
+            bin_data[je_ws4 + 1] = (uint8_t)(pos_is_ws - (je_ws4 + 2));
+            append_u8(bin_data, 0x47); // inc edi
+            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(loop_jg_skip_ws - (bin_data.size() + 1)));
+
+            size_t pos_val_begin = bin_data.size();
+            bin_data[jmp_val_begin + 1] = (uint8_t)(pos_val_begin - (jmp_val_begin + 2));
+            append_u8(bin_data, 0xBA); append_u32(bin_data, 0x00095800); // mov edx, 0x00095800
+            append_u8(bin_data, 0x80); append_u8(bin_data, 0x3F); append_u8(bin_data, '"'); // cmp byte [edi], '"'
+            size_t jne_unquoted = bin_data.size(); append_u8(bin_data, 0x75); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x47); // inc edi (skip opening '"')
+
+            // Copy quoted value
+            size_t loop_cp_q = bin_data.size();
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x07); // mov al, [edi]
+            append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0); // test al, al
+            size_t jz_done_q1 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x3C); append_u8(bin_data, '"'); // cmp al, '"'
+            size_t je_done_q2 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x88); append_u8(bin_data, 0x02); // mov [edx], al
+            append_u8(bin_data, 0x47); append_u8(bin_data, 0x42); // inc edi, inc edx
+            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(loop_cp_q - (bin_data.size() + 1)));
+
+            // Copy unquoted value
+            size_t pos_unquoted = bin_data.size();
+            bin_data[jne_unquoted + 1] = (uint8_t)(pos_unquoted - (jne_unquoted + 2));
+            size_t loop_cp_uq = bin_data.size();
+            append_u8(bin_data, 0x8A); append_u8(bin_data, 0x07); // mov al, [edi]
+            append_u8(bin_data, 0x84); append_u8(bin_data, 0xC0);
+            size_t jz_done_uq1 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x3C); append_u8(bin_data, ',');
+            size_t je_done_uq2 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x3C); append_u8(bin_data, '}');
+            size_t je_done_uq3 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x3C); append_u8(bin_data, ' ');
+            size_t je_done_uq4 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 9);
+            size_t je_done_uq5 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 10);
+            size_t je_done_uq6 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
+            append_u8(bin_data, 0x3C); append_u8(bin_data, 13);
+            size_t je_done_uq7 = bin_data.size(); append_u8(bin_data, 0x74); append_u8(bin_data, 0x00);
             append_u8(bin_data, 0x88); append_u8(bin_data, 0x02);
             append_u8(bin_data, 0x47); append_u8(bin_data, 0x42);
-            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(loop_jg_uq - (bin_data.size() + 1)));
-            size_t pos_jg_cp_done = bin_data.size();
-            bin_data[jz_jg_cp_done1 + 1] = (uint8_t)(pos_jg_cp_done - (jz_jg_cp_done1 + 2));
-            bin_data[je_jg_cp_done2 + 1] = (uint8_t)(pos_jg_cp_done - (je_jg_cp_done2 + 2));
-            bin_data[jz_jg_cp_done3 + 1] = (uint8_t)(pos_jg_cp_done - (jz_jg_cp_done3 + 2));
-            bin_data[je_jg_cp_done4 + 1] = (uint8_t)(pos_jg_cp_done - (je_jg_cp_done4 + 2));
-            bin_data[je_jg_cp_done5 + 1] = (uint8_t)(pos_jg_cp_done - (je_jg_cp_done5 + 2));
-            bin_data[je_jg_cp_done6 + 1] = (uint8_t)(pos_jg_cp_done - (je_jg_cp_done6 + 2));
-            bin_data[je_jg_cp_done7 + 1] = (uint8_t)(pos_jg_cp_done - (je_jg_cp_done7 + 2));
-            bin_data[je_jg_cp_done8 + 1] = (uint8_t)(pos_jg_cp_done - (je_jg_cp_done8 + 2));
-            bin_data[je_jg_cp_done9 + 1] = (uint8_t)(pos_jg_cp_done - (je_jg_cp_done9 + 2));
-            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x02); append_u8(bin_data, 0);
+            append_u8(bin_data, 0xEB); append_u8(bin_data, (uint8_t)(int8_t)(loop_cp_uq - (bin_data.size() + 1)));
+
+            size_t pos_cp_done = bin_data.size();
+            bin_data[jz_done_q1 + 1] = (uint8_t)(pos_cp_done - (jz_done_q1 + 2));
+            bin_data[je_done_q2 + 1] = (uint8_t)(pos_cp_done - (je_done_q2 + 2));
+            bin_data[jz_done_uq1 + 1] = (uint8_t)(pos_cp_done - (jz_done_uq1 + 2));
+            bin_data[je_done_uq2 + 1] = (uint8_t)(pos_cp_done - (je_done_uq2 + 2));
+            bin_data[je_done_uq3 + 1] = (uint8_t)(pos_cp_done - (je_done_uq3 + 2));
+            bin_data[je_done_uq4 + 1] = (uint8_t)(pos_cp_done - (je_done_uq4 + 2));
+            bin_data[je_done_uq5 + 1] = (uint8_t)(pos_cp_done - (je_done_uq5 + 2));
+            bin_data[je_done_uq6 + 1] = (uint8_t)(pos_cp_done - (je_done_uq6 + 2));
+            bin_data[je_done_uq7 + 1] = (uint8_t)(pos_cp_done - (je_done_uq7 + 2));
+            append_u8(bin_data, 0xC6); append_u8(bin_data, 0x02); append_u8(bin_data, 0); // null terminate
             append_u8(bin_data, 0x5A); append_u8(bin_data, 0x59); append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E);
             append_u8(bin_data, 0xB8); append_u32(bin_data, 0x00095800);
             append_u8(bin_data, 0xC3);
+
             size_t pos_jg_nf = bin_data.size();
-            bin_data[jz_jg_nf + 1] = (uint8_t)(pos_jg_nf - (jz_jg_nf + 2));
-            bin_data[jz_jg_nf2 + 1] = (uint8_t)(pos_jg_nf - (jz_jg_nf2 + 2));
+            write_u32_le(bin_data, jz_jg_nf, (uint32_t)((int32_t)pos_jg_nf - (int32_t)(jz_jg_nf + 4)));
+            write_u32_le(bin_data, jz_jg_nf_c, (uint32_t)((int32_t)pos_jg_nf - (int32_t)(jz_jg_nf_c + 4)));
+            write_u32_le(bin_data, jz_jg_nf_ws, (uint32_t)((int32_t)pos_jg_nf - (int32_t)(jz_jg_nf_ws + 4)));
             append_u8(bin_data, 0x5A); append_u8(bin_data, 0x59); append_u8(bin_data, 0x5F); append_u8(bin_data, 0x5E);
             size_t pos_jg_empty = bin_data.size();
             bin_data[jb_jg_empty1 + 1] = (uint8_t)(pos_jg_empty - (jb_jg_empty1 + 2));
@@ -4604,7 +4679,7 @@ namespace GrassBoot {
 
             // Perfectly assembled GUI helpers from GNU AS (helpers.bin)
             static const uint8_t s_gui_helpers_bin[904] = {
-                0x50, 0x52, 0xA3, 0xC0, 0x13, 0x09, 0x00, 0x89, 0x15, 0xC4, 0x13, 0x09, 0x00, 0xC1, 0xE0, 0x02, 0xA3, 0xC8, 0x13, 0x09, 0x00, 0xC7, 0x05, 0xD4, 0x13, 0x09, 0x00, 0x01, 0x00, 0x00, 0x00, 0x66, 0xBA, 0xCE, 0x01, 0x66, 0xB8, 0x04, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCF, 0x01, 0x66, 0x31, 0xC0, 0x66, 0xEF, 0x66, 0xBA, 0xCE, 0x01, 0x66, 0xB8, 0x01, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCF, 0x01, 0xA1, 0xC0, 0x13, 0x09, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCE, 0x01, 0x66, 0xB8, 0x02, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCF, 0x01, 0xA1, 0xC4, 0x13, 0x09, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCE, 0x01, 0x66, 0xB8, 0x03, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCF, 0x01, 0x66, 0xB8, 0x20, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCE, 0x01, 0x66, 0xB8, 0x04, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCF, 0x01, 0x66, 0xB8, 0x41, 0x00, 0x66, 0xEF, 0x5A, 0x58, 0xC3, 0x55, 0x89, 0xE5, 0x53, 0x56, 0x57, 0x8B, 0x45, 0x0C, 0x8B, 0x5D, 0x10, 0x8B, 0x4D, 0x14, 0x8B, 0x55, 0x18, 0x85, 0xC0, 0x75, 0x25, 0x85, 0xDB, 0x75, 0x21, 0x81, 0xF9, 0x00, 0x04, 0x00, 0x00, 0x72, 0x19, 0x81, 0xFA, 0x00, 0x03, 0x00, 0x00, 0x72, 0x11, 0x8B, 0x0D, 0xC0, 0x13, 0x09, 0x00, 0x8B, 0x15, 0xC4, 0x13, 0x09, 0x00, 0xE9, 0x9C, 0x00, 0x00, 0x00, 0x85, 0xC0, 0x75, 0x18, 0x83, 0xFB, 0x28, 0x77, 0x13, 0x81, 0xF9, 0x00, 0x04, 0x00, 0x00, 0x72, 0x0B, 0x8B, 0x0D, 0xC0, 0x13, 0x09, 0x00, 0xE9, 0x80, 0x00, 0x00, 0x00, 0x83, 0xFB, 0x2C, 0x73, 0x33, 0x3D, 0xBC, 0x02, 0x00, 0x00, 0x72, 0x10, 0x8B, 0x35, 0xC0, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x04, 0x00, 0x00, 0x01, 0xF0, 0xEB, 0x64, 0x3D, 0x90, 0x01, 0x00, 0x00, 0x72, 0x5D, 0x3D, 0xF4, 0x01, 0x00, 0x00, 0x73, 0x56, 0xA1, 0xC0, 0x13, 0x09, 0x00, 0x2D, 0xE0, 0x00, 0x00, 0x00, 0xD1, 0xE8, 0xEB, 0x48, 0x81, 0xFB, 0xBC, 0x02, 0x00, 0x00, 0x72, 0x20, 0x8B, 0x35, 0xC0, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x04, 0x00, 0x00, 0xD1, 0xEE, 0x01, 0xF0, 0x8B, 0x35, 0xC4, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x03, 0x00, 0x00, 0x01, 0xF3, 0xEB, 0x20, 0x8B, 0x35, 0xC0, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x04, 0x00, 0x00, 0xD1, 0xEE, 0x01, 0xF0, 0x8B, 0x35, 0xC4, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x03, 0x00, 0x00, 0xD1, 0xEE, 0x01, 0xF3, 0x3B, 0x05, 0xC0, 0x13, 0x09, 0x00, 0x73, 0x60, 0x3B, 0x1D, 0xC4, 0x13, 0x09, 0x00, 0x73, 0x58, 0x85, 0xC9, 0x7E, 0x54, 0x85, 0xD2, 0x7E, 0x50, 0x89, 0xC6, 0x01, 0xCE, 0x3B, 0x35, 0xC0, 0x13, 0x09, 0x00, 0x76, 0x08, 0x8B, 0x0D, 0xC0, 0x13, 0x09, 0x00, 0x29, 0xC1, 0x89, 0xDE, 0x01, 0xD6, 0x3B, 0x35, 0xC4, 0x13, 0x09, 0x00, 0x76, 0x08, 0x8B, 0x15, 0xC4, 0x13, 0x09, 0x00, 0x29, 0xDA, 0x8B, 0x3D, 0x90, 0x13, 0x09, 0x00, 0x89, 0xDE, 0x0F, 0xAF, 0x35, 0xC8, 0x13, 0x09, 0x00, 0x01, 0xF7, 0x8D, 0x3C, 0x87, 0x8B, 0x75, 0x08, 0x57, 0x51, 0x89, 0xF0, 0xF3, 0xAB, 0x59, 0x5F, 0x03, 0x3D, 0xC8, 0x13, 0x09, 0x00, 0x4A, 0x75, 0xEF, 0x5F, 0x5E, 0x5B, 0x5D, 0xC2, 0x14, 0x00, 0x55, 0x89, 0xE5, 0x53, 0x56, 0x57, 0x8B, 0x45, 0x0C, 0x8B, 0x5D, 0x10, 0x3B, 0x05, 0xC0, 0x13, 0x09, 0x00, 0x0F, 0x83, 0xAA, 0x00, 0x00, 0x00, 0x3B, 0x1D, 0xC4, 0x13, 0x09, 0x00, 0x0F, 0x83, 0x9E, 0x00, 0x00, 0x00, 0x0F, 0xB6, 0x45, 0x14, 0x3C, 0xC0, 0x72, 0x06, 0x2C, 0xC0, 0x04, 0x5F, 0xEB, 0x0A, 0x3C, 0x20, 0x0F, 0x82, 0x88, 0x00, 0x00, 0x00, 0x2C, 0x20, 0x0F, 0xB6, 0xC0, 0xC1, 0xE0, 0x04, 0x05, 0x00, 0x50, 0x10, 0x00, 0x50, 0x8B, 0x3D, 0x90, 0x13, 0x09, 0x00, 0x8B, 0x45, 0x10, 0x0F, 0xAF, 0x05, 0xC8, 0x13, 0x09, 0x00, 0x01, 0xC7, 0x8B, 0x45, 0x0C, 0x8D, 0x3C, 0x87, 0x8B, 0x75, 0x08, 0x8B, 0x5D, 0x18, 0x31, 0xC9, 0x8B, 0x14, 0x24, 0x8A, 0x04, 0x0A, 0xB4, 0x08, 0x57, 0xA8, 0x80, 0x74, 0x1B, 0x83, 0xFB, 0x02, 0x75, 0x14, 0x89, 0x37, 0x89, 0x77, 0x04, 0x8B, 0x15, 0xC8, 0x13, 0x09, 0x00, 0x89, 0x34, 0x17, 0x89, 0x74, 0x17, 0x04, 0xEB, 0x02, 0x89, 0x37, 0x83, 0xFB, 0x02, 0x75, 0x05, 0x83, 0xC7, 0x08, 0xEB, 0x03, 0x83, 0xC7, 0x04, 0xD0, 0xE0, 0xFE, 0xCC, 0x75, 0xCE, 0x5F, 0x83, 0xFB, 0x02, 0x75, 0x0C, 0x8B, 0x15, 0xC8, 0x13, 0x09, 0x00, 0xD1, 0xE2, 0x01, 0xD7, 0xEB, 0x06, 0x03, 0x3D, 0xC8, 0x13, 0x09, 0x00, 0x41, 0x83, 0xF9, 0x10, 0x72, 0xA7, 0x58, 0x5F, 0x5E, 0x5B, 0x5D, 0xC2, 0x14, 0x00, 0x55, 0x89, 0xE5, 0x53, 0x56, 0x57, 0x8B, 0x45, 0x0C, 0x8B, 0x5D, 0x10, 0x83, 0xFB, 0x2C, 0x73, 0x33, 0x3D, 0xBC, 0x02, 0x00, 0x00, 0x72, 0x10, 0x8B, 0x35, 0xC0, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x04, 0x00, 0x00, 0x01, 0xF0, 0xEB, 0x64, 0x3D, 0x90, 0x01, 0x00, 0x00, 0x72, 0x5D, 0x3D, 0xF4, 0x01, 0x00, 0x00, 0x73, 0x56, 0xA1, 0xC0, 0x13, 0x09, 0x00, 0x2D, 0xE0, 0x00, 0x00, 0x00, 0xD1, 0xE8, 0xEB, 0x48, 0x81, 0xFB, 0xBC, 0x02, 0x00, 0x00, 0x72, 0x20, 0x8B, 0x35, 0xC0, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x04, 0x00, 0x00, 0xD1, 0xEE, 0x01, 0xF0, 0x8B, 0x35, 0xC4, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x03, 0x00, 0x00, 0x01, 0xF3, 0xEB, 0x20, 0x8B, 0x35, 0xC0, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x04, 0x00, 0x00, 0xD1, 0xEE, 0x01, 0xF0, 0x8B, 0x35, 0xC4, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x03, 0x00, 0x00, 0xD1, 0xEE, 0x01, 0xF3, 0x89, 0xC7, 0x8B, 0x75, 0x14, 0x0F, 0xB6, 0x06, 0x85, 0xC0, 0x74, 0x52, 0x46, 0x3C, 0xD0, 0x75, 0x10, 0x0F, 0xB6, 0x06, 0x46, 0x3C, 0x81, 0x75, 0x04, 0xB0, 0xC5, 0xEB, 0x21, 0x04, 0x30, 0xEB, 0x1D, 0x3C, 0xD1, 0x75, 0x10, 0x0F, 0xB6, 0x06, 0x46, 0x3C, 0x91, 0x75, 0x04, 0xB0, 0xE5, 0xEB, 0x0D, 0x04, 0x70, 0xEB, 0x09, 0x3C, 0xE2, 0x75, 0x05, 0x83, 0xC6, 0x02, 0xB0, 0x2D, 0xFF, 0x75, 0x18, 0x50, 0x53, 0x57, 0xFF, 0x75, 0x08, 0xE8, 0x5F, 0xFE, 0xFF, 0xFF, 0x8B, 0x45, 0x18, 0x83, 0xF8, 0x02, 0x75, 0x05, 0x83, 0xC7, 0x10, 0xEB, 0xAC, 0x83, 0xC7, 0x08, 0xEB, 0xA7, 0x5F, 0x5E, 0x5B, 0x5D, 0xC2, 0x14, 0x00, 0x90
+                0x50, 0x52, 0xA3, 0xC0, 0x13, 0x09, 0x00, 0x89, 0x15, 0xC4, 0x13, 0x09, 0x00, 0xC1, 0xE0, 0x02, 0xA3, 0xC8, 0x13, 0x09, 0x00, 0xC7, 0x05, 0xD4, 0x13, 0x09, 0x00, 0x01, 0x00, 0x00, 0x00, 0x66, 0xBA, 0xCE, 0x01, 0x66, 0xB8, 0x04, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCF, 0x01, 0x66, 0x31, 0xC0, 0x66, 0xEF, 0x66, 0xBA, 0xCE, 0x01, 0x66, 0xB8, 0x01, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCF, 0x01, 0xA1, 0xC0, 0x13, 0x09, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCE, 0x01, 0x66, 0xB8, 0x02, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCF, 0x01, 0xA1, 0xC4, 0x13, 0x09, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCE, 0x01, 0x66, 0xB8, 0x03, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCF, 0x01, 0x66, 0xB8, 0x20, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCE, 0x01, 0x66, 0xB8, 0x04, 0x00, 0x66, 0xEF, 0x66, 0xBA, 0xCF, 0x01, 0x66, 0xB8, 0x41, 0x00, 0x66, 0xEF, 0x5A, 0x58, 0xC3, 0x55, 0x89, 0xE5, 0x53, 0x56, 0x57, 0x8B, 0x45, 0x0C, 0x8B, 0x5D, 0x10, 0x8B, 0x4D, 0x14, 0x8B, 0x55, 0x18, 0xE9, 0xC0, 0x00, 0x00, 0x00, 0x90, 0x90, 0x90, 0x81, 0xF9, 0x00, 0x04, 0x00, 0x00, 0x72, 0x19, 0x81, 0xFA, 0x00, 0x03, 0x00, 0x00, 0x72, 0x11, 0x8B, 0x0D, 0xC0, 0x13, 0x09, 0x00, 0x8B, 0x15, 0xC4, 0x13, 0x09, 0x00, 0xE9, 0x9C, 0x00, 0x00, 0x00, 0x85, 0xC0, 0x75, 0x18, 0x83, 0xFB, 0x28, 0x77, 0x13, 0x81, 0xF9, 0x00, 0x04, 0x00, 0x00, 0x72, 0x0B, 0x8B, 0x0D, 0xC0, 0x13, 0x09, 0x00, 0xE9, 0x80, 0x00, 0x00, 0x00, 0xE9, 0x7B, 0x00, 0x00, 0x00, 0x90, 0x90, 0x90, 0x00, 0x00, 0x72, 0x10, 0x8B, 0x35, 0xC0, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x04, 0x00, 0x00, 0x01, 0xF0, 0xEB, 0x64, 0x3D, 0x90, 0x01, 0x00, 0x00, 0x72, 0x5D, 0x3D, 0xF4, 0x01, 0x00, 0x00, 0x73, 0x56, 0xA1, 0xC0, 0x13, 0x09, 0x00, 0x2D, 0xE0, 0x00, 0x00, 0x00, 0xD1, 0xE8, 0xEB, 0x48, 0x81, 0xFB, 0xBC, 0x02, 0x00, 0x00, 0x72, 0x20, 0x8B, 0x35, 0xC0, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x04, 0x00, 0x00, 0xD1, 0xEE, 0x01, 0xF0, 0x8B, 0x35, 0xC4, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x03, 0x00, 0x00, 0x01, 0xF3, 0xEB, 0x20, 0x8B, 0x35, 0xC0, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x04, 0x00, 0x00, 0xD1, 0xEE, 0x01, 0xF0, 0x8B, 0x35, 0xC4, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x03, 0x00, 0x00, 0xD1, 0xEE, 0x01, 0xF3, 0x3B, 0x05, 0xC0, 0x13, 0x09, 0x00, 0x73, 0x60, 0x3B, 0x1D, 0xC4, 0x13, 0x09, 0x00, 0x73, 0x58, 0x85, 0xC9, 0x7E, 0x54, 0x85, 0xD2, 0x7E, 0x50, 0x89, 0xC6, 0x01, 0xCE, 0x3B, 0x35, 0xC0, 0x13, 0x09, 0x00, 0x76, 0x08, 0x8B, 0x0D, 0xC0, 0x13, 0x09, 0x00, 0x29, 0xC1, 0x89, 0xDE, 0x01, 0xD6, 0x3B, 0x35, 0xC4, 0x13, 0x09, 0x00, 0x76, 0x08, 0x8B, 0x15, 0xC4, 0x13, 0x09, 0x00, 0x29, 0xDA, 0x8B, 0x3D, 0x90, 0x13, 0x09, 0x00, 0x89, 0xDE, 0x0F, 0xAF, 0x35, 0xC8, 0x13, 0x09, 0x00, 0x01, 0xF7, 0x8D, 0x3C, 0x87, 0x8B, 0x75, 0x08, 0x57, 0x51, 0x89, 0xF0, 0xF3, 0xAB, 0x59, 0x5F, 0x03, 0x3D, 0xC8, 0x13, 0x09, 0x00, 0x4A, 0x75, 0xEF, 0x5F, 0x5E, 0x5B, 0x5D, 0xC2, 0x14, 0x00, 0x55, 0x89, 0xE5, 0x53, 0x56, 0x57, 0x8B, 0x45, 0x0C, 0x8B, 0x5D, 0x10, 0x3B, 0x05, 0xC0, 0x13, 0x09, 0x00, 0x0F, 0x83, 0xAA, 0x00, 0x00, 0x00, 0x3B, 0x1D, 0xC4, 0x13, 0x09, 0x00, 0x0F, 0x83, 0x9E, 0x00, 0x00, 0x00, 0x0F, 0xB6, 0x45, 0x14, 0x3C, 0xC0, 0x72, 0x06, 0x2C, 0xC0, 0x04, 0x5F, 0xEB, 0x0A, 0x3C, 0x20, 0x0F, 0x82, 0x88, 0x00, 0x00, 0x00, 0x2C, 0x20, 0x0F, 0xB6, 0xC0, 0xC1, 0xE0, 0x04, 0x05, 0x00, 0x50, 0x10, 0x00, 0x50, 0x8B, 0x3D, 0x90, 0x13, 0x09, 0x00, 0x8B, 0x45, 0x10, 0x0F, 0xAF, 0x05, 0xC8, 0x13, 0x09, 0x00, 0x01, 0xC7, 0x8B, 0x45, 0x0C, 0x8D, 0x3C, 0x87, 0x8B, 0x75, 0x08, 0x8B, 0x5D, 0x18, 0x31, 0xC9, 0x8B, 0x14, 0x24, 0x8A, 0x04, 0x0A, 0xB4, 0x08, 0x57, 0xA8, 0x80, 0x74, 0x1B, 0x83, 0xFB, 0x02, 0x75, 0x14, 0x89, 0x37, 0x89, 0x77, 0x04, 0x8B, 0x15, 0xC8, 0x13, 0x09, 0x00, 0x89, 0x34, 0x17, 0x89, 0x74, 0x17, 0x04, 0xEB, 0x02, 0x89, 0x37, 0x83, 0xFB, 0x02, 0x75, 0x05, 0x83, 0xC7, 0x08, 0xEB, 0x03, 0x83, 0xC7, 0x04, 0xD0, 0xE0, 0xFE, 0xCC, 0x75, 0xCE, 0x5F, 0x83, 0xFB, 0x02, 0x75, 0x0C, 0x8B, 0x15, 0xC8, 0x13, 0x09, 0x00, 0xD1, 0xE2, 0x01, 0xD7, 0xEB, 0x06, 0x03, 0x3D, 0xC8, 0x13, 0x09, 0x00, 0x41, 0x83, 0xF9, 0x10, 0x72, 0xA7, 0x58, 0x5F, 0x5E, 0x5B, 0x5D, 0xC2, 0x14, 0x00, 0x55, 0x89, 0xE5, 0x53, 0x56, 0x57, 0x8B, 0x45, 0x0C, 0x8B, 0x5D, 0x10, 0x83, 0xFB, 0x2C, 0x73, 0x33, 0x3D, 0xBC, 0x02, 0x00, 0x00, 0x72, 0x10, 0x8B, 0x35, 0xC0, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x04, 0x00, 0x00, 0x01, 0xF0, 0xEB, 0x64, 0x3D, 0x90, 0x01, 0x00, 0x00, 0x72, 0x5D, 0x3D, 0xF4, 0x01, 0x00, 0x00, 0x73, 0x56, 0xA1, 0xC0, 0x13, 0x09, 0x00, 0x2D, 0xE0, 0x00, 0x00, 0x00, 0xD1, 0xE8, 0xEB, 0x48, 0x81, 0xFB, 0xBC, 0x02, 0x00, 0x00, 0x72, 0x20, 0x8B, 0x35, 0xC0, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x04, 0x00, 0x00, 0xD1, 0xEE, 0x01, 0xF0, 0x8B, 0x35, 0xC4, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x03, 0x00, 0x00, 0x01, 0xF3, 0xEB, 0x20, 0x8B, 0x35, 0xC0, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x04, 0x00, 0x00, 0xD1, 0xEE, 0x01, 0xF0, 0x8B, 0x35, 0xC4, 0x13, 0x09, 0x00, 0x81, 0xEE, 0x00, 0x03, 0x00, 0x00, 0xD1, 0xEE, 0x01, 0xF3, 0x89, 0xC7, 0x8B, 0x75, 0x14, 0x0F, 0xB6, 0x06, 0x85, 0xC0, 0x74, 0x52, 0x46, 0x3C, 0xD0, 0x75, 0x10, 0x0F, 0xB6, 0x06, 0x46, 0x3C, 0x81, 0x75, 0x04, 0xB0, 0xC5, 0xEB, 0x21, 0x04, 0x30, 0xEB, 0x1D, 0x3C, 0xD1, 0x75, 0x10, 0x0F, 0xB6, 0x06, 0x46, 0x3C, 0x91, 0x75, 0x04, 0xB0, 0xE5, 0xEB, 0x0D, 0x04, 0x70, 0xEB, 0x09, 0x3C, 0xE2, 0x75, 0x05, 0x83, 0xC6, 0x02, 0xB0, 0x2D, 0xFF, 0x75, 0x18, 0x50, 0x53, 0x57, 0xFF, 0x75, 0x08, 0xE8, 0x5F, 0xFE, 0xFF, 0xFF, 0x8B, 0x45, 0x18, 0x83, 0xF8, 0x02, 0x75, 0x05, 0x83, 0xC7, 0x10, 0xEB, 0xAC, 0x83, 0xC7, 0x08, 0xEB, 0xA7, 0x5F, 0x5E, 0x5B, 0x5D, 0xC2, 0x14, 0x00, 0x90
             };
             size_t start_helpers_offset = bin_data.size();
             uint32_t addr_bga_set_mode = KERNEL_LOAD_ADDR + (uint32_t)start_helpers_offset;
@@ -4848,12 +4923,10 @@ namespace GrassBoot {
             append_u8(bin_data, 0xE8); append_u32(bin_data, addr_mouse_init - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
 
             // Set default tab index in [0x00091380]
-            if (g_kwin.tabs.empty()) g_kwin.tabs.push_back("desktop");
+            if (g_kwin.tabs.empty()) g_kwin.tabs.push_back("system");
             uint8_t init_tab_idx = 0;
-            if (!g_kwin.current_tab.empty()) {
-                for (size_t i = 0; i < g_kwin.tabs.size(); ++i) {
-                    if (g_kwin.tabs[i] == g_kwin.current_tab) { init_tab_idx = (uint8_t)i; break; }
-                }
+            for (size_t i = 0; i < g_kwin.tabs.size(); ++i) {
+                if (g_kwin.tabs[i] == "system") { init_tab_idx = (uint8_t)i; break; }
             }
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, init_tab_idx);
 
@@ -4887,14 +4960,101 @@ namespace GrassBoot {
 
             // Tab Redraw Loop
             size_t loop_gui_tab_redraw = bin_data.size();
-            int work_y = (g_kwin.header_style.empty()) ? 0 : (hdr_h + 1);
+            int work_y = (g_kwin.header_style.empty() || g_kwin.header_style == "none") ? 0 : (hdr_h + 1);
             int work_h = g_kwin.height - work_y;
             emit_draw_rect(0, work_y, g_kwin.width, work_h, g_kwin.bg_color);
 
-            // Draw widgets for active tab:
+            auto emit_render_widget = [&](const KernelWidget& w) {
+                if (w.type == "button") {
+                    emit_draw_rect(w.x, w.y, w.w, w.h, w.bg_color);
+                    if (w.border_color != 0 && w.border_width > 0) {
+                        int bw = w.border_width;
+                        emit_draw_rect(w.x, w.y, w.w, bw, w.border_color);
+                        emit_draw_rect(w.x, w.y + w.h - bw, w.w, bw, w.border_color);
+                        emit_draw_rect(w.x, w.y, bw, w.h, w.border_color);
+                        emit_draw_rect(w.x + w.w - bw, w.y, bw, w.h, w.border_color);
+                    }
+                    if (!w.text.empty()) {
+                        uint32_t str_val_addr = emit_inline_str(w.text);
+                        int tx = w.x + 10;
+                        int ty = w.y + (w.h - 16) / 2;
+                        if (ty < w.y) ty = w.y;
+                        emit_draw_str(tx, ty, str_val_addr, w.text_color, 1);
+                    }
+                } else if (w.type == "label") {
+                    if (w.bg_color != 0) {
+                        emit_draw_rect(w.x, w.y, w.w, w.h, w.bg_color);
+                    }
+                    if (w.border_color != 0 && w.border_width > 0) {
+                        int bw = w.border_width;
+                        emit_draw_rect(w.x, w.y, w.w, bw, w.border_color);
+                        emit_draw_rect(w.x, w.y + w.h - bw, w.w, bw, w.border_color);
+                        emit_draw_rect(w.x, w.y, bw, w.h, w.border_color);
+                        emit_draw_rect(w.x + w.w - bw, w.y, bw, w.h, w.border_color);
+                    }
+                    if (!w.text.empty()) {
+                        uint32_t str_val_addr = emit_inline_str(w.text);
+                        int scale = (w.font_size >= 24) ? 2 : 1;
+                        emit_draw_str(w.x, w.y, str_val_addr, w.text_color, scale);
+                    }
+                } else if (w.type == "enter") {
+                    emit_draw_rect(w.x, w.y, w.w, w.h, w.bg_color);
+                    if (w.border_color != 0 && w.border_width > 0) {
+                        int bw = w.border_width;
+                        emit_draw_rect(w.x, w.y, w.w, bw, w.border_color);
+                        emit_draw_rect(w.x, w.y + w.h - bw, w.w, bw, w.border_color);
+                        emit_draw_rect(w.x, w.y, bw, w.h, w.border_color);
+                        emit_draw_rect(w.x + w.w - bw, w.y, bw, w.h, w.border_color);
+                    }
+                    if (!w.text.empty()) {
+                        uint32_t str_val_addr = emit_inline_str(w.text);
+                        int tx = w.x + 10;
+                        int ty = w.y + (w.h - 16) / 2;
+                        emit_draw_str(tx, ty, str_val_addr, w.text_color, 1);
+                    }
+                } else if (w.type == "svg" || w.type == "icon") {
+                    if (w.text.find("logo") != std::string::npos) {
+                        emit_draw_rect(w.x + 3, w.y + 3, 14, 14, 0x0022C55E);
+                    } else if (w.text.find("wifi") != std::string::npos) {
+                        emit_draw_rect(w.x + 3, w.y + 3, 12, 12, 0x0038BDF8);
+                    } else if (w.text.find("volume") != std::string::npos) {
+                        emit_draw_rect(w.x + 3, w.y + 3, 12, 12, 0x00A855F7);
+                    } else if (w.text.find("battery") != std::string::npos) {
+                        emit_draw_rect(w.x + 1, w.y + 4, 16, 10, 0x0022C55E);
+                    } else if (w.text.find("user") != std::string::npos) {
+                        emit_draw_rect(w.x + 3, w.y + 3, 12, 12, 0x00F8FAFC);
+                    } else if (w.text.find("files") != std::string::npos) {
+                        emit_draw_rect(w.x + 3, w.y + 3, 14, 14, 0x0038BDF8);
+                    } else if (w.text.find("monitor") != std::string::npos) {
+                        emit_draw_rect(w.x + 3, w.y + 3, 14, 14, 0x00FBBF24);
+                    } else if (w.text.find("term") != std::string::npos) {
+                        emit_draw_rect(w.x + 3, w.y + 3, 14, 14, 0x0022C55E);
+                    } else if (w.text.find("notes") != std::string::npos) {
+                        emit_draw_rect(w.x + 3, w.y + 3, 14, 14, 0x0038BDF8);
+                    } else if (w.text.find("calc") != std::string::npos) {
+                        emit_draw_rect(w.x + 3, w.y + 3, 14, 14, 0x00F97316);
+                    } else if (w.text.find("clock") != std::string::npos) {
+                        emit_draw_rect(w.x + 3, w.y + 3, 14, 14, 0x00FBBF24);
+                    } else if (w.text.find("settings") != std::string::npos) {
+                        emit_draw_rect(w.x + 3, w.y + 3, 14, 14, 0x00A855F7);
+                    } else if (w.bg_color != 0) {
+                        emit_draw_rect(w.x, w.y, w.w, w.h, w.bg_color);
+                    }
+                }
+            };
+
+            // 1. Draw Global Widgets (top status bar, dock, desktop shortcuts)
+            for (const auto& w : g_kwin.widgets) {
+                if (w.tab_name == "main" || w.tab_name.empty()) {
+                    emit_render_widget(w);
+                }
+            }
+
+            // 2. Draw widgets for active tab:
             std::vector<size_t> jmp_tab_dones;
             for (size_t t = 0; t < g_kwin.tabs.size(); ++t) {
                 const std::string& tab_name = g_kwin.tabs[t];
+                if (tab_name == "main" || tab_name.empty()) continue;
                 append_u8(bin_data, 0x80); append_u8(bin_data, 0x3D);
                 append_u32(bin_data, 0x00091380); append_u8(bin_data, (uint8_t)t);
                 append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85);
@@ -4903,30 +5063,7 @@ namespace GrassBoot {
 
                 for (const auto& w : g_kwin.widgets) {
                     if (w.tab_name != tab_name) continue;
-                    if (w.type == "button") {
-                        emit_draw_rect(w.x, w.y, w.w, w.h, w.bg_color);
-                        if (!w.text.empty()) {
-                            uint32_t str_val_addr = emit_inline_str(w.text);
-                            int tx = w.x + 14;
-                            int ty = w.y + (w.h - 16) / 2;
-                            if (ty < w.y) ty = w.y;
-                            emit_draw_str(tx, ty, str_val_addr, w.text_color, 1);
-                        }
-                    } else if (w.type == "label") {
-                        if (!w.text.empty()) {
-                            uint32_t str_val_addr = emit_inline_str(w.text);
-                            int scale = (w.font_size >= 24) ? 2 : 1;
-                            emit_draw_str(w.x, w.y, str_val_addr, w.text_color, scale);
-                        }
-                    } else if (w.type == "enter") {
-                        emit_draw_rect(w.x, w.y, w.w, w.h, w.bg_color);
-                        if (!w.text.empty()) {
-                            uint32_t str_val_addr = emit_inline_str(w.text);
-                            int tx = w.x + 10;
-                            int ty = w.y + (w.h - 16) / 2;
-                            emit_draw_str(tx, ty, str_val_addr, w.text_color, 1);
-                        }
-                    }
+                    emit_render_widget(w);
                 }
 
                 append_u8(bin_data, 0xE9);
@@ -4964,58 +5101,73 @@ namespace GrassBoot {
             append_u8(bin_data, 0x8B); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091400); // mov eax, [0x00091400] (mouse_x)
             append_u8(bin_data, 0x8B); append_u8(bin_data, 0x15); append_u32(bin_data, 0x00091404); // mov edx, [0x00091404] (mouse_y)
 
-            // Hit test buttons of active tab:
+            // Hit test buttons of active tab and global buttons:
             std::vector<size_t> mouse_click_redraw_jmps;
+
+            auto emit_hit_test_btn = [&](const KernelWidget& w) {
+                if (w.type != "button" || w.click_tab.empty()) return;
+                int tgt_idx = -1;
+                for (size_t k = 0; k < g_kwin.tabs.size(); ++k) {
+                    if (g_kwin.tabs[k] == w.click_tab) { tgt_idx = (int)k; break; }
+                }
+                if (tgt_idx == -1) return;
+
+                // Test bounds: w.x <= eax < w.x + w.w && w.y <= edx < w.y + w.h
+                append_u8(bin_data, 0x3D); append_u32(bin_data, (uint32_t)w.x);
+                append_u8(bin_data, 0x0F); append_u8(bin_data, 0x8C);
+                size_t jl_btn = bin_data.size(); append_u32(bin_data, 0);
+
+                append_u8(bin_data, 0x3D); append_u32(bin_data, (uint32_t)(w.x + w.w));
+                append_u8(bin_data, 0x0F); append_u8(bin_data, 0x8D);
+                size_t jge_btn = bin_data.size(); append_u32(bin_data, 0);
+
+                append_u8(bin_data, 0x81); append_u8(bin_data, 0xFA); append_u32(bin_data, (uint32_t)w.y);
+                append_u8(bin_data, 0x0F); append_u8(bin_data, 0x8C);
+                size_t jl_btn_y = bin_data.size(); append_u32(bin_data, 0);
+
+                append_u8(bin_data, 0x81); append_u8(bin_data, 0xFA); append_u32(bin_data, (uint32_t)(w.y + w.h));
+                append_u8(bin_data, 0x0F); append_u8(bin_data, 0x8D);
+                size_t jge_btn_y = bin_data.size(); append_u32(bin_data, 0);
+
+                // Button Hit! Play sound 1 (click)
+                append_u8(bin_data, 0xB0); append_u8(bin_data, 1);
+                append_u8(bin_data, 0xE8); append_u32(bin_data, addr_play_sound - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
+
+                // Switch active tab: mov [0x00091380], tgt_idx
+                append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, (uint8_t)tgt_idx);
+
+                // Jump to tab redraw
+                append_u8(bin_data, 0xE9);
+                size_t j_m_redraw = bin_data.size();
+                append_u32(bin_data, 0);
+                mouse_click_redraw_jmps.push_back(j_m_redraw);
+
+                size_t pos_btn_miss = bin_data.size();
+                write_u32_le(bin_data, jl_btn, (uint32_t)((int32_t)pos_btn_miss - (int32_t)(jl_btn + 4)));
+                write_u32_le(bin_data, jge_btn, (uint32_t)((int32_t)pos_btn_miss - (int32_t)(jge_btn + 4)));
+                write_u32_le(bin_data, jl_btn_y, (uint32_t)((int32_t)pos_btn_miss - (int32_t)(jl_btn_y + 4)));
+                write_u32_le(bin_data, jge_btn_y, (uint32_t)((int32_t)pos_btn_miss - (int32_t)(jge_btn_y + 4)));
+            };
+
+            // Test global buttons first:
+            for (const auto& w : g_kwin.widgets) {
+                if (w.tab_name == "main" || w.tab_name.empty()) {
+                    emit_hit_test_btn(w);
+                }
+            }
+
+            // Test active tab buttons:
             for (size_t t = 0; t < g_kwin.tabs.size(); ++t) {
                 const std::string& tab_name = g_kwin.tabs[t];
+                if (tab_name == "main" || tab_name.empty()) continue;
                 append_u8(bin_data, 0x80); append_u8(bin_data, 0x3D);
                 append_u32(bin_data, 0x00091380); append_u8(bin_data, (uint8_t)t);
                 append_u8(bin_data, 0x0F); append_u8(bin_data, 0x85);
                 size_t jne_skip_tab_click = bin_data.size(); append_u32(bin_data, 0);
 
                 for (const auto& w : g_kwin.widgets) {
-                    if (w.tab_name != tab_name || w.type != "button" || w.click_tab.empty()) continue;
-                    int tgt_idx = -1;
-                    for (size_t k = 0; k < g_kwin.tabs.size(); ++k) {
-                        if (g_kwin.tabs[k] == w.click_tab) { tgt_idx = (int)k; break; }
-                    }
-                    if (tgt_idx == -1) continue;
-
-                    // Test bounds: w.x <= eax < w.x + w.w && w.y <= edx < w.y + w.h
-                    append_u8(bin_data, 0x3D); append_u32(bin_data, (uint32_t)w.x);
-                    append_u8(bin_data, 0x0F); append_u8(bin_data, 0x8C);
-                    size_t jl_btn = bin_data.size(); append_u32(bin_data, 0);
-
-                    append_u8(bin_data, 0x3D); append_u32(bin_data, (uint32_t)(w.x + w.w));
-                    append_u8(bin_data, 0x0F); append_u8(bin_data, 0x8D);
-                    size_t jge_btn = bin_data.size(); append_u32(bin_data, 0);
-
-                    append_u8(bin_data, 0x81); append_u8(bin_data, 0xFA); append_u32(bin_data, (uint32_t)w.y);
-                    append_u8(bin_data, 0x0F); append_u8(bin_data, 0x8C);
-                    size_t jl_btn_y = bin_data.size(); append_u32(bin_data, 0);
-
-                    append_u8(bin_data, 0x81); append_u8(bin_data, 0xFA); append_u32(bin_data, (uint32_t)(w.y + w.h));
-                    append_u8(bin_data, 0x0F); append_u8(bin_data, 0x8D);
-                    size_t jge_btn_y = bin_data.size(); append_u32(bin_data, 0);
-
-                    // Button Hit! Play sound 1 (click)
-                    append_u8(bin_data, 0xB0); append_u8(bin_data, 1);
-                    append_u8(bin_data, 0xE8); append_u32(bin_data, addr_play_sound - (KERNEL_LOAD_ADDR + (uint32_t)bin_data.size() + 4));
-
-                    // Switch active tab: mov [0x00091380], tgt_idx
-                    append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00091380); append_u8(bin_data, (uint8_t)tgt_idx);
-
-                    // Jump to tab redraw
-                    append_u8(bin_data, 0xE9);
-                    size_t j_m_redraw = bin_data.size();
-                    append_u32(bin_data, 0);
-                    mouse_click_redraw_jmps.push_back(j_m_redraw);
-
-                    size_t pos_btn_miss = bin_data.size();
-                    write_u32_le(bin_data, jl_btn, (uint32_t)((int32_t)pos_btn_miss - (int32_t)(jl_btn + 4)));
-                    write_u32_le(bin_data, jge_btn, (uint32_t)((int32_t)pos_btn_miss - (int32_t)(jge_btn + 4)));
-                    write_u32_le(bin_data, jl_btn_y, (uint32_t)((int32_t)pos_btn_miss - (int32_t)(jl_btn_y + 4)));
-                    write_u32_le(bin_data, jge_btn_y, (uint32_t)((int32_t)pos_btn_miss - (int32_t)(jge_btn_y + 4)));
+                    if (w.tab_name != tab_name) continue;
+                    emit_hit_test_btn(w);
                 }
 
                 size_t pos_skip_tab = bin_data.size();

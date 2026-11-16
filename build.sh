@@ -8,7 +8,7 @@ set -e
 echo "[GrassCompiler] Building GrassGreen v4.2 on Linux..."
 mkdir -p bin
 
-g++ -std=c++20 -O3 -s \
+g++ -std=c++20 -O3 -s -static-libgcc -static-libstdc++ \
   src/grassc.cpp \
   src/GrassHAL.cpp \
   src/GrassMMIO.cpp \
