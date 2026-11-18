@@ -173,6 +173,10 @@ string CompileGrassToHTML(const string& filename) {
     string pad_in = "", margin_out_x = "", margin_out_y = "";
     string pos_x = "", pos_y = "", current_icon = "";
     string glass_blur = "12", glass_alpha = "0.05";
+    string current_gap = "", current_flex = "", current_grid = "";
+    string hover_bg = "", hover_color = "";
+    bool is_hover = false;
+    vector<string> container_stack;
 
     bool in_script = false;
     string current_js_target = "";
@@ -189,6 +193,9 @@ string CompileGrassToHTML(const string& filename) {
         pad_in = ""; margin_out_x = ""; margin_out_y = "";
         pos_x = ""; pos_y = ""; current_icon = "";
         glass_blur = "12"; glass_alpha = "0.05";
+        current_gap = ""; current_flex = ""; current_grid = "";
+        hover_bg = ""; hover_color = "";
+        is_hover = false;
         is_bold = false; is_glass = false; is_neon = false; is_circle = false; is_hidden = false; anim_loop = true;
     };
 
@@ -200,11 +207,25 @@ string CompileGrassToHTML(const string& filename) {
         if (!current_grad1.empty() && !current_grad2.empty()) {
             st += "background: linear-gradient(135deg, " + current_grad1 + ", " + current_grad2 + "); ";
         }
-        if (!current_radius.empty() && current_radius != "0") st += "border-radius: " + current_radius + "px; ";
-        if (!current_w.empty()) st += "width: " + current_w + "px; ";
-        if (!current_h.empty()) st += "height: " + current_h + "px; ";
+        if (!current_radius.empty() && current_radius != "0") {
+            string r = current_radius;
+            if (r.find("px") == string::npos && r.find("%") == string::npos) r += "px";
+            st += "border-radius: " + r + "; ";
+        }
+        if (!current_w.empty()) {
+            string w = current_w;
+            if (w.find("px") == string::npos && w.find("%") == string::npos && w.find("vw") == string::npos) w += "px";
+            st += "width: " + w + "; ";
+        }
+        if (!current_h.empty()) {
+            string h = current_h;
+            if (h.find("px") == string::npos && h.find("%") == string::npos && h.find("vh") == string::npos) h += "px";
+            st += "height: " + h + "; ";
+        }
         if (!current_border_sz.empty() && !current_border_col.empty()) {
-            st += "border: " + current_border_sz + "px solid " + current_border_col + "; ";
+            string bsz = current_border_sz;
+            if (bsz.find("px") == string::npos) bsz += "px";
+            st += "border: " + bsz + " solid " + current_border_col + "; ";
         }
         if (!current_font.empty()) st += "font-family: '" + StripQuotesWeb(current_font) + "', sans-serif; ";
         if (!current_align.empty()) st += "text-align: " + current_align + "; ";
@@ -212,17 +233,22 @@ string CompileGrassToHTML(const string& filename) {
         if (!current_blur.empty()) st += "filter: blur(" + current_blur + "px); ";
         if (!shadow_blur.empty()) {
             string a = shadow_alpha.empty() ? "0.6" : shadow_alpha;
-            st += "box-shadow: 0 10px " + shadow_blur + "px rgba(0, 0, 0, " + a + "); ";
+            string sblur = shadow_blur;
+            if (sblur.find("px") == string::npos) sblur += "px";
+            st += "box-shadow: 0 10px " + sblur + " rgba(0, 0, 0, " + a + "); ";
         }
-        if (!pad_in.empty()) st += "padding: " + pad_in + "px; ";
+        if (!pad_in.empty()) st += "padding: " + pad_in + "; ";
         if (!margin_out_x.empty() && !margin_out_y.empty()) {
-            st += "margin: " + margin_out_y + "px " + margin_out_x + "px; ";
+            st += "margin: " + margin_out_y + " " + margin_out_x + "; ";
         } else if (!margin_out_x.empty()) {
-            st += "margin: " + margin_out_x + "px; ";
+            st += "margin: " + margin_out_x + "; ";
         }
         if (!pos_x.empty() && !pos_y.empty()) {
             st += "position: absolute; left: " + pos_x + "px; top: " + pos_y + "px; ";
         }
+        if (!current_gap.empty()) st += "gap: " + current_gap + "; ";
+        if (!current_flex.empty()) st += "display: flex; " + current_flex + "; ";
+        if (!current_grid.empty()) st += "display: grid; " + current_grid + "; ";
         if (is_glass) {
             st += "background: rgba(255, 255, 255, " + glass_alpha + ") !important; ";
             st += "backdrop-filter: blur(" + glass_blur + "px); -webkit-backdrop-filter: blur(" + glass_blur + "px); ";
@@ -237,6 +263,27 @@ string CompileGrassToHTML(const string& filename) {
         }
         if (is_hidden) st += "display: none; ";
         return st;
+    };
+
+    auto BuildHoverAttr = [&]() -> string {
+        if (!hover_bg.empty() || !hover_color.empty() || is_hover) {
+            string onenter = "";
+            string onleave = "";
+            if (!hover_bg.empty()) {
+                onenter += "this.dataset.origBg=this.style.backgroundColor; this.style.backgroundColor='" + hover_bg + "'; ";
+                onleave += "this.style.backgroundColor=this.dataset.origBg||''; ";
+            }
+            if (!hover_color.empty()) {
+                onenter += "this.dataset.origCol=this.style.color; this.style.color='" + hover_color + "'; ";
+                onleave += "this.style.color=this.dataset.origCol||''; ";
+            }
+            if (is_hover) {
+                onenter += "this.style.filter='brightness(1.2)'; ";
+                onleave += "this.style.filter='none'; ";
+            }
+            return " onmouseenter=\"" + onenter + "\" onmouseleave=\"" + onleave + "\"";
+        }
+        return "";
     };
 
     while (getline(file, line)) {
@@ -555,32 +602,230 @@ string CompileGrassToHTML(const string& filename) {
         }
         if (trimmed.find("id(") == 0) { current_id = StripQuotesWeb(ExtractArg(trimmed)); continue; }
 
+        // Закрытие блока по фигурной скобке }
+        if (trimmed == "}" && !container_stack.empty()) {
+            html_content << "</" << container_stack.back() << ">\n";
+            container_stack.pop_back();
+            continue;
+        }
+
         // Контейнеры (поддерживают предварительную стилизацию!)
-        if (trimmed == "row-start") {
+        if (trimmed == "page-start" || trimmed == "page {" || trimmed == "page") {
             string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
-            html_content << "<div class=\"grass-row\" style=\"" << BuildCommonStyle(false) << "\"" << id_attr << ">\n";
+            html_content << "<div class=\"grass-page\" style=\"" << BuildCommonStyle(false) << "\"" << id_attr << ">\n";
+            container_stack.push_back("div");
             ResetStyles(); continue;
         }
-        if (trimmed == "row-end") { html_content << "</div>\n"; continue; }
+        if (trimmed == "page-end") {
+            html_content << "</div>\n";
+            if (!container_stack.empty()) container_stack.pop_back();
+            continue;
+        }
 
-        if (trimmed == "col-start") {
+        if (trimmed == "header-start" || trimmed == "header {" || trimmed == "header") {
             string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
-            html_content << "<div class=\"grass-col\" style=\"" << BuildCommonStyle(false) << "\"" << id_attr << ">\n";
+            html_content << "<header class=\"grass-header\" style=\"" << BuildCommonStyle(false) << "\"" << id_attr << ">\n";
+            container_stack.push_back("header");
             ResetStyles(); continue;
         }
-        if (trimmed == "col-end") { html_content << "</div>\n"; continue; }
+        if (trimmed == "header-end") {
+            html_content << "</header>\n";
+            if (!container_stack.empty()) container_stack.pop_back();
+            continue;
+        }
 
-        if (trimmed == "box-start") {
+        if (trimmed == "footer-start" || trimmed == "footer {" || trimmed == "footer") {
+            string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
+            html_content << "<footer class=\"grass-footer\" style=\"" << BuildCommonStyle(false) << "\"" << id_attr << ">\n";
+            container_stack.push_back("footer");
+            ResetStyles(); continue;
+        }
+        if (trimmed == "footer-end") {
+            html_content << "</footer>\n";
+            if (!container_stack.empty()) container_stack.pop_back();
+            continue;
+        }
+
+        if (trimmed == "nav-start" || trimmed == "nav {" || trimmed == "nav") {
+            string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
+            html_content << "<nav class=\"grass-nav\" style=\"" << BuildCommonStyle(false) << "\"" << id_attr << ">\n";
+            container_stack.push_back("nav");
+            ResetStyles(); continue;
+        }
+        if (trimmed == "nav-end") {
+            html_content << "</nav>\n";
+            if (!container_stack.empty()) container_stack.pop_back();
+            continue;
+        }
+
+        if (trimmed == "section-start" || trimmed == "section {" || trimmed == "section") {
+            string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
+            html_content << "<section class=\"grass-section\" style=\"" << BuildCommonStyle(false) << "\"" << id_attr << ">\n";
+            container_stack.push_back("section");
+            ResetStyles(); continue;
+        }
+        if (trimmed == "section-end") {
+            html_content << "</section>\n";
+            if (!container_stack.empty()) container_stack.pop_back();
+            continue;
+        }
+
+        if (trimmed == "card-start" || trimmed == "card {" || trimmed == "card") {
+            string classes = "grass-card ";
+            if (is_glass) classes += "glass ";
+            if (is_neon) classes += "neon ";
+            string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
+            html_content << "<div class=\"" << classes << "\" style=\"" << BuildCommonStyle(false) << "\"" << id_attr << BuildHoverAttr() << ">\n";
+            container_stack.push_back("div");
+            ResetStyles(); continue;
+        }
+        if (trimmed == "card-end") {
+            html_content << "</div>\n";
+            if (!container_stack.empty()) container_stack.pop_back();
+            continue;
+        }
+
+        if (trimmed == "box-start" || trimmed == "div-start" || trimmed == "box {" || trimmed == "div {") {
             string classes = "grass-box ";
             if (is_glass) classes += "glass ";
             if (is_neon) classes += "neon ";
             string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
-            html_content << "<div class=\"" << classes << "\" style=\"" << BuildCommonStyle(true) << "\"" << id_attr << ">\n";
+            html_content << "<div class=\"" << classes << "\" style=\"" << BuildCommonStyle(true) << "\"" << id_attr << BuildHoverAttr() << ">\n";
+            container_stack.push_back("div");
             ResetStyles(); continue;
         }
-        if (trimmed == "box-end") { html_content << "</div>\n"; continue; }
+        if (trimmed == "box-end" || trimmed == "div-end") {
+            html_content << "</div>\n";
+            if (!container_stack.empty()) container_stack.pop_back();
+            continue;
+        }
 
-        // Модификаторы стилей из WEB.txt
+        if (trimmed == "table-start" || trimmed == "table {") {
+            string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
+            html_content << "<table class=\"grass-table\" style=\"" << BuildCommonStyle(false) << "\"" << id_attr << ">\n";
+            container_stack.push_back("table");
+            ResetStyles(); continue;
+        }
+        if (trimmed == "table-end") {
+            html_content << "</table>\n";
+            if (!container_stack.empty()) container_stack.pop_back();
+            continue;
+        }
+
+        if (trimmed == "tr-start" || trimmed == "row-start" || trimmed == "tr {") {
+            string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
+            if (trimmed == "row-start" && (container_stack.empty() || container_stack.back() != "table")) {
+                html_content << "<div class=\"grass-row\" style=\"" << BuildCommonStyle(false) << "\"" << id_attr << ">\n";
+                container_stack.push_back("div");
+            } else {
+                html_content << "<tr style=\"" << BuildCommonStyle(false) << "\"" << id_attr << ">\n";
+                container_stack.push_back("tr");
+            }
+            ResetStyles(); continue;
+        }
+        if (trimmed == "tr-end" || trimmed == "row-end") {
+            if (!container_stack.empty()) {
+                html_content << "</" << container_stack.back() << ">\n";
+                container_stack.pop_back();
+            } else {
+                html_content << "</div>\n";
+            }
+            continue;
+        }
+
+        if (trimmed == "col-start" || trimmed == "col {") {
+            string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
+            if (!container_stack.empty() && container_stack.back() == "tr") {
+                html_content << "<td style=\"" << BuildCommonStyle(false) << "\"" << id_attr << ">\n";
+                container_stack.push_back("td");
+            } else {
+                html_content << "<div class=\"grass-col\" style=\"" << BuildCommonStyle(false) << "\"" << id_attr << ">\n";
+                container_stack.push_back("div");
+            }
+            ResetStyles(); continue;
+        }
+        if (trimmed == "col-end") {
+            if (!container_stack.empty()) {
+                html_content << "</" << container_stack.back() << ">\n";
+                container_stack.pop_back();
+            } else {
+                html_content << "</div>\n";
+            }
+            continue;
+        }
+
+        if (trimmed.find("th") == 0 && (trimmed.find('=') != string::npos || trimmed.find('(') != string::npos)) {
+            string val = (trimmed.find('=') != string::npos) ? TrimStr(trimmed.substr(trimmed.find('=') + 1)) : ExtractArg(trimmed);
+            val = StripQuotesWeb(val);
+            string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
+            html_content << "<th style=\"" << BuildCommonStyle(false) << "\"" << id_attr << ">" << val << "</th>\n";
+            ResetStyles(); continue;
+        }
+
+        if (trimmed.find("td") == 0 && (trimmed.find('=') != string::npos || trimmed.find('(') != string::npos)) {
+            string val = (trimmed.find('=') != string::npos) ? TrimStr(trimmed.substr(trimmed.find('=') + 1)) : ExtractArg(trimmed);
+            val = StripQuotesWeb(val);
+            string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
+            html_content << "<td style=\"" << BuildCommonStyle(false) << "\"" << id_attr << ">" << val << "</td>\n";
+            ResetStyles(); continue;
+        }
+
+        // Модификаторы стилей и раскладки
+        if (trimmed.find("flex(") == 0 || trimmed == "flex" || trimmed == "flex()") {
+            string arg = ExtractArg(trimmed);
+            if (arg.empty() || arg == "row") current_flex = "flex-direction: row; flex-wrap: wrap";
+            else if (arg == "col" || arg == "column") current_flex = "flex-direction: column";
+            else if (arg == "center") current_flex = "justify-content: center; align-items: center";
+            else current_flex = "flex-direction: " + arg;
+            continue;
+        }
+        if (trimmed.find("grid(") == 0) {
+            string cols = StripQuotesWeb(ExtractArg(trimmed));
+            bool is_num = !cols.empty() && all_of(cols.begin(), cols.end(), ::isdigit);
+            if (is_num) {
+                current_grid = "grid-template-columns: repeat(" + cols + ", 1fr)";
+            } else {
+                current_grid = "grid-template-columns: " + cols;
+            }
+            continue;
+        }
+        if (trimmed.find("gap(") == 0) {
+            string g = ExtractArg(trimmed);
+            if (g.find("px") == string::npos && g.find("rem") == string::npos && g.find("%") == string::npos) g += "px";
+            current_gap = g;
+            continue;
+        }
+        if (trimmed.find("pad(") == 0) {
+            string p1, p2;
+            ExtractTwoArgs(trimmed, p1, p2);
+            if (!p1.empty() && p1.find("px") == string::npos && p1.find("%") == string::npos) p1 += "px";
+            if (!p2.empty() && p2.find("px") == string::npos && p2.find("%") == string::npos) p2 += "px";
+            pad_in = p2.empty() ? p1 : (p1 + " " + p2);
+            continue;
+        }
+        if (trimmed.find("margin(") == 0) {
+            string m1, m2;
+            ExtractTwoArgs(trimmed, m1, m2);
+            if (!m1.empty() && m1.find("px") == string::npos && m1.find("%") == string::npos) m1 += "px";
+            if (!m2.empty() && m2.find("px") == string::npos && m2.find("%") == string::npos) m2 += "px";
+            margin_out_x = m2.empty() ? m1 : m2;
+            margin_out_y = m2.empty() ? m1 : m1;
+            continue;
+        }
+        if (trimmed.find("width(") == 0) { current_w = StripQuotesWeb(ExtractArg(trimmed)); continue; }
+        if (trimmed.find("height(") == 0) { current_h = StripQuotesWeb(ExtractArg(trimmed)); continue; }
+        if (trimmed.find("radius(") == 0) { current_radius = ExtractArg(trimmed); continue; }
+        if (trimmed.find("shadow(") == 0) { ExtractTwoArgs(trimmed, shadow_blur, shadow_alpha); continue; }
+        if (trimmed.find("hover(") == 0 || trimmed == "hover" || trimmed == "hover()") {
+            is_hover = true;
+            string h1, h2;
+            ExtractTwoArgs(trimmed, h1, h2);
+            if (!h2.empty()) { hover_bg = StripQuotesWeb(h1); hover_color = StripQuotesWeb(h2); }
+            else if (!h1.empty()) { hover_bg = StripQuotesWeb(h1); }
+            continue;
+        }
+        if (trimmed.find("anim(") == 0) { ExtractTwoArgs(trimmed, anim_type, anim_speed); continue; }
+
         if (trimmed.find("color(") == 0) { current_color = StripQuotesWeb(ExtractArg(trimmed)); continue; }
         if (trimmed.find("bg(") == 0) { current_bg = StripQuotesWeb(ExtractArg(trimmed)); continue; }
         if (trimmed.find("round-ob(") == 0) { current_radius = ExtractArg(trimmed); continue; }
@@ -619,21 +864,21 @@ string CompileGrassToHTML(const string& filename) {
             continue;
         }
 
-        // Картинка: image(ссылка)
-        if (trimmed.find("image(") == 0) {
+        // Картинка: image(ссылка) или img(ссылка)
+        if (trimmed.find("image(") == 0 || trimmed.find("img(") == 0) {
             string img_url = StripQuotesWeb(ExtractArg(trimmed));
             string classes = "grass-img ";
             if (is_circle) classes += "circle ";
             if (is_neon) classes += "neon ";
             string style = BuildCommonStyle(false);
             string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
-            html_content << "<img src=\"" << img_url << "\" class=\"" << classes << "\" style=\"" << style << "\"" << id_attr << " alt=\"image\">\n";
+            html_content << "<img src=\"" << img_url << "\" class=\"" << classes << "\" style=\"" << style << "\"" << id_attr << BuildHoverAttr() << " alt=\"image\">\n";
             ResetStyles(); continue;
         }
 
         // Чекбокс: checkbox = Текст
         if (trimmed.find("checkbox") == 0 && trimmed.find('=') != string::npos) {
-            string txt = TrimStr(trimmed.substr(trimmed.find('=') + 1));
+            string txt = StripQuotesWeb(TrimStr(trimmed.substr(trimmed.find('=') + 1)));
             string style = BuildCommonStyle(true);
             string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
             html_content << "<label class=\"grass-checkbox\" style=\"" << style << "\"><input type=\"checkbox\"" << id_attr << "> " << txt << "</label>\n";
@@ -650,8 +895,8 @@ string CompileGrassToHTML(const string& filename) {
             ResetStyles(); continue;
         }
 
-        // Выпадающий список: drop-list(item1, item2, item3)
-        if (trimmed.find("drop-list(") == 0) {
+        // Выпадающий список: drop-list(item1, item2, item3) или select(item1, item2, item3)
+        if (trimmed.find("drop-list(") == 0 || trimmed.find("select(") == 0) {
             string content = ExtractArg(trimmed);
             stringstream ss(content);
             string item;
@@ -662,7 +907,7 @@ string CompileGrassToHTML(const string& filename) {
             string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
             html_content << "<select class=\"" << classes << "\" style=\"" << style << "\"" << id_attr << ">\n";
             while (getline(ss, item, ',')) {
-                item = TrimStr(item);
+                item = StripQuotesWeb(TrimStr(item));
                 html_content << "  <option value=\"" << item << "\">" << item << "</option>\n";
             }
             html_content << "</select>\n";
@@ -674,6 +919,7 @@ string CompileGrassToHTML(const string& filename) {
             string url = StripQuotesWeb(ExtractArg(trimmed));
             size_t eq_pos = trimmed.find('=');
             string text = (eq_pos != string::npos) ? TrimStr(trimmed.substr(eq_pos + 1)) : url;
+            text = StripQuotesWeb(text);
             if (!current_icon.empty()) text = current_icon + " " + text;
 
             if (url.find("http://") != 0 && url.find("https://") != 0 && !url.empty() && url[0] != '/') {
@@ -683,17 +929,74 @@ string CompileGrassToHTML(const string& filename) {
             if (is_neon) classes += "neon ";
             string style = "text-decoration: none; padding: 8px 12px; display: inline-block; " + BuildCommonStyle(true);
             string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
-            html_content << "<a href=\"" << url << "\" class=\"" << classes << "\" style=\"" << style << "\"" << id_attr << ">" << text << "</a>\n";
+            html_content << "<a href=\"" << url << "\" class=\"" << classes << "\" style=\"" << style << "\"" << id_attr << BuildHoverAttr() << ">" << text << "</a>\n";
             ResetStyles(); continue;
         }
 
-        // Заголовки и текст G1..G5 (от маленького G1 до огромного G5, либо классические h1..h5)
+        // Заголовки: title / h1..h3
+        if (trimmed.find("title =") == 0 || trimmed.find("title=") == 0 || trimmed.find("title \"") == 0 ||
+            trimmed.find("h1 =") == 0 || trimmed.find("h1=") == 0 || trimmed.find("h1 \"") == 0) {
+            size_t eq_pos = trimmed.find('=');
+            string text = (eq_pos != string::npos) ? TrimStr(trimmed.substr(eq_pos + 1)) : TrimStr(trimmed.substr((trimmed[0] == 'h') ? 2 : 5));
+            text = StripQuotesWeb(text);
+            if (!current_icon.empty()) text = current_icon + " " + text;
+            string classes = is_bold ? "thick " : "";
+            if (is_neon) classes += "neon ";
+            string style = "font-size: 34px; font-weight: bold; margin: 16px 0; " + BuildCommonStyle(true);
+            if (is_neon) style += "text-shadow: 0 0 12px " + neon_color + "; ";
+            string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
+            html_content << "<h1 class=\"" << classes << "\" style=\"" << style << "\"" << id_attr << BuildHoverAttr() << ">" << text << "</h1>\n";
+            ResetStyles(); continue;
+        }
+        if (trimmed.find("h2 =") == 0 || trimmed.find("h2=") == 0 || trimmed.find("h2 \"") == 0) {
+            size_t eq_pos = trimmed.find('=');
+            string text = (eq_pos != string::npos) ? TrimStr(trimmed.substr(eq_pos + 1)) : TrimStr(trimmed.substr(2));
+            text = StripQuotesWeb(text);
+            if (!current_icon.empty()) text = current_icon + " " + text;
+            string classes = is_bold ? "thick " : "";
+            if (is_neon) classes += "neon ";
+            string style = "font-size: 26px; font-weight: 600; margin: 12px 0; " + BuildCommonStyle(true);
+            if (is_neon) style += "text-shadow: 0 0 10px " + neon_color + "; ";
+            string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
+            html_content << "<h2 class=\"" << classes << "\" style=\"" << style << "\"" << id_attr << BuildHoverAttr() << ">" << text << "</h2>\n";
+            ResetStyles(); continue;
+        }
+        if (trimmed.find("h3 =") == 0 || trimmed.find("h3=") == 0 || trimmed.find("h3 \"") == 0) {
+            size_t eq_pos = trimmed.find('=');
+            string text = (eq_pos != string::npos) ? TrimStr(trimmed.substr(eq_pos + 1)) : TrimStr(trimmed.substr(2));
+            text = StripQuotesWeb(text);
+            if (!current_icon.empty()) text = current_icon + " " + text;
+            string classes = is_bold ? "thick " : "";
+            if (is_neon) classes += "neon ";
+            string style = "font-size: 20px; font-weight: 600; margin: 10px 0; " + BuildCommonStyle(true);
+            if (is_neon) style += "text-shadow: 0 0 8px " + neon_color + "; ";
+            string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
+            html_content << "<h3 class=\"" << classes << "\" style=\"" << style << "\"" << id_attr << BuildHoverAttr() << ">" << text << "</h3>\n";
+            ResetStyles(); continue;
+        }
+
+        // Текст: text "..." / text = ... / p = ... / p "..."
+        if (trimmed.find("text =") == 0 || trimmed.find("text=") == 0 || trimmed.find("text \"") == 0 ||
+            trimmed.find("p =") == 0 || trimmed.find("p=") == 0 || trimmed.find("p \"") == 0) {
+            size_t eq_pos = trimmed.find('=');
+            string text = (eq_pos != string::npos) ? TrimStr(trimmed.substr(eq_pos + 1)) : ((trimmed[0] == 'p') ? TrimStr(trimmed.substr(1)) : TrimStr(trimmed.substr(4)));
+            text = StripQuotesWeb(text);
+            if (!current_icon.empty()) text = current_icon + " " + text;
+            string classes = is_bold ? "thick " : "";
+            if (is_neon) classes += "neon ";
+            string style = "font-size: 16px; line-height: 1.6; margin: 8px 0; " + BuildCommonStyle(true);
+            string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
+            html_content << "<p class=\"" << classes << "\" style=\"" << style << "\"" << id_attr << BuildHoverAttr() << ">" << text << "</p>\n";
+            ResetStyles(); continue;
+        }
+
+        // Заголовки и текст G1..G5 (от маленького G1 до огромного G5)
         if ((trimmed.size() >= 3 && trimmed[0] == 'G' && trimmed[1] >= '1' && trimmed[1] <= '5' && trimmed[2] == ' ')) {
             int level = trimmed[1] - '0'; // G1..G5
             string text = TrimStr(trimmed.substr(3));
+            text = StripQuotesWeb(text);
             if (!current_icon.empty()) text = current_icon + " " + text;
 
-            // В WEB.txt G1..G5 идут от маленького к большому: задаём точный размер шрифта
             const int font_sizes[6] = {0, 15, 20, 26, 34, 46};
             string html_tag = "div";
             string classes = is_bold ? "thick " : "";
@@ -703,13 +1006,13 @@ string CompileGrassToHTML(const string& filename) {
             if (is_neon) style += "text-shadow: 0 0 12px " + neon_color + "; ";
 
             string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
-            html_content << "<" << html_tag << " class=\"" << classes << "\" style=\"" << style << "\"" << id_attr << ">" << text << "</" << html_tag << ">\n";
+            html_content << "<" << html_tag << " class=\"" << classes << "\" style=\"" << style << "\"" << id_attr << BuildHoverAttr() << ">" << text << "</" << html_tag << ">\n";
             ResetStyles(); continue;
         }
 
-        // Кнопка: button = Текст
-        if (trimmed.find("button") == 0 && trimmed.find('=') != string::npos) {
-            string btn_text = TrimStr(trimmed.substr(trimmed.find('=') + 1));
+        // Кнопка: button = Текст или btn = Текст
+        if ((trimmed.find("button") == 0 || trimmed.find("btn") == 0) && trimmed.find('=') != string::npos) {
+            string btn_text = StripQuotesWeb(TrimStr(trimmed.substr(trimmed.find('=') + 1)));
             if (!current_icon.empty()) btn_text = "<span>" + current_icon + "</span> <span>" + btn_text + "</span>";
 
             string classes = "";
@@ -726,24 +1029,41 @@ string CompileGrassToHTML(const string& filename) {
                 onclick = " onclick=\"window.location.href='" + target_url + "'\"";
             }
             string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
-            html_content << "<button class=\"" << classes << "\" style=\"" << style << "\"" << onclick << id_attr << ">" << btn_text << "</button>\n";
+            html_content << "<button class=\"" << classes << "\" style=\"" << style << "\"" << onclick << id_attr << BuildHoverAttr() << ">" << btn_text << "</button>\n";
             ResetStyles(); continue;
         }
 
-        // Поле ввода: enter = Плейсхолдер
-        if (trimmed.find("enter") == 0 && trimmed.find('=') != string::npos) {
-            string placeholder = TrimStr(trimmed.substr(trimmed.find('=') + 1));
+        // Поле ввода: enter = Плейсхолдер или input = Плейсхолдер
+        if ((trimmed.find("enter") == 0 || trimmed.find("input") == 0) && trimmed.find('=') != string::npos) {
+            string placeholder = StripQuotesWeb(TrimStr(trimmed.substr(trimmed.find('=') + 1)));
             string classes = "";
             if (is_glass) classes += "glass ";
             if (is_neon) classes += "neon ";
             if (is_bold) classes += "thick ";
 
-            string style = "background: rgba(0,0,0,0.45); border: 1px solid #444; padding: 14px 18px; margin: 10px; font-size: 16px; outline: none; text-align: center; " + BuildCommonStyle(true);
+            string style = "background: rgba(0,0,0,0.45); border: 1px solid #444; padding: 14px 18px; margin: 10px; font-size: 16px; outline: none; border-radius: 8px; color: #fff; " + BuildCommonStyle(true);
             string input_type = (placeholder.find("пароль") != string::npos || placeholder.find("Пароль") != string::npos || placeholder.find("password") != string::npos) ? "password" : "text";
             string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
             html_content << "<input type=\"" << input_type << "\" class=\"" << classes << "\" style=\"" << style << "\"" << id_attr << " placeholder=\"" << placeholder << "\">\n";
             ResetStyles(); continue;
         }
+
+        // Многострочное поле ввода: textarea = Плейсхолдер
+        if (trimmed.find("textarea") == 0 && trimmed.find('=') != string::npos) {
+            string placeholder = StripQuotesWeb(TrimStr(trimmed.substr(trimmed.find('=') + 1)));
+            string classes = "grass-textarea ";
+            if (is_glass) classes += "glass ";
+            if (is_neon) classes += "neon ";
+            string style = BuildCommonStyle(true);
+            string id_attr = !current_id.empty() ? " id=\"" + current_id + "\"" : "";
+            html_content << "<textarea class=\"" << classes << "\" style=\"" << style << "\"" << id_attr << " placeholder=\"" << placeholder << "\"></textarea>\n";
+            ResetStyles(); continue;
+        }
+    }
+
+    while (!container_stack.empty()) {
+        html_content << "</" << container_stack.back() << ">\n";
+        container_stack.pop_back();
     }
 
     file.close();
@@ -754,7 +1074,7 @@ string CompileGrassToHTML(const string& filename) {
     full_page << "<title>GrassGreen Web Engine</title>\n";
     full_page << head_links.str();
     full_page << "<style>\n" << BASE_CSS << "\n</style>\n</head>\n<body>\n";
-    full_page << "<div style=\"display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 85vh;\">\n";
+    full_page << "<div style=\"width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; min-height: 85vh;\">\n";
     full_page << html_content.str();
     full_page << "</div>\n</body>\n</html>";
 
@@ -762,10 +1082,17 @@ string CompileGrassToHTML(const string& filename) {
 }
 
 void GrassWeb_LoadPage(const string& filename) {
+    string html_content_page = CompileGrassToHTML(filename);
+    ofstream out_file(filename + ".html");
+    if (out_file.is_open()) {
+        out_file << html_content_page;
+        out_file.close();
+        cout << "[GrassWeb]: Страница скомпилирована в HTML: " << filename << ".html (" << html_content_page.size() << " байт)\n";
+    }
+
     if (GrassHAL::is_freestanding()) {
-        string html_body = CompileGrassToHTML(filename);
-        GrassHAL::vfs_write(filename + ".html", html_body);
-        cout << "[GrassWeb Freestanding]: Скомпилировано в RamFS: " << filename << ".html (" << html_body.size() << " байт)\n";
+        GrassHAL::vfs_write(filename + ".html", html_content_page);
+        cout << "[GrassWeb Freestanding]: Скомпилировано в RamFS: " << filename << ".html (" << html_content_page.size() << " байт)\n";
         return;
     }
 #if defined(_WIN32)

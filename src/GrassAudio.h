@@ -10,13 +10,17 @@
 // =============================================================================
 
 namespace GrassAudio {
+    // ── Инициализация подсистемы аудио ──
+    void init();
+
     // ── Низкоуровневый процедурный синтезатор звука (с нуля, без внешних файлов) ──
-    void tone(double freq_hz, int duration_ms, double volume = 80.0);
+    void tone(double freq_hz, int duration_ms, double volume = 80.0, bool async = false);
     void beep(double freq_hz = 750.0, int duration_ms = 300);
-    void synth_play(const std::string& waveform, double freq_hz, int duration_ms, double volume = 80.0);
+    void synth_play(const std::string& waveform, double freq_hz, int duration_ms, double volume = 80.0, bool async = false);
 
     // ── Высокоуровневое воспроизведение аудиофайлов (.wav, .mp3, .ogg, .mid) ──
     bool sound_play(const std::string& filepath, bool loop = false);
+    void play_sound_effect(const std::string& filepath);
     void sound_stop();
     void sound_pause();
     void sound_resume();

@@ -1,0 +1,178 @@
+!GrassGreen!
+!GrassWeb!
+
+page-start
+    // --- Шапка сайта ---
+    header-start
+        color(#22c55e)
+        thick
+        h2 = GrassGreen Cloud Platform
+
+        nav-start
+            link("#features") = Возможности
+            link("#pricing") = Тарифы
+            link("#contact") = Контакты
+            btn = Войти
+        nav-end
+    header-end
+
+    // --- Главная секция (Hero) ---
+    section-start
+        align(center)
+        pad(40)
+        neon(#00ffcc)
+        title = Высокопроизводительный Web-движок нового поколения
+
+        color(#a1a1aa)
+        pad(10)
+        p = Создавайте современные реактивные веб-интерфейсы с поддержкой Flexbox, Grid и Glassmorphism прямо на языке GrassGreen.
+
+        gap(15)
+        flex(center)
+        row-start
+            bg(#22c55e)
+            color(#09090b)
+            thick
+            btn = Начать бесплатно
+            
+            glass(12, 0.08)
+            border(1, #3f3f46)
+            btn = Документация
+        row-end
+    section-end
+
+    // --- Сетка карточек с преимуществами (CSS Grid) ---
+    grid(3)
+    gap(25)
+    pad(30)
+    section-start
+        card-start
+            color(#22c55e)
+            thick
+            h3 = ⚡ Реактивность
+            color(#d4d4d8)
+            p = Поддержка декларативных таймеров every() и коллбэков on-click без сторонних фреймворков.
+        card-end
+
+        card-start
+            color(#38bdf8)
+            thick
+            h3 = 💎 Стили и Glassmorphism
+            color(#d4d4d8)
+            p = Встроенный блюр, неоновые тени, адаптивный Flexbox и Grid-раскладка из коробки.
+        card-end
+
+        card-start
+            color(#f59e0b)
+            thick
+            h3 = 🔒 Безопасность и скорость
+            color(#d4d4d8)
+            p = Компиляция в чистый оптимизированный HTML5 + CSS3 с быстрой доставкой по сети.
+        card-end
+    section-end
+
+    // --- Интерактивный калькулятор / форма обратной связи ---
+    pad(30)
+    section-start
+        box-start
+            glass(16, 0.06)
+            border(1, #27272a)
+            radius(16)
+            pad(30)
+            align(center)
+
+            h2 = Интерактивный калькулятор кликов
+            
+            p = Нажмите кнопку ниже, чтобы проверить работу встроенного движка сценариев script-start:
+            
+            <name>/counter_disp
+            color(#00ffcc)
+            thick
+            h1 = 0
+
+            gap(15)
+            flex(center)
+            row-start
+                <name>/btn_inc
+                bg(#16a34a)
+                color(#ffffff)
+                btn = Кликнуть (+1)
+
+                <name>/btn_reset
+                bg(#27272a)
+                color(#ef4444)
+                btn = Сбросить
+            row-end
+
+            pad(20)
+            h3 = Форма заявки
+            
+            <name>/user_name
+            input = Ваше имя
+
+            <name>/plan_select
+            select(Тариф Базовый, Тариф Про, Корпоративный)
+
+            <name>/project_desc
+            textarea = Опишите ваш проект...
+
+            <name>/btn_submit
+            bg(#2563eb)
+            color(#ffffff)
+            btn = Отправить заявку
+        box-end
+    section-end
+
+    // --- Таблица характеристик ---
+    pad(30)
+    section-start
+        h2 = Сравнение характеристик
+        table-start
+            tr-start
+                th = Параметр
+                th = Обычный HTML/JS
+                th = GrassWeb Engine
+            tr-end
+            tr-start
+                td = Размер зависимостей
+                td = 2-5 МБ (Node, React)
+                td = 0 КБ (Нативный парсер)
+            tr-end
+            tr-start
+                td = Скорость компиляции
+                td = 5-15 секунд
+                td = 1 миллисекунда
+            tr-end
+            tr-start
+                td = Поддержка стилей
+                td = Внешний CSS / PostCSS
+                td = Встроенные директивы
+            tr-end
+        table-end
+    section-end
+
+    // --- Подвал (Footer) ---
+    footer-start
+        color(#71717a)
+        p = © 2026 GrassGreen Compiler. Платформа визуального и веб-интерфейса VD+ Engine.
+    footer-end
+page-end
+
+// --- Скриптовая логика страницы ---
+script-start
+    var(clicks = 0)
+
+    on-click(btn_inc)
+        add-var(clicks, 1)
+        set-text(counter_disp, {clicks})
+    end-click
+
+    on-click(btn_reset)
+        var(clicks = 0)
+        set-text(counter_disp, 0)
+    end-click
+
+    on-click(btn_submit)
+        alert(Спасибо за заявку! Мы свяжемся с вами в ближайшее время.)
+    end-click
+script-end

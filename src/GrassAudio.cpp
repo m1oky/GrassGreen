@@ -4,12 +4,14 @@
 // =============================================================================
 
 #include "GrassAudio.h"
+#include "gui_engine.h"
 #include <cmath>
 #include <vector>
 #include <string>
 #include <algorithm>
 #include <thread>
 #include <iostream>
+#include <atomic>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -21,6 +23,19 @@
 #endif
 
 namespace GrassAudio {
+
+    static std::atomic<bool> g_audio_initialized{false};
+    static std::atomic<uint32_t> g_sfx_counter{0};
+
+    void init() {
+#if defined(_WIN32)
+        if (!g_audio_initialized.exchange(true)) {
+            timeBeginPeriod(1);
+        }
+#else
+        g_audio_initialized = true;
+#endif
+    }
 
 #if defined(_WIN32)
     static std::wstring utf8_to_wstr(const std::string& str) {
@@ -35,10 +50,17 @@ namespace GrassAudio {
 #endif
 
     void beep(double freq_hz, int duration_ms) {
+        init();
 #if defined(_WIN32)
         DWORD freq = (DWORD)std::max(37.0, std::min(32767.0, freq_hz));
         DWORD dur = (DWORD)std::max(1, duration_ms);
-        Beep(freq, dur);
+        if (GrassGUI::is_window_active()) {
+            std::thread([freq, dur]() {
+                Beep(freq, dur);
+            }).detach();
+        } else {
+            Beep(freq, dur);
+        }
 #else
         std::cout << "\a" << std::flush;
         if (duration_ms > 0) {
@@ -47,83 +69,94 @@ namespace GrassAudio {
 #endif
     }
 
-    void synth_play(const std::string& waveform, double freq_hz, int duration_ms, double volume) {
+    void synth_play(const std::string& waveform, double freq_hz, int duration_ms, double volume, bool async) {
+        init();
         if (duration_ms <= 0 || freq_hz <= 0.0) return;
 
-        const int sample_rate = 44100;
-        int num_samples = (int)((sample_rate * (long long)duration_ms) / 1000);
-        if (num_samples <= 0) return;
+        bool run_async = async || GrassGUI::is_window_active();
 
-        std::vector<int16_t> samples(num_samples);
-        double amp = 32760.0 * (std::max(0.0, std::min(100.0, volume)) / 100.0);
-        const double two_pi = 6.28318530717958647692;
+        auto do_synth = [waveform, freq_hz, duration_ms, volume]() {
+            const int sample_rate = 44100;
+            int num_samples = (int)((sample_rate * (long long)duration_ms) / 1000);
+            if (num_samples <= 0) return;
 
-        std::string wf = waveform;
-        std::transform(wf.begin(), wf.end(), wf.begin(), ::tolower);
+            std::vector<int16_t> samples(num_samples);
+            double amp = 32760.0 * (std::max(0.0, std::min(100.0, volume)) / 100.0);
+            const double two_pi = 6.28318530717958647692;
 
-        int fade_samples = (std::min)(num_samples / 4, sample_rate * 5 / 1000); // 5 мс сглаживание клика
+            std::string wf = waveform;
+            std::transform(wf.begin(), wf.end(), wf.begin(), ::tolower);
 
-        for (int i = 0; i < num_samples; ++i) {
-            double t = (double)i / (double)sample_rate;
-            double phase = fmod(t * freq_hz, 1.0); // 0.0 .. 1.0
-            double sample = 0.0;
+            int fade_samples = (std::min)(num_samples / 4, sample_rate * 5 / 1000); // 5 мс сглаживание клика
 
-            if (wf == "square") {
-                sample = (phase < 0.5) ? 1.0 : -1.0;
-            } else if (wf == "sawtooth" || wf == "saw") {
-                sample = 2.0 * phase - 1.0;
-            } else if (wf == "triangle") {
-                sample = (phase < 0.5) ? (4.0 * phase - 1.0) : (3.0 - 4.0 * phase);
-            } else if (wf == "noise") {
-                sample = ((double)rand() / (double)RAND_MAX) * 2.0 - 1.0;
-            } else { // "sine" по умолчанию
-                sample = sin(phase * two_pi);
+            for (int i = 0; i < num_samples; ++i) {
+                double t = (double)i / (double)sample_rate;
+                double phase = fmod(t * freq_hz, 1.0); // 0.0 .. 1.0
+                double sample = 0.0;
+
+                if (wf == "square") {
+                    sample = (phase < 0.5) ? 1.0 : -1.0;
+                } else if (wf == "sawtooth" || wf == "saw") {
+                    sample = 2.0 * phase - 1.0;
+                } else if (wf == "triangle") {
+                    sample = (phase < 0.5) ? (4.0 * phase - 1.0) : (3.0 - 4.0 * phase);
+                } else if (wf == "noise") {
+                    sample = ((double)rand() / (double)RAND_MAX) * 2.0 - 1.0;
+                } else { // "sine" по умолчанию
+                    sample = sin(phase * two_pi);
+                }
+
+                // Плавное нарастание и затухание для исключения щелчков
+                double env = 1.0;
+                if (i < fade_samples) {
+                    env = (double)i / (double)fade_samples;
+                } else if (i > num_samples - fade_samples) {
+                    env = (double)(num_samples - i) / (double)fade_samples;
+                }
+
+                samples[i] = (int16_t)(sample * amp * env);
             }
-
-            // Плавное нарастание и затухание для исключения щелчков
-            double env = 1.0;
-            if (i < fade_samples) {
-                env = (double)i / (double)fade_samples;
-            } else if (i > num_samples - fade_samples) {
-                env = (double)(num_samples - i) / (double)fade_samples;
-            }
-
-            samples[i] = (int16_t)(sample * amp * env);
-        }
 
 #if defined(_WIN32)
-        WAVEFORMATEX wfx = {};
-        wfx.wFormatTag = WAVE_FORMAT_PCM;
-        wfx.nChannels = 1;
-        wfx.nSamplesPerSec = sample_rate;
-        wfx.wBitsPerSample = 16;
-        wfx.nBlockAlign = (wfx.nChannels * wfx.wBitsPerSample) / 8;
-        wfx.nAvgBytesPerSec = wfx.nSamplesPerSec * wfx.nBlockAlign;
+            WAVEFORMATEX wfx = {};
+            wfx.wFormatTag = WAVE_FORMAT_PCM;
+            wfx.nChannels = 1;
+            wfx.nSamplesPerSec = sample_rate;
+            wfx.wBitsPerSample = 16;
+            wfx.nBlockAlign = (wfx.nChannels * wfx.wBitsPerSample) / 8;
+            wfx.nAvgBytesPerSec = wfx.nSamplesPerSec * wfx.nBlockAlign;
 
-        HWAVEOUT hWaveOut = NULL;
-        if (waveOutOpen(&hWaveOut, WAVE_MAPPER, &wfx, 0, 0, CALLBACK_NULL) == MMSYSERR_NOERROR) {
-            WAVEHDR hdr = {};
-            hdr.lpData = (LPSTR)samples.data();
-            hdr.dwBufferLength = (DWORD)(samples.size() * sizeof(int16_t));
-            waveOutPrepareHeader(hWaveOut, &hdr, sizeof(WAVEHDR));
-            waveOutWrite(hWaveOut, &hdr, sizeof(WAVEHDR));
+            HWAVEOUT hWaveOut = NULL;
+            if (waveOutOpen(&hWaveOut, WAVE_MAPPER, &wfx, 0, 0, CALLBACK_NULL) == MMSYSERR_NOERROR) {
+                WAVEHDR hdr = {};
+                hdr.lpData = (LPSTR)samples.data();
+                hdr.dwBufferLength = (DWORD)(samples.size() * sizeof(int16_t));
+                waveOutPrepareHeader(hWaveOut, &hdr, sizeof(WAVEHDR));
+                waveOutWrite(hWaveOut, &hdr, sizeof(WAVEHDR));
 
-            while (!(hdr.dwFlags & WHDR_DONE)) {
-                Sleep(2);
+                while (!(hdr.dwFlags & WHDR_DONE)) {
+                    Sleep(2);
+                }
+
+                waveOutUnprepareHeader(hWaveOut, &hdr, sizeof(WAVEHDR));
+                waveOutClose(hWaveOut);
+            } else {
+                beep(freq_hz, duration_ms);
             }
-
-            waveOutUnprepareHeader(hWaveOut, &hdr, sizeof(WAVEHDR));
-            waveOutClose(hWaveOut);
-        } else {
-            beep(freq_hz, duration_ms);
-        }
 #else
-        beep(freq_hz, duration_ms);
+            beep(freq_hz, duration_ms);
 #endif
+        };
+
+        if (run_async) {
+            std::thread(do_synth).detach();
+        } else {
+            do_synth();
+        }
     }
 
-    void tone(double freq_hz, int duration_ms, double volume) {
-        synth_play("sine", freq_hz, duration_ms, volume);
+    void tone(double freq_hz, int duration_ms, double volume, bool async) {
+        synth_play("sine", freq_hz, duration_ms, volume, async);
     }
 
     void sound_stop() {
@@ -200,7 +233,36 @@ namespace GrassAudio {
 #endif
     }
 
+    void play_sound_effect(const std::string& filepath) {
+        init();
+        if (filepath.empty()) return;
+#if defined(_WIN32)
+        std::wstring wpath = utf8_to_wstr(filepath);
+        std::wstring ext = L"";
+        size_t dot = wpath.rfind(L'.');
+        if (dot != std::wstring::npos) ext = wpath.substr(dot);
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+
+        if (ext == L".wav" || ext.empty()) {
+            PlaySoundW(wpath.c_str(), NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
+        } else {
+            uint32_t sfx_id = ++g_sfx_counter;
+            std::wstring alias = L"grass_sfx_" + std::to_wstring(sfx_id);
+            std::wstring openCmd = L"open \"" + wpath + L"\" alias " + alias;
+            if (mciSendStringW(openCmd.c_str(), NULL, 0, NULL) == 0) {
+                std::wstring playCmd = L"play " + alias;
+                mciSendStringW(playCmd.c_str(), NULL, 0, NULL);
+            }
+        }
+#endif
+    }
+
     void cleanup() {
         sound_stop();
+#if defined(_WIN32)
+        if (g_audio_initialized.exchange(false)) {
+            timeEndPeriod(1);
+        }
+#endif
     }
 }

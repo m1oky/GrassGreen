@@ -100,6 +100,15 @@ class GrassVM {
     unordered_map<uint32_t, int> loop_trip_counters;
     unordered_set<uint32_t> failed_loops;
 
+    struct AttachedSound {
+        string waveform = "sine";
+        double freq_hz = 440.0;
+        int duration_ms = 100;
+        double volume = 80.0;
+    };
+    unordered_map<string, uint32_t> func_name_to_ip;
+    unordered_map<uint32_t, AttachedSound> attached_ip_sounds;
+
     bool tryRunJitLoop(uint32_t loop_start, uint32_t loop_end) {
         if (failed_loops.count(loop_start)) return false;
 
@@ -199,11 +208,26 @@ class GrassVM {
             for (const auto& kv : shared_env->vars) {
                 GrassGUI::set_variable(kv.first, kv.second.toString());
             }
-        } else {
-            for (const auto& kv : vars) {
+        }
+        for (const auto& kv : vars) {
+            GrassGUI::set_variable(kv.first, kv.second.toString());
+        }
+        for (const auto& f : frames) {
+            for (const auto& kv : f.locals) {
                 GrassGUI::set_variable(kv.first, kv.second.toString());
             }
         }
+    }
+
+    void run_callback(uint32_t cb_ip) {
+        if (cb_ip == 0 || cb_ip >= code.size()) return;
+        syncVarsToGUI();
+        frames.push_back({ (size_t)0xFFFFFFFF, {} });
+        size_t saved_ip = ip;
+        execute(cb_ip);
+        ip = saved_ip;
+        syncVarsToGUI();
+        GrassGUI::refresh_elements();
     }
 
     static bool isGdbSchemaKey(const string& fn) {
@@ -492,6 +516,10 @@ public:
 
     do_call_func: {
         uint32_t target_ip = readU32();
+        auto it = attached_ip_sounds.find(target_ip);
+        if (it != attached_ip_sounds.end()) {
+            GrassAudio::synth_play(it->second.waveform, it->second.freq_hz, it->second.duration_ms, it->second.volume);
+        }
         frames.push_back({ip, {}}); // Создаем новый локальный фрейм вызова
         ip = target_ip;
         DISPATCH_STEP();
@@ -502,8 +530,12 @@ public:
             last_return_value = stack.back();
         }
         if (frames.size() > 1) {
-            ip = frames.back().return_ip;
+            size_t ret_ip = frames.back().return_ip;
             frames.pop_back(); // Уничтожаем локальный фрейм завершенной функции
+            if (ret_ip == (size_t)0xFFFFFFFF) {
+                return; // Завершение выполнения VM callback
+            }
+            ip = ret_ip;
         } else {
             return;
         }
@@ -515,22 +547,13 @@ public:
             string name = readString();
             bool found = false;
             GrassValue val;
-            // 1. Поиск в текущем локальном фрейме функции
-            if (!frames.empty()) {
-                auto it = frames.back().locals.find(name);
-                if (it != frames.back().locals.end()) {
-                    if (is_root_vm && frames.size() == 2 && shared_env && name.rfind("g_", 0) == 0) {
-                        std::lock_guard<std::mutex> lk(shared_env->mtx);
-                        auto sit = shared_env->vars.find(name);
-                        if (sit != shared_env->vars.end()) {
-                            val = sit->second;
-                        } else {
-                            val = it->second;
-                        }
-                    } else {
-                        val = it->second;
-                    }
+            // 1. Поиск во всех локальных фреймах от текущего к внешним
+            for (int fi = (int)frames.size() - 1; fi >= 0; --fi) {
+                auto it = frames[fi].locals.find(name);
+                if (it != frames[fi].locals.end()) {
+                    val = it->second;
                     found = true;
+                    break;
                 }
             }
             // 2. Поиск в разделяемых глобальных переменных (shared_env)
@@ -542,15 +565,7 @@ public:
                     found = true;
                 }
             }
-            // 3. Поиск в глобальном фрейме (уровень 0)
-            if (!found && !frames.empty()) {
-                auto it = frames[0].locals.find(name);
-                if (it != frames[0].locals.end()) {
-                    val = it->second;
-                    found = true;
-                }
-            }
-            // 4. Поиск в локальных переменных потока
+            // 3. Поиск в локальных переменных потока
             if (!found && !is_root_vm) {
                 auto it = vars.find(name);
                 if (it != vars.end()) {
@@ -568,6 +583,8 @@ public:
                 push(GrassValue::Num((double)GrassHardware::ram_free_mb()));
             } else if (GrassDB::has(name)) {
                 push(GrassValue::Str(GrassDB::get(name)));
+            } else if (GrassGUI::has_element(name)) {
+                push(GrassValue::Str(name));
             } else {
                 push(GrassValue::Str(""));
             }
@@ -596,6 +613,7 @@ public:
                     shared_env->vars[name] = std::move(val);
                 }
             }
+            GrassGUI::set_variable(name, val.toString());
         }
         DISPATCH_STEP();
     }
@@ -604,41 +622,31 @@ public:
         {
             string name = readString();
             GrassValue val = pop();
-            // 1. Если переменная есть в текущем локальном фрейме функции
-            if (!frames.empty() && frames.back().locals.count(name)) {
-                frames.back().locals[name] = val;
-                if (is_root_vm && frames.size() == 2 && shared_env && name.rfind("g_", 0) == 0) {
-                    std::lock_guard<std::mutex> lk(shared_env->mtx);
-                    if (shared_env->vars.count(name)) {
-                        shared_env->vars[name] = val;
-                    }
-                }
-            } else if (shared_env) {
-                // 2. Иначе если переменная существует в разделяемой среде
-                bool in_shared = false;
-                {
-                    std::lock_guard<std::mutex> lk(shared_env->mtx);
-                    auto sit = shared_env->vars.find(name);
-                    if (sit != shared_env->vars.end()) {
-                        sit->second = val;
-                        in_shared = true;
-                    }
-                }
-                if (!in_shared) {
-                    if (!frames.empty()) {
-                        frames.back().locals[name] = std::move(val);
-                    } else {
-                        vars[name] = std::move(val);
-                    }
-                }
-            } else {
-                // 3. Fallback в локальный фрейм
-                if (!frames.empty()) {
-                    frames.back().locals[name] = std::move(val);
-                } else {
-                    vars[name] = std::move(val);
+            bool stored = false;
+            // 1. Поиск во всех локальных фреймах от текущего к внешним
+            for (int fi = (int)frames.size() - 1; fi >= 0; --fi) {
+                if (frames[fi].locals.count(name)) {
+                    frames[fi].locals[name] = val;
+                    stored = true;
+                    break;
                 }
             }
+            if (!stored && shared_env) {
+                std::lock_guard<std::mutex> lk(shared_env->mtx);
+                auto sit = shared_env->vars.find(name);
+                if (sit != shared_env->vars.end()) {
+                    sit->second = val;
+                    stored = true;
+                }
+            }
+            if (!stored) {
+                if (!frames.empty()) {
+                    frames.back().locals[name] = val;
+                } else {
+                    vars[name] = val;
+                }
+            }
+            GrassGUI::set_variable(name, val.toString());
         }
         DISPATCH_STEP();
     }
@@ -1897,6 +1905,58 @@ public:
                         GrassGUI::run_from_file(args[0].toString());
                         push(GrassValue::Num(1.0));
                     }
+                    else if (fn == "set_text" && argc >= 2) {
+                        GrassGUI::set_text(args[0].toString(), args[1].toString());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "get_text" && argc >= 1) {
+                        push(GrassValue::Str(GrassGUI::get_text(args[0].toString())));
+                    }
+                    else if (fn == "set_val" && argc >= 2) {
+                        GrassGUI::set_val(args[0].toString(), args[1].toString());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "get_val" && argc >= 1) {
+                        push(GrassValue::Num(GrassGUI::get_val(args[0].toString())));
+                    }
+                    else if (fn == "set_color" && argc >= 2) {
+                        GrassGUI::set_color(args[0].toString(), args[1].toString());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "set_bg" && argc >= 2) {
+                        GrassGUI::set_bg(args[0].toString(), args[1].toString());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "set_visible" && argc >= 2) {
+                        GrassGUI::set_visible(args[0].toString(), args[1].toNumber() != 0.0 || args[1].toString() == "true");
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "hide" && argc >= 1) {
+                        GrassGUI::set_visible(args[0].toString(), false);
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "show" && argc >= 1) {
+                        GrassGUI::set_visible(args[0].toString(), true);
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "is_checked" && argc >= 1) {
+                        push(GrassValue::Num(GrassGUI::is_checked(args[0].toString()) ? 1.0 : 0.0));
+                    }
+                    else if (fn == "add_item" && argc >= 2) {
+                        GrassGUI::add_list_item(args[0].toString(), args[1].toString());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "clear_list" && argc >= 1) {
+                        GrassGUI::clear_list(args[0].toString());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "get_selected" && argc >= 1) {
+                        push(GrassValue::Str(GrassGUI::get_list_selected(args[0].toString())));
+                    }
+                    else if (fn == "on_timer" && argc >= 2) {
+                        GrassGUI::add_timer((int)args[0].toNumber(), (uint32_t)args[1].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
                     else if (fn == "web_start" && argc >= 1) { GrassWeb_LoadPage(args[0].toString()); push(GrassValue::Num(1.0)); }
                     else if (fn == "web_compile" && argc >= 1) {
                         string html = CompileGrassToHTML(args[0].toString());
@@ -1947,6 +2007,35 @@ public:
                     }
                     else if (fn == "sound_is_playing") {
                         push(GrassValue::Num(GrassAudio::sound_is_playing() ? 1.0 : 0.0));
+                    }
+                    else if (fn == "audio_init") {
+                        GrassAudio::init();
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "__reg_func" && argc >= 2) {
+                        func_name_to_ip[args[0].toString()] = (uint32_t)args[1].toNumber();
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "attach_sound" && argc >= 5) {
+                        string target_name = args[0].toString();
+                        uint32_t target_ip = 0;
+                        if (func_name_to_ip.count(target_name)) {
+                            target_ip = func_name_to_ip[target_name];
+                        } else {
+                            target_ip = (uint32_t)args[0].toNumber();
+                        }
+                        if (target_ip != 0) {
+                            attached_ip_sounds[target_ip] = { args[1].toString(), args[2].toNumber(), (int)args[3].toNumber(), args[4].toNumber() };
+                        }
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "bind_synth" && argc >= 5) {
+                        GrassGUI::bind_synth(args[0].toString(), args[1].toString(), args[2].toNumber(), (int)args[3].toNumber(), args[4].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "bind_sound" && argc >= 2) {
+                        GrassGUI::bind_sound(args[0].toString(), args[1].toString());
+                        push(GrassValue::Num(1.0));
                     }
                     // ── Многопоточность (!thread!) ──
                     else if (fn == "thread_join" && argc >= 1) {
@@ -2283,6 +2372,9 @@ public:
         if (hConsole) ShowWindow(hConsole, SW_HIDE);
 #endif
         syncVarsToGUI();
+        GrassGUI::set_vm_callback_runner([this](uint32_t cb_ip) {
+            this->run_callback(cb_ip);
+        });
         GrassGUI::show_window();
         DISPATCH_STEP();
     }

@@ -159,7 +159,21 @@ namespace GrassGUI {
 
     // Вкладки (Tabs System)
     string current_active_tab = "main";
-    string current_parsing_tab = "main";
+    string current_parsing_tab = ""; // По умолчанию пустая вкладка — постоянный каркас интерфейса
+
+    // Реактивная интеграция с виртуальной машиной и таймеры
+    VMCallbackRunner g_vm_callback_runner = nullptr;
+    vector<TimerEntry> g_window_timers;
+    wstring g_hovered_tooltip = L"";
+    POINT g_hovered_tooltip_pt = { 0, 0 };
+
+    inline bool is_elem_visible(const UIElement& elem) {
+        if (!elem.is_visible) return false;
+        if (elem.tab_name.empty() || elem.tab_name == "all" || elem.tab_name == "global" || elem.tab_name == "__global__") {
+            return true;
+        }
+        return elem.tab_name == current_active_tab;
+    }
 
     // Частицы (Particle Engine)
     bool particles_active = false;
@@ -227,15 +241,52 @@ namespace GrassGUI {
     bool trigger_show = false;
     string pending_switch_file = "";
 
+    // Звуки кнопок по умолчанию (bind_synth / bind_sound "all" / "buttons")
+    static bool g_default_btn_has_synth = false;
+    static string g_default_btn_synth_wave = "sine";
+    static double g_default_btn_synth_freq = 440.0;
+    static int g_default_btn_synth_dur = 100;
+    static double g_default_btn_synth_vol = 80.0;
+
+    static bool g_default_btn_has_sound_file = false;
+    static string g_default_btn_sound_file = "";
+
     // --- Вспомогательные функции ---
 
     wstring utf8_to_wstring(const string& str);
     string wstring_to_utf8(const wstring& wstr);
 
+    string trim(const string& s);
+
     void cleanParentheses(string& str) {
         string res;
         for (char c : str) if (c != '(' && c != ')') res += c;
         str = res;
+    }
+
+    vector<string> split_csv_args(const string& raw) {
+        vector<string> res;
+        string cur;
+        bool in_quotes = false;
+        char quote_char = 0;
+        for (char c : raw) {
+            if ((c == '"' || c == '\'') && !in_quotes) {
+                in_quotes = true;
+                quote_char = c;
+            } else if (c == quote_char && in_quotes) {
+                in_quotes = false;
+                quote_char = 0;
+            } else if (c == ',' && !in_quotes) {
+                res.push_back(trim(cur));
+                cur.clear();
+            } else if ((c == '(' || c == ')') && !in_quotes) {
+                // пропускаем внешние скобки
+            } else {
+                cur += c;
+            }
+        }
+        if (!cur.empty()) res.push_back(trim(cur));
+        return res;
     }
 
     void cleanCarriageReturn(string& str) {
@@ -447,6 +498,9 @@ namespace GrassGUI {
                     if (elem.anim_type == "slide-up") elem.y = elem.orig_y + 15;
                 }
             }
+        }
+        if (g_hwnd_main && IsWindow(g_hwnd_main)) {
+            InvalidateRect(g_hwnd_main, NULL, FALSE);
         }
     }
 
@@ -1225,6 +1279,20 @@ using namespace std;
                     // Обновление анимаций элементов
                     bool need_redraw = particles_active || (focused_elem_idx != -1);
 
+                    // Обновление реактивных таймеров every(ms)
+                    if (!g_window_timers.empty()) {
+                        uint64_t now_ticks = GetTickCount64();
+                        for (auto& t : g_window_timers) {
+                            if (t.callback_ip != 0 && (now_ticks - t.last_tick >= (uint64_t)t.interval_ms)) {
+                                t.last_tick = now_ticks;
+                                if (g_vm_callback_runner) {
+                                    g_vm_callback_runner(t.callback_ip);
+                                    need_redraw = true;
+                                }
+                            }
+                        }
+                    }
+
                     // Обновление виджетов часов (Clock widget) раз в секунду
                     SYSTEMTIME st;
                     GetLocalTime(&st);
@@ -1408,11 +1476,24 @@ using namespace std;
                 bool need_redraw = false;
                 bool is_hand = false;
                 bool is_ibeam = false;
+                bool is_no = false;
 
                 if (is_dragging_header_buttons) {
                     header_buttons_offset = drag_buttons_initial_offset + (mx - drag_buttons_start_x);
                     InvalidateRect(hwnd, NULL, FALSE);
                     break;
+                }
+
+                // Перетаскивание слайдера (Slider dragging)
+                for (auto& elem : elements) {
+                    if (elem.type == "slider" && elem.is_slider_dragging) {
+                        float pct = max(0.0f, min(1.0f, (float)(mx - elem.x) / (float)elem.w));
+                        elem.slider_val = elem.slider_min + pct * (elem.slider_max - elem.slider_min);
+                        if (elem.on_change_ip != 0 && g_vm_callback_runner) {
+                            g_vm_callback_runner(elem.on_change_ip);
+                        }
+                        need_redraw = true;
+                    }
                 }
 
                 if (is_modern_frameless && current_header_style != HeaderStyle::None && my < header_bar_height) {
@@ -1429,20 +1510,41 @@ using namespace std;
                     }
                 }
 
+                wstring new_tt = L"";
+                POINT new_tt_pt = { mx, my };
+
                 for (auto& elem : elements) {
-                    if (!elem.tab_name.empty() && elem.tab_name != "all" && elem.tab_name != current_active_tab) continue;
+                    if (!is_elem_visible(elem)) continue;
                     bool inside = (mx >= elem.x && mx <= elem.x + elem.w && my >= elem.y && my <= elem.y + elem.h);
                     if (elem.is_hovered != inside) {
                         elem.is_hovered = inside;
                         need_redraw = true;
+                        if (inside && !elem.is_disabled) {
+                            if (elem.has_hover_synth) {
+                                GrassAudio::synth_play(elem.hover_synth_wave, elem.hover_synth_freq, elem.hover_synth_dur, elem.hover_synth_vol);
+                            } else if (elem.has_hover_sound_file) {
+                                GrassAudio::play_sound_effect(elem.hover_sound_file);
+                            }
+                        }
                     }
                     if (inside) {
-                        if (elem.type == "button") is_hand = true;
-                        else if (elem.type == "enter") is_ibeam = true;
+                        if (!elem.tooltip.empty()) {
+                            new_tt = elem.tooltip;
+                        }
+                        if (elem.is_disabled) is_no = true;
+                        else if (elem.cursor_type == "pointer" || elem.type == "button" || elem.type == "checkbox" || elem.type == "slider") is_hand = true;
+                        else if (elem.cursor_type == "text" || elem.type == "enter") is_ibeam = true;
                     }
                 }
 
-                if (is_hand) SetCursor(LoadCursor(NULL, IDC_HAND));
+                if (g_hovered_tooltip != new_tt) {
+                    g_hovered_tooltip = new_tt;
+                    g_hovered_tooltip_pt = new_tt_pt;
+                    need_redraw = true;
+                }
+
+                if (is_no) SetCursor(LoadCursor(NULL, IDC_NO));
+                else if (is_hand) SetCursor(LoadCursor(NULL, IDC_HAND));
                 else if (is_ibeam) SetCursor(LoadCursor(NULL, IDC_IBEAM));
                 else SetCursor(LoadCursor(NULL, IDC_ARROW));
 
@@ -1534,17 +1636,33 @@ using namespace std;
 
                 for (int i = (int)elements.size() - 1; i >= 0; --i) {
                     auto& elem = elements[i];
-                    if (!elem.tab_name.empty() && elem.tab_name != "all" && elem.tab_name != current_active_tab) continue;
+                    if (!is_elem_visible(elem)) continue;
+                    if (elem.is_disabled) continue;
 
                     if (mx >= elem.x && mx <= elem.x + elem.w && my >= elem.y && my <= elem.y + elem.h) {
                         if (elem.type == "button") {
                             hit_button = true;
                             elem.is_pressed = true;
-                            GrassAudio::tone(950, 12, 25);
+                            if (elem.has_click_synth) {
+                                GrassAudio::synth_play(elem.click_synth_wave, elem.click_synth_freq, elem.click_synth_dur, elem.click_synth_vol);
+                            } else if (elem.has_click_sound_file) {
+                                GrassAudio::play_sound_effect(elem.click_sound_file);
+                            } else if (elem.click_sound) {
+                                GrassAudio::tone(950, 12, 25);
+                            } else if (g_default_btn_has_synth) {
+                                GrassAudio::synth_play(g_default_btn_synth_wave, g_default_btn_synth_freq, g_default_btn_synth_dur, g_default_btn_synth_vol);
+                            } else if (g_default_btn_has_sound_file) {
+                                GrassAudio::play_sound_effect(g_default_btn_sound_file);
+                            }
+
+                            // Вызов обработчика клика виртуальной машины GrassGreen
+                            if (elem.on_click_ip != 0 && g_vm_callback_runner) {
+                                g_vm_callback_runner(elem.on_click_ip);
+                            }
 
                             // Переключение вкладки (tab switch)
                             if (elem.has_tab_switch && !elem.target_tab_name.empty()) {
-                                GrassAudio::tone(640, 20, 35);
+                                if (elem.click_sound) GrassAudio::tone(640, 20, 35);
                                 switch_tab(elem.target_tab_name);
                                 InvalidateRect(hwnd, NULL, FALSE);
                                 return 0;
@@ -1595,6 +1713,46 @@ using namespace std;
                             }
                             InvalidateRect(hwnd, NULL, FALSE);
                             break;
+                        } else if (elem.type == "checkbox") {
+                            elem.is_checked = !elem.is_checked;
+                            if (elem.has_click_synth) {
+                                GrassAudio::synth_play(elem.click_synth_wave, elem.click_synth_freq, elem.click_synth_dur, elem.click_synth_vol);
+                            } else if (elem.has_click_sound_file) {
+                                GrassAudio::play_sound_effect(elem.click_sound_file);
+                            } else if (elem.click_sound) {
+                                GrassAudio::tone(800, 10, 20);
+                            }
+                            if (elem.on_change_ip != 0 && g_vm_callback_runner) {
+                                g_vm_callback_runner(elem.on_change_ip);
+                            }
+                            InvalidateRect(hwnd, NULL, FALSE);
+                            break;
+                        } else if (elem.type == "slider") {
+                            elem.is_slider_dragging = true;
+                            SetCapture(hwnd);
+                            float pct = max(0.0f, min(1.0f, (float)(mx - elem.x) / (float)elem.w));
+                            elem.slider_val = elem.slider_min + pct * (elem.slider_max - elem.slider_min);
+                            if (elem.has_click_synth) {
+                                GrassAudio::synth_play(elem.click_synth_wave, elem.click_synth_freq, elem.click_synth_dur, elem.click_synth_vol);
+                            } else if (elem.has_click_sound_file) {
+                                GrassAudio::play_sound_effect(elem.click_sound_file);
+                            }
+                            if (elem.on_change_ip != 0 && g_vm_callback_runner) {
+                                g_vm_callback_runner(elem.on_change_ip);
+                            }
+                            InvalidateRect(hwnd, NULL, FALSE);
+                            break;
+                        } else if (elem.type == "list") {
+                            int item_h = 24;
+                            int clicked_idx = (my - elem.y - 4 + elem.list_scroll_y) / item_h;
+                            if (clicked_idx >= 0 && clicked_idx < (int)elem.list_items.size()) {
+                                elem.list_selected_idx = clicked_idx;
+                                if (elem.on_change_ip != 0 && g_vm_callback_runner) {
+                                    g_vm_callback_runner(elem.on_change_ip);
+                                }
+                                InvalidateRect(hwnd, NULL, FALSE);
+                            }
+                            break;
                         } else if (elem.type == "enter") {
                             hit_input = true;
                             if (focused_elem_idx != i) {
@@ -1634,8 +1792,29 @@ using namespace std;
                     is_dragging_header_buttons = false;
                     ReleaseCapture();
                 }
-                for (auto& elem : elements) elem.is_pressed = false;
+                for (auto& elem : elements) {
+                    elem.is_pressed = false;
+                    if (elem.is_slider_dragging) {
+                        elem.is_slider_dragging = false;
+                        ReleaseCapture();
+                    }
+                }
                 InvalidateRect(hwnd, NULL, FALSE);
+                break;
+            }
+
+            case WM_MOUSEWHEEL: {
+                POINT pt;
+                GetCursorPos(&pt);
+                ScreenToClient(hwnd, &pt);
+                short zDelta = GET_WHEEL_DELTA_WPARAM(wp);
+                for (auto& elem : elements) {
+                    if (is_elem_visible(elem) && elem.type == "list" && pt.x >= elem.x && pt.x <= elem.x + elem.w && pt.y >= elem.y && pt.y <= elem.y + elem.h) {
+                        elem.list_scroll_y = max(0, elem.list_scroll_y - (zDelta / 120) * 24);
+                        InvalidateRect(hwnd, NULL, FALSE);
+                        return 0;
+                    }
+                }
                 break;
             }
 
@@ -1649,6 +1828,9 @@ using namespace std;
                                 elem.caret_pos--;
                                 caret_pulse_phase = 0.0f;
                                 if (!elem.id.empty()) input_values_utf8[elem.id] = wstring_to_utf8(elem.text);
+                                if (elem.on_change_ip != 0 && g_vm_callback_runner) {
+                                    g_vm_callback_runner(elem.on_change_ip);
+                                }
                                 InvalidateRect(hwnd, NULL, FALSE);
                             }
                         } else if (wp >= 32) {
@@ -1656,6 +1838,9 @@ using namespace std;
                             elem.caret_pos++;
                             caret_pulse_phase = 0.0f;
                             if (!elem.id.empty()) input_values_utf8[elem.id] = wstring_to_utf8(elem.text);
+                            if (elem.on_change_ip != 0 && g_vm_callback_runner) {
+                                g_vm_callback_runner(elem.on_change_ip);
+                            }
                             InvalidateRect(hwnd, NULL, FALSE);
                         }
                     }
@@ -1878,8 +2063,8 @@ using namespace std;
 
                     // 4. Отрисовка элементов активной вкладки через композитор VD+
                     for (auto& elem : elements) {
-                        // Фильтр вкладок (Tabs System): рисуем только элементы текущей вкладки
-                        if (!elem.tab_name.empty() && elem.tab_name != "all" && elem.tab_name != current_active_tab) {
+                        // Фильтр вкладок (Tabs System): постоянный каркас или текущая вкладка
+                        if (!is_elem_visible(elem)) {
                             continue;
                         }
 
@@ -2052,6 +2237,122 @@ using namespace std;
                             RectF rectF(ex + (REAL)elem.pad, ey, ew - (REAL)(elem.pad * 2), eh);
                             graphics.DrawString(elem.text.c_str(), -1, &font, rectF, &format, &textBrush);
                         }
+                        else if (elem.type == "progress") {
+                            // Фоновый трек
+                            SolidBrush progBg(Color(255, 24, 24, 27));
+                            graphics.FillPath(&progBg, &path);
+
+                            // Заполненная часть с градиентом
+                            double pVal = max(0.0, min(100.0, elem.progress_val));
+                            REAL fill_w = ew * (REAL)(pVal / 100.0);
+                            if (fill_w > 2.0f) {
+                                GraphicsPath fillPath;
+                                MakeRoundedRectPath(fillPath, ex, ey, fill_w, eh, er);
+                                if (elem.has_gradient) {
+                                    Color c1(255, GetRValue(elem.grad_color1), GetGValue(elem.grad_color1), GetBValue(elem.grad_color1));
+                                    Color c2(255, GetRValue(elem.grad_color2), GetGValue(elem.grad_color2), GetBValue(elem.grad_color2));
+                                    LinearGradientBrush fillBrush(RectF(ex, ey, fill_w, eh), c1, c2, elem.grad_angle);
+                                    graphics.FillPath(&fillBrush, &fillPath);
+                                } else {
+                                    Color c1(255, 34, 197, 94);
+                                    Color c2(255, 22, 163, 74);
+                                    LinearGradientBrush fillBrush(RectF(ex, ey, fill_w, eh), c1, c2, 90.0f);
+                                    graphics.FillPath(&fillBrush, &fillPath);
+                                }
+                            }
+
+                            // Рамка прогресс-бара
+                            Color inBorder = elem.has_border ?
+                                Color(255, GetRValue(elem.border_color), GetGValue(elem.border_color), GetBValue(elem.border_color)) : Color(255, 63, 63, 70);
+                            DrawSmoothRoundedBorder(graphics, ex, ey, ew, eh, er, (REAL)max(1, elem.border_width), inBorder);
+
+                            // Текст процентов внутри
+                            wstring pText = elem.text.empty() ? (to_wstring((int)pVal) + L"%") : elem.text;
+                            FontFamily fontFamily(elem.f_style.c_str());
+                            Gdiplus::Font font(&fontFamily, (REAL)elem.f_size, FontStyleBold, UnitPixel);
+                            SolidBrush textBrush(Color(255, GetRValue(elem.txt_color), GetGValue(elem.txt_color), GetBValue(elem.txt_color)));
+                            StringFormat format;
+                            format.SetAlignment(StringAlignmentCenter);
+                            format.SetLineAlignment(StringAlignmentCenter);
+                            graphics.DrawString(pText.c_str(), -1, &font, RectF(ex, ey, ew, eh), &format, &textBrush);
+                        }
+                        else if (elem.type == "slider") {
+                            REAL track_y = ey + eh / 2.0f;
+                            REAL track_h = 6.0f;
+                            GraphicsPath trackPath;
+                            MakeRoundedRectPath(trackPath, ex, track_y - track_h / 2.0f, ew, track_h, 3.0f);
+                            SolidBrush trackBg(Color(255, 39, 39, 42));
+                            graphics.FillPath(&trackBg, &trackPath);
+
+                            float pct = (elem.slider_max > elem.slider_min) ? (float)((elem.slider_val - elem.slider_min) / (elem.slider_max - elem.slider_min)) : 0.0f;
+                            pct = max(0.0f, min(1.0f, pct));
+                            REAL fill_w = ew * pct;
+                            if (fill_w > 1.0f) {
+                                GraphicsPath fillTrack;
+                                MakeRoundedRectPath(fillTrack, ex, track_y - track_h / 2.0f, fill_w, track_h, 3.0f);
+                                SolidBrush fillBrush(Color(255, 34, 197, 94));
+                                graphics.FillPath(&fillBrush, &fillTrack);
+                            }
+
+                            // Ползунок (кружок)
+                            REAL thumb_r = 9.0f;
+                            REAL thumb_x = ex + fill_w;
+                            SolidBrush thumbBrush(Color(255, 244, 244, 245));
+                            graphics.FillEllipse(&thumbBrush, thumb_x - thumb_r, track_y - thumb_r, thumb_r * 2.0f, thumb_r * 2.0f);
+                            Pen thumbPen(Color(255, 34, 197, 94), 2.0f);
+                            graphics.DrawEllipse(&thumbPen, thumb_x - thumb_r, track_y - thumb_r, thumb_r * 2.0f, thumb_r * 2.0f);
+                        }
+                        else if (elem.type == "checkbox") {
+                            REAL box_sz = 18.0f;
+                            REAL box_x = ex;
+                            REAL box_y = ey + (eh - box_sz) / 2.0f;
+                            GraphicsPath boxPath;
+                            MakeRoundedRectPath(boxPath, box_x, box_y, box_sz, box_sz, 4.0f);
+                            SolidBrush boxBg(elem.is_checked ? Color(255, 22, 163, 74) : Color(255, 24, 24, 27));
+                            graphics.FillPath(&boxBg, &boxPath);
+                            Pen boxPen(elem.is_checked ? Color(255, 34, 197, 94) : Color(255, 63, 63, 70), 1.5f);
+                            graphics.DrawPath(&boxPen, &boxPath);
+
+                            if (elem.is_checked) {
+                                Pen checkPen(Color(255, 255, 255, 255), 2.2f);
+                                graphics.DrawLine(&checkPen, box_x + 3.5f, box_y + 9.0f, box_x + 7.5f, box_y + 13.5f);
+                                graphics.DrawLine(&checkPen, box_x + 7.5f, box_y + 13.5f, box_x + 14.5f, box_y + 4.5f);
+                            }
+
+                            FontFamily fontFamily(elem.f_style.c_str());
+                            Gdiplus::Font font(&fontFamily, (REAL)elem.f_size, FontStyleRegular, UnitPixel);
+                            SolidBrush textBrush(Color(255, GetRValue(elem.txt_color), GetGValue(elem.txt_color), GetBValue(elem.txt_color)));
+                            StringFormat sfmt;
+                            sfmt.SetLineAlignment(StringAlignmentCenter);
+                            RectF txtRect(ex + box_sz + 8.0f, ey, ew - box_sz - 8.0f, eh);
+                            graphics.DrawString(elem.text.c_str(), -1, &font, txtRect, &sfmt, &textBrush);
+                        }
+                        else if (elem.type == "list") {
+                            SolidBrush listBg(Color(255, 18, 18, 22));
+                            graphics.FillPath(&listBg, &path);
+                            DrawSmoothRoundedBorder(graphics, ex, ey, ew, eh, er, 1.0f, Color(255, 39, 39, 42));
+
+                            graphics.SetClip(&path);
+                            int item_h = 24;
+                            FontFamily fontFamily(elem.f_style.c_str());
+                            Gdiplus::Font font(&fontFamily, (REAL)elem.f_size, FontStyleRegular, UnitPixel);
+
+                            for (size_t li = 0; li < elem.list_items.size(); ++li) {
+                                REAL iy = ey + 4.0f + (REAL)(li * item_h) - (REAL)elem.list_scroll_y;
+                                if (iy + item_h < ey || iy > ey + eh) continue;
+                                bool is_sel = ((int)li == elem.list_selected_idx);
+                                if (is_sel) {
+                                    SolidBrush selBrush(Color(255, 22, 101, 52));
+                                    graphics.FillRectangle(&selBrush, ex + 4.0f, iy, ew - 8.0f, (REAL)item_h);
+                                }
+                                SolidBrush itmBrush(is_sel ? Color(255, 255, 255, 255) : Color(255, 212, 212, 216));
+                                StringFormat sfmt;
+                                sfmt.SetLineAlignment(StringAlignmentCenter);
+                                RectF itmRect(ex + 10.0f, iy, ew - 20.0f, (REAL)item_h);
+                                graphics.DrawString(elem.list_items[li].c_str(), -1, &font, itmRect, &sfmt, &itmBrush);
+                            }
+                            graphics.ResetClip();
+                        }
                         else if (elem.type == "icon" || elem.type == "svg") {
                             if (!elem.media_path.empty()) {
                                 wstring ext = elem.media_path.substr(elem.media_path.find_last_of(L".") + 1);
@@ -2074,6 +2375,37 @@ using namespace std;
                         Color wbColor(255, GetRValue(win_border_color), GetGValue(win_border_color), GetBValue(win_border_color));
                         DrawSmoothRoundedBorder(graphics, 0, 0, (REAL)cw, (REAL)ch, (REAL)app_border_radius, (REAL)win_border_width, wbColor);
                     }
+
+                    // 6. Отрисовка всплывающей подсказки (Tooltip)
+                    if (!g_hovered_tooltip.empty()) {
+                        graphics.ResetClip();
+                        FontFamily ttFamily(L"Segoe UI");
+                        Gdiplus::Font ttFont(&ttFamily, 12.0f, FontStyleRegular, UnitPixel);
+                        RectF layoutRect(0, 0, 300.0f, 100.0f);
+                        RectF boundRect;
+                        graphics.MeasureString(g_hovered_tooltip.c_str(), -1, &ttFont, layoutRect, NULL, &boundRect);
+
+                        REAL ttPadX = 8.0f;
+                        REAL ttPadY = 5.0f;
+                        REAL ttW = boundRect.Width + ttPadX * 2.0f;
+                        REAL ttH = boundRect.Height + ttPadY * 2.0f;
+                        REAL ttX = (REAL)g_hovered_tooltip_pt.x + 12.0f;
+                        REAL ttY = (REAL)g_hovered_tooltip_pt.y + 16.0f;
+                        if (ttX + ttW > (REAL)cw - 6.0f) ttX = (REAL)cw - ttW - 6.0f;
+                        if (ttY + ttH > (REAL)ch - 6.0f) ttY = (REAL)g_hovered_tooltip_pt.y - ttH - 6.0f;
+                        if (ttX < 6.0f) ttX = 6.0f;
+                        if (ttY < 6.0f) ttY = 6.0f;
+
+                        GraphicsPath ttPath;
+                        MakeRoundedRectPath(ttPath, ttX, ttY, ttW, ttH, 4.0f);
+                        SolidBrush ttBg(Color(240, 24, 24, 27));
+                        graphics.FillPath(&ttBg, &ttPath);
+                        Pen ttBorder(Color(255, 63, 63, 70), 1.0f);
+                        graphics.DrawPath(&ttBorder, &ttPath);
+
+                        SolidBrush ttTxt(Color(255, 244, 244, 245));
+                        graphics.DrawString(g_hovered_tooltip.c_str(), -1, &ttFont, PointF(ttX + ttPadX, ttY + ttPadY), &ttTxt);
+                    }
                 }
 
                 BitBlt(hdc, 0, 0, cw, ch, memDC, 0, 0, SRCCOPY);
@@ -2089,6 +2421,7 @@ using namespace std;
             case WM_DESTROY:
                 KillTimer(hwnd, 1);
                 if (pBgImage) { delete pBgImage; pBgImage = NULL; }
+                g_hwnd_main = NULL;
                 PostQuitMessage(0);
                 return 0;
         }
@@ -2111,6 +2444,8 @@ using namespace std;
         elements.clear();
         last_idx = -1;
         focused_elem_idx = -1;
+        g_default_btn_has_synth = false;
+        g_default_btn_has_sound_file = false;
         caret_pulse_phase = 0.0f;
         trigger_show = false;
         pending_switch_file.clear();
@@ -2125,7 +2460,7 @@ using namespace std;
         win_border_width = 0;
         app_border_radius = 0;
         current_active_tab = "main";
-        current_parsing_tab = "main";
+        current_parsing_tab = "";
         particles_active = false;
         g_particles.clear();
         start_in_fullscreen = false;
@@ -2133,6 +2468,9 @@ using namespace std;
         window_is_topmost = false;
         window_z_index = 0;
         g_hwnd_main = NULL;
+        g_window_timers.clear();
+        g_vm_callback_runner = nullptr;
+        g_hovered_tooltip.clear();
     }
 
     void set_variable(const string& name, const string& val) {
@@ -2318,7 +2656,11 @@ using namespace std;
         else if (command == "tab") {
             cleanParentheses(inline_arg);
             string tname = stripQuotes(inline_arg);
-            if (!tname.empty()) current_parsing_tab = tname;
+            if (tname.empty() || tname == "all" || tname == "global" || tname == "__global__") {
+                current_parsing_tab = "";
+            } else {
+                current_parsing_tab = tname;
+            }
         }
         else if (command == "switch" || command == "switch_tab") {
             cleanParentheses(inline_arg);
@@ -2444,12 +2786,24 @@ using namespace std;
                 elem.font_bold = true;
             } else {
                 elem.text = utf8_to_wstring(val);
+                elem.template_text = elem.text;
                 unpack_cached_vars(elem.text);
             }
             if (command == "button") {
                 elem.has_shadow = true;
                 elem.shadow_blur = 10;
                 elem.radius = 8;
+                if (g_default_btn_has_synth) {
+                    elem.has_click_synth = true;
+                    elem.click_synth_wave = g_default_btn_synth_wave;
+                    elem.click_synth_freq = g_default_btn_synth_freq;
+                    elem.click_synth_dur = g_default_btn_synth_dur;
+                    elem.click_synth_vol = g_default_btn_synth_vol;
+                }
+                if (g_default_btn_has_sound_file) {
+                    elem.has_click_sound_file = true;
+                    elem.click_sound_file = g_default_btn_sound_file;
+                }
             } else if (command == "enter") {
                 elem.has_border = true;
                 elem.border_width = 1;
@@ -2458,6 +2812,69 @@ using namespace std;
             } else if (command == "label") {
                 elem.radius = 0;
             }
+            elements.push_back(elem);
+            last_idx = (int)elements.size() - 1;
+        }
+        else if (command == "progress") {
+            cleanParentheses(inline_arg);
+            float pval = 0.0f;
+            try { pval = stof(stripQuotes(inline_arg)); } catch (...) {}
+            UIElement elem;
+            elem.type = "progress";
+            elem.tab_name = current_parsing_tab;
+            elem.progress_val = pval;
+            elem.radius = 6;
+            elem.w = 200;
+            elem.h = 20;
+            elem.txt_color = RGB(255, 255, 255);
+            elements.push_back(elem);
+            last_idx = (int)elements.size() - 1;
+        }
+        else if (command == "slider") {
+            cleanParentheses(inline_arg);
+            for (char& c : inline_arg) if (c == ',') c = ' ';
+            stringstream ss(inline_arg);
+            float smin = 0.0f, smax = 100.0f, sval = 50.0f;
+            if (ss >> smin) {
+                if (ss >> smax) {
+                    if (ss >> sval) {} else sval = smin;
+                }
+            }
+            UIElement elem;
+            elem.type = "slider";
+            elem.tab_name = current_parsing_tab;
+            elem.slider_min = smin;
+            elem.slider_max = smax;
+            elem.slider_val = sval;
+            elem.radius = 4;
+            elem.w = 180;
+            elem.h = 24;
+            elements.push_back(elem);
+            last_idx = (int)elements.size() - 1;
+        }
+        else if (command == "checkbox") {
+            cleanParentheses(inline_arg);
+            string val = stripQuotes(inline_arg);
+            UIElement elem;
+            elem.type = "checkbox";
+            elem.tab_name = current_parsing_tab;
+            elem.text = utf8_to_wstring(val);
+            elem.template_text = elem.text;
+            unpack_cached_vars(elem.text);
+            elem.is_checked = false;
+            elem.w = 160;
+            elem.h = 24;
+            elem.txt_color = RGB(244, 244, 245);
+            elements.push_back(elem);
+            last_idx = (int)elements.size() - 1;
+        }
+        else if (command == "list" || command == "scroll-box" || command == "scroll_box") {
+            UIElement elem;
+            elem.type = "list";
+            elem.tab_name = current_parsing_tab;
+            elem.radius = 6;
+            elem.w = 200;
+            elem.h = 120;
             elements.push_back(elem);
             last_idx = (int)elements.size() - 1;
         }
@@ -2649,6 +3066,129 @@ using namespace std;
                 elements[last_idx].run_target = stripQuotes(inline_arg);
             }
         }
+        else if (command == "click-sound" || command == "click_sound") {
+            cleanParentheses(inline_arg);
+            string v = stripQuotes(inline_arg);
+            if (v == "true" || v == "1" || v == "on") {
+                if (last_idx != -1) {
+                    elements[last_idx].click_sound = true;
+                    elements[last_idx].has_click_sound_file = false;
+                }
+            } else if (v == "false" || v == "0" || v == "off") {
+                if (last_idx != -1) {
+                    elements[last_idx].click_sound = false;
+                    elements[last_idx].has_click_sound_file = false;
+                }
+            } else if (!v.empty()) {
+                if (last_idx != -1) {
+                    elements[last_idx].has_click_sound_file = true;
+                    elements[last_idx].click_sound_file = v;
+                }
+            } else {
+                if (last_idx != -1) elements[last_idx].click_sound = true;
+            }
+        }
+        else if (command == "click-synth" || command == "click_synth") {
+            vector<string> parts = split_csv_args(inline_arg);
+            if (last_idx != -1 && !parts.empty()) {
+                elements[last_idx].has_click_synth = true;
+                elements[last_idx].click_synth_wave = stripQuotes(parts[0]);
+                if (parts.size() >= 2) {
+                    try { elements[last_idx].click_synth_freq = stod(parts[1]); } catch(...) {}
+                }
+                if (parts.size() >= 3) {
+                    try { elements[last_idx].click_synth_dur = stoi(parts[2]); } catch(...) {}
+                }
+                if (parts.size() >= 4) {
+                    try { elements[last_idx].click_synth_vol = stod(parts[3]); } catch(...) {}
+                }
+            }
+        }
+        else if (command == "hover-synth" || command == "hover_synth") {
+            vector<string> parts = split_csv_args(inline_arg);
+            if (last_idx != -1 && !parts.empty()) {
+                elements[last_idx].has_hover_synth = true;
+                elements[last_idx].hover_synth_wave = stripQuotes(parts[0]);
+                if (parts.size() >= 2) {
+                    try { elements[last_idx].hover_synth_freq = stod(parts[1]); } catch(...) {}
+                }
+                if (parts.size() >= 3) {
+                    try { elements[last_idx].hover_synth_dur = stoi(parts[2]); } catch(...) {}
+                }
+                if (parts.size() >= 4) {
+                    try { elements[last_idx].hover_synth_vol = stod(parts[3]); } catch(...) {}
+                }
+            }
+        }
+        else if (command == "hover-sound" || command == "hover_sound") {
+            cleanParentheses(inline_arg);
+            string v = stripQuotes(inline_arg);
+            if (last_idx != -1 && !v.empty()) {
+                elements[last_idx].has_hover_sound_file = true;
+                elements[last_idx].hover_sound_file = v;
+            }
+        }
+        else if (command == "tooltip") {
+            cleanParentheses(inline_arg);
+            if (last_idx != -1) elements[last_idx].tooltip = utf8_to_wstring(stripQuotes(inline_arg));
+        }
+        else if (command == "cursor") {
+            cleanParentheses(inline_arg);
+            if (last_idx != -1) elements[last_idx].cursor_type = stripQuotes(inline_arg);
+        }
+        else if (command == "disabled") {
+            cleanParentheses(inline_arg);
+            string v = stripQuotes(inline_arg);
+            bool dis = (v.empty() || v == "true" || v == "1" || v == "on");
+            if (last_idx != -1) elements[last_idx].is_disabled = dis;
+        }
+        else if (command == "val" || command == "value") {
+            cleanParentheses(inline_arg);
+            string v = stripQuotes(inline_arg);
+            if (last_idx != -1) {
+                if (elements[last_idx].type == "progress") {
+                    try { elements[last_idx].progress_val = stof(v); } catch(...) {}
+                } else if (elements[last_idx].type == "slider") {
+                    try { elements[last_idx].slider_val = stof(v); } catch(...) {}
+                } else if (elements[last_idx].type == "checkbox") {
+                    elements[last_idx].is_checked = (v == "1" || v == "true" || v == "on");
+                } else if (elements[last_idx].type == "enter") {
+                    elements[last_idx].text = utf8_to_wstring(v);
+                    elements[last_idx].template_text = elements[last_idx].text;
+                }
+            }
+        }
+        else if (command == "item" || command == "add_item" || command == "add-item") {
+            cleanParentheses(inline_arg);
+            string itm = stripQuotes(inline_arg);
+            if (last_idx != -1 && elements[last_idx].type == "list") {
+                elements[last_idx].list_items.push_back(utf8_to_wstring(itm));
+            }
+        }
+        else if (command == "on_click_callback" || command == "on_click_ip" || command == "click_callback") {
+            cleanParentheses(inline_arg);
+            try {
+                uint32_t ip = (uint32_t)stoul(stripQuotes(inline_arg));
+                if (last_idx != -1) elements[last_idx].on_click_ip = ip;
+            } catch(...) {}
+        }
+        else if (command == "on_change_callback" || command == "on_change_ip" || command == "change_callback") {
+            cleanParentheses(inline_arg);
+            try {
+                uint32_t ip = (uint32_t)stoul(stripQuotes(inline_arg));
+                if (last_idx != -1) elements[last_idx].on_change_ip = ip;
+            } catch(...) {}
+        }
+        else if (command == "every") {
+            cleanParentheses(inline_arg);
+            for (char& c : inline_arg) if (c == ',') c = ' ';
+            stringstream ss(inline_arg);
+            int interval = 1000;
+            uint32_t cb_ip = 0;
+            if (ss >> interval >> cb_ip) {
+                add_timer(interval, cb_ip);
+            }
+        }
         else if (command == "show") {
             trigger_show = true;
         }
@@ -2670,7 +3210,7 @@ using namespace std;
             }
 
             for (const auto& elem : elements) {
-                if (!elem.tab_name.empty() && elem.tab_name != "all" && elem.tab_name != current_active_tab) continue;
+                if (!is_elem_visible(elem)) continue;
                 uint32_t c_elem = ((GetRValue(elem.btn_color)) << 16) | ((GetGValue(elem.btn_color)) << 8) | (GetBValue(elem.btn_color));
                 int ey_end = min(win_h, elem.y + elem.h);
                 int ex_end = min(win_w, elem.x + elem.w);
@@ -2907,5 +3447,260 @@ using namespace std;
         }
         file.close();
         return show_window();
+    }
+
+    static UIElement* find_element_by_id(const string& id) {
+        for (auto& elem : elements) {
+            if (elem.id == id) return &elem;
+        }
+        try {
+            size_t idx = (size_t)stoul(id);
+            if (idx < elements.size()) return &elements[idx];
+        } catch (...) {}
+        return nullptr;
+    }
+
+    void set_text(const string& id, const string& val) {
+        UIElement* elem = find_element_by_id(id);
+        if (elem) {
+            elem->text = utf8_to_wstring(val);
+            elem->template_text = elem->text;
+            unpack_cached_vars(elem->text);
+            if (g_hwnd_main && IsWindow(g_hwnd_main)) {
+                InvalidateRect(g_hwnd_main, NULL, FALSE);
+            }
+        }
+    }
+
+    string get_text(const string& id) {
+        UIElement* elem = find_element_by_id(id);
+        if (elem) {
+            return wstring_to_utf8(elem->text);
+        }
+        if (input_values_utf8.count(id)) return input_values_utf8[id];
+        return "";
+    }
+
+    void set_val(const string& id, double val) {
+        UIElement* elem = find_element_by_id(id);
+        if (elem) {
+            if (elem->type == "progress") {
+                elem->progress_val = (float)val;
+            } else if (elem->type == "slider") {
+                elem->slider_val = (float)val;
+            } else if (elem->type == "checkbox") {
+                elem->is_checked = (val != 0.0);
+            } else if (elem->type == "enter") {
+                elem->text = utf8_to_wstring(to_string((long long)val));
+                elem->template_text = elem->text;
+            }
+            if (g_hwnd_main && IsWindow(g_hwnd_main)) {
+                InvalidateRect(g_hwnd_main, NULL, FALSE);
+            }
+        }
+    }
+
+    void set_val(const string& id, const string& val) {
+        UIElement* elem = find_element_by_id(id);
+        if (elem) {
+            if (elem->type == "progress") {
+                try { elem->progress_val = stof(val); } catch (...) {}
+            } else if (elem->type == "slider") {
+                try { elem->slider_val = stof(val); } catch (...) {}
+            } else if (elem->type == "checkbox") {
+                elem->is_checked = (val == "1" || val == "true" || val == "on");
+            } else {
+                elem->text = utf8_to_wstring(val);
+                elem->template_text = elem->text;
+                unpack_cached_vars(elem->text);
+            }
+            if (g_hwnd_main && IsWindow(g_hwnd_main)) {
+                InvalidateRect(g_hwnd_main, NULL, FALSE);
+            }
+        }
+    }
+
+    double get_val(const string& id) {
+        UIElement* elem = find_element_by_id(id);
+        if (elem) {
+            if (elem->type == "progress") return (double)elem->progress_val;
+            if (elem->type == "slider") return (double)elem->slider_val;
+            if (elem->type == "checkbox") return elem->is_checked ? 1.0 : 0.0;
+            if (elem->type == "enter") {
+                try { return stod(wstring_to_utf8(elem->text)); } catch(...) {}
+            }
+        }
+        return 0.0;
+    }
+
+    string get_val_str(const string& id) {
+        UIElement* elem = find_element_by_id(id);
+        if (elem) {
+            if (elem->type == "list") {
+                if (elem->list_selected_idx >= 0 && elem->list_selected_idx < (int)elem->list_items.size()) {
+                    return wstring_to_utf8(elem->list_items[elem->list_selected_idx]);
+                }
+                return "";
+            }
+            if (elem->type == "checkbox") return elem->is_checked ? "1" : "0";
+            if (elem->type == "slider") return to_string(elem->slider_val);
+            if (elem->type == "progress") return to_string(elem->progress_val);
+            return wstring_to_utf8(elem->text);
+        }
+        return "";
+    }
+
+    void set_color(const string& id, const string& hex) {
+        UIElement* elem = find_element_by_id(id);
+        if (elem) {
+            elem->txt_color = hex_to_rgb(hex);
+            if (g_hwnd_main && IsWindow(g_hwnd_main)) {
+                InvalidateRect(g_hwnd_main, NULL, FALSE);
+            }
+        }
+    }
+
+    void set_bg(const string& id, const string& hex) {
+        UIElement* elem = find_element_by_id(id);
+        if (elem) {
+            elem->btn_color = hex_to_rgb(hex);
+            elem->has_custom_btn_color = true;
+            if (g_hwnd_main && IsWindow(g_hwnd_main)) {
+                InvalidateRect(g_hwnd_main, NULL, FALSE);
+            }
+        }
+    }
+
+    void set_visible(const string& id, bool visible) {
+        UIElement* elem = find_element_by_id(id);
+        if (elem) {
+            elem->is_visible = visible;
+            if (g_hwnd_main && IsWindow(g_hwnd_main)) {
+                InvalidateRect(g_hwnd_main, NULL, FALSE);
+            }
+        }
+    }
+
+    bool is_checked(const string& id) {
+        UIElement* elem = find_element_by_id(id);
+        if (elem) return elem->is_checked;
+        return false;
+    }
+
+    void add_list_item(const string& id, const string& text) {
+        UIElement* elem = find_element_by_id(id);
+        if (elem && elem->type == "list") {
+            elem->list_items.push_back(utf8_to_wstring(text));
+            if (g_hwnd_main && IsWindow(g_hwnd_main)) {
+                InvalidateRect(g_hwnd_main, NULL, FALSE);
+            }
+        }
+    }
+
+    void clear_list(const string& id) {
+        UIElement* elem = find_element_by_id(id);
+        if (elem && elem->type == "list") {
+            elem->list_items.clear();
+            elem->list_selected_idx = -1;
+            elem->list_scroll_y = 0;
+            if (g_hwnd_main && IsWindow(g_hwnd_main)) {
+                InvalidateRect(g_hwnd_main, NULL, FALSE);
+            }
+        }
+    }
+
+    string get_list_selected(const string& id) {
+        UIElement* elem = find_element_by_id(id);
+        if (elem && elem->type == "list") {
+            if (elem->list_selected_idx >= 0 && elem->list_selected_idx < (int)elem->list_items.size()) {
+                return wstring_to_utf8(elem->list_items[elem->list_selected_idx]);
+            }
+        }
+        return "";
+    }
+
+    bool has_element(const string& id) {
+        return find_element_by_id(id) != nullptr;
+    }
+
+    void refresh_elements() {
+        for (auto& elem : elements) {
+            if (!elem.template_text.empty()) {
+                elem.text = elem.template_text;
+                unpack_cached_vars(elem.text);
+            }
+        }
+        if (g_hwnd_main && IsWindow(g_hwnd_main)) {
+            InvalidateRect(g_hwnd_main, NULL, FALSE);
+        }
+    }
+
+    bool is_window_active() {
+#if defined(_WIN32)
+        return g_hwnd_main != NULL && IsWindow(g_hwnd_main);
+#else
+        return false;
+#endif
+    }
+
+    void bind_synth(const string& target_id, const string& waveform, double freq_hz, int duration_ms, double volume) {
+        if (target_id == "all" || target_id == "buttons" || target_id.empty()) {
+            g_default_btn_has_synth = true;
+            g_default_btn_synth_wave = waveform;
+            g_default_btn_synth_freq = freq_hz;
+            g_default_btn_synth_dur = duration_ms;
+            g_default_btn_synth_vol = volume;
+            for (auto& elem : elements) {
+                if (elem.type == "button") {
+                    elem.has_click_synth = true;
+                    elem.click_synth_wave = waveform;
+                    elem.click_synth_freq = freq_hz;
+                    elem.click_synth_dur = duration_ms;
+                    elem.click_synth_vol = volume;
+                }
+            }
+        } else {
+            for (auto& elem : elements) {
+                if (elem.id == target_id) {
+                    elem.has_click_synth = true;
+                    elem.click_synth_wave = waveform;
+                    elem.click_synth_freq = freq_hz;
+                    elem.click_synth_dur = duration_ms;
+                    elem.click_synth_vol = volume;
+                }
+            }
+        }
+    }
+
+    void bind_sound(const string& target_id, const string& filepath) {
+        if (target_id == "all" || target_id == "buttons" || target_id.empty()) {
+            g_default_btn_has_sound_file = true;
+            g_default_btn_sound_file = filepath;
+            for (auto& elem : elements) {
+                if (elem.type == "button") {
+                    elem.has_click_sound_file = true;
+                    elem.click_sound_file = filepath;
+                }
+            }
+        } else {
+            for (auto& elem : elements) {
+                if (elem.id == target_id) {
+                    elem.has_click_sound_file = true;
+                    elem.click_sound_file = filepath;
+                }
+            }
+        }
+    }
+
+    void set_vm_callback_runner(VMCallbackRunner runner) {
+        g_vm_callback_runner = runner;
+    }
+
+    void add_timer(int interval_ms, uint32_t callback_ip) {
+        TimerEntry te;
+        te.interval_ms = interval_ms;
+        te.callback_ip = callback_ip;
+        te.last_tick = GetTickCount64();
+        g_window_timers.push_back(te);
     }
 }

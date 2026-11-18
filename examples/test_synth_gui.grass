@@ -1,0 +1,277 @@
+!GrassGreen!
+!interface!
+!audio!
+
+// Пользовательская функция воспроизведения аккорда
+fun play_custom_chord() {
+    synth_play("sawtooth", 261.63, 220, 75);
+    synth_play("sawtooth", 329.63, 220, 70);
+    synth_play("sawtooth", 392.00, 220, 65);
+}
+
+// Пользовательская функция с привязанным синтезом через attach_sound
+fun play_arpeggio() {
+    synth_play("sine", 523.25, 120, 80);
+    synth_play("triangle", 659.25, 120, 75);
+    synth_play("sine", 783.99, 120, 70);
+    synth_play("sawtooth", 1046.50, 160, 65);
+}
+
+int main() {
+    gout << "[Test Synth GUI]: Initializing GrassGreen 4.3 Synthesizer..." << endl;
+
+    take current_note = "Ожидание нажатия...";
+    take synth_volume = 80;
+    take note_counter = 0;
+
+    // 1. Привязка звука к функции play_arpeggio (автоматический тон перед запуском функции)
+    attach_sound(play_arpeggio, "square", 440, 80, 60);
+
+    // 2. Глобальная привязка синтеза по умолчанию ко всем кнопкам
+    bind_synth("buttons", "sine", 440, 50, 40);
+
+    window {
+        title("GrassGreen 4.3 — Pro Synthesizer & Soundboard")
+        size(780, 520)
+        bg("#09090b")
+        border-radius-app(14)
+        header("glass")
+        header-color("#18181b")
+        header-title-align("center")
+        header-buttons("mac")
+        window-border(1, "#27272a")
+
+        // Заголовок и статус
+        label "🎹 GrassGreen Audio & Interface Engine (VD+)" {
+            window-ob(30, 25)
+            font-size(17)
+            text-color("#4ade80")
+            font-weight(true)
+        }
+
+        label "Статус: {current_note}" {
+            id("status_lbl")
+            window-ob(30, 55)
+            font-size(13)
+            text-color("#a1a1aa")
+        }
+
+        // --- Секция 1: Клавиатура нот (Декларативный click-synth и hover-synth) ---
+        label "--- Октава C4 (Декларативный click-synth / hover-synth) ---" {
+            window-ob(30, 95)
+            font-size(12)
+            text-color("#71717a")
+        }
+
+        button "До (C)" {
+            id("btn_c")
+            window-ob(30, 125)
+            size(90, 60)
+            button-color("#1e293b")
+            text-color("#f8fafc")
+            radius(8)
+            click-synth("sine", 261.63, 180, 85)
+            hover-synth("sine", 523.25, 30, 40)
+            tooltip("Нота До (261.63 Гц, Синус)")
+            on_click {
+                note_counter = note_counter + 1;
+                set_text("status_lbl", "Воспроизведено: Нота До (C4 - 261.6 Гц)");
+            }
+        }
+
+        button "Ре (D)" {
+            id("btn_d")
+            window-ob(130, 125)
+            size(90, 60)
+            button-color("#1e293b")
+            text-color("#f8fafc")
+            radius(8)
+            click-synth("square", 293.66, 180, 80)
+            hover-synth("square", 587.33, 30, 40)
+            tooltip("Нота Ре (293.66 Гц, Квадрат)")
+            on_click {
+                note_counter = note_counter + 1;
+                set_text("status_lbl", "Воспроизведено: Нота Ре (D4 - 293.7 Гц)");
+            }
+        }
+
+        button "Ми (E)" {
+            id("btn_e")
+            window-ob(230, 125)
+            size(90, 60)
+            button-color("#1e293b")
+            text-color("#f8fafc")
+            radius(8)
+            click-synth("triangle", 329.63, 180, 85)
+            hover-synth("triangle", 659.25, 30, 40)
+            tooltip("Нота Ми (329.63 Гц, Треугольник)")
+            on_click {
+                note_counter = note_counter + 1;
+                set_text("status_lbl", "Воспроизведено: Нота Ми (E4 - 329.6 Гц)");
+            }
+        }
+
+        button "Фа (F)" {
+            id("btn_f")
+            window-ob(330, 125)
+            size(90, 60)
+            button-color("#1e293b")
+            text-color("#f8fafc")
+            radius(8)
+            click-synth("sawtooth", 349.23, 180, 75)
+            hover-synth("sawtooth", 698.46, 30, 40)
+            tooltip("Нота Фа (349.23 Гц, Пила)")
+            on_click {
+                note_counter = note_counter + 1;
+                set_text("status_lbl", "Воспроизведено: Нота Фа (F4 - 349.2 Гц)");
+            }
+        }
+
+        button "Соль (G)" {
+            id("btn_g")
+            window-ob(430, 125)
+            size(90, 60)
+            button-color("#1e293b")
+            text-color("#f8fafc")
+            radius(8)
+            click-synth("sine", 392.00, 180, 85)
+            hover-synth("sine", 783.99, 30, 40)
+            tooltip("Нота Соль (392.00 Гц, Синус)")
+            on_click {
+                note_counter = note_counter + 1;
+                set_text("status_lbl", "Воспроизведено: Нота Соль (G4 - 392.0 Гц)");
+            }
+        }
+
+        button "Ля (A)" {
+            id("btn_a")
+            window-ob(530, 125)
+            size(90, 60)
+            button-color("#1e293b")
+            text-color("#f8fafc")
+            radius(8)
+            click-synth("square", 440.00, 180, 80)
+            hover-synth("square", 880.00, 30, 40)
+            tooltip("Нота Ля (440.00 Гц, Камертон A4)")
+            on_click {
+                note_counter = note_counter + 1;
+                set_text("status_lbl", "Воспроизведено: Нота Ля (A4 - 440.0 Гц)");
+            }
+        }
+
+        button "Си (B)" {
+            id("btn_b")
+            window-ob(630, 125)
+            size(90, 60)
+            button-color("#1e293b")
+            text-color("#f8fafc")
+            radius(8)
+            click-synth("triangle", 493.88, 180, 85)
+            hover-synth("triangle", 987.77, 30, 40)
+            tooltip("Нота Си (493.88 Гц, Треугольник)")
+            on_click {
+                note_counter = note_counter + 1;
+                set_text("status_lbl", "Воспроизведено: Нота Си (B4 - 493.9 Гц)");
+            }
+        }
+
+        // --- Секция 2: Сложные эффекты (on_click, attach_sound, chord) ---
+        label "--- Сложные синтезы и привязка к функциям (attach_sound) ---" {
+            window-ob(30, 215)
+            font-size(12)
+            text-color("#71717a")
+        }
+
+        button "✨ Аккорд C-E-G (Полифония)" {
+            id("btn_chord")
+            window-ob(30, 245)
+            size(220, 42)
+            button-color("#16a34a")
+            text-color("#ffffff")
+            radius(8)
+            tooltip("Запуск одновременного синтеза трех частот")
+            on_click {
+                play_custom_chord();
+                set_text("status_lbl", "Сыгран мажорный аккорд C-E-G (Полифония)");
+            }
+        }
+
+        button "🎵 Арпеджио (attach_sound)" {
+            id("btn_arp")
+            window-ob(270, 245)
+            size(220, 42)
+            button-color("#0284c7")
+            text-color("#ffffff")
+            radius(8)
+            tooltip("Функция с привязанным синтезом через attach_sound")
+            on_click {
+                play_arpeggio();
+                set_text("status_lbl", "Сыграно арпеджио C-E-G-C (attach_sound + callback)");
+            }
+        }
+
+        button "🔊 Бип (Неблокирующий tone)" {
+            id("btn_beep")
+            window-ob(510, 245)
+            size(210, 42)
+            button-color("#d97706")
+            text-color("#ffffff")
+            radius(8)
+            tooltip("Проверка неблокирующего воспроизведения tone(1200, 150)")
+            on_click {
+                tone(1200, 150, 75);
+                set_text("status_lbl", "Воспроизведен тон 1200 Гц без зависания UI");
+            }
+        }
+
+        // --- Секция 3: Реактивные элементы управления ---
+        label "--- Настройки и параметры синтезатора ---" {
+            window-ob(30, 315)
+            font-size(12)
+            text-color("#71717a")
+        }
+
+        checkbox "Включить звуковую обратную связь кликов (click-sound)" {
+            id("chk_feedback")
+            window-ob(30, 345)
+            size(350, 24)
+            click-sound(true)
+            on_change {
+                set_text("status_lbl", "Обратная связь кликов изменена");
+            }
+        }
+
+        label "Громкость мастера: 80%" {
+            id("vol_lbl")
+            window-ob(30, 385)
+            font-size(13)
+            text-color("#e4e4e7")
+        }
+
+        slider(0, 100, 80) {
+            id("vol_slider")
+            window-ob(30, 415)
+            size(320, 24)
+            on_change {
+                take v = get_val("vol_slider");
+                set_text("vol_lbl", "Громкость мастера: " + to_str(v) + "%");
+            }
+        }
+
+        label "Всего нажатий нот: {note_counter}" {
+            id("counter_lbl")
+            window-ob(430, 385)
+            font-size(14)
+            text-color("#22c55e")
+        }
+
+        // Неблокирующий цикл таймера 1 Гц (проверка плавности интерфейса)
+        every(1000) {
+            take current_clicks = note_counter;
+            set_text("counter_lbl", "Всего нажатий нот: " + to_str(current_clicks));
+        }
+    }
+
+    gout << "[Test Synth GUI]: Synthesis demo completed cleanly!" << endl;
+    return 0;
+}

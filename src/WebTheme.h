@@ -131,6 +131,23 @@ button:active {
 .grass-col { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 15px; margin: 15px 0; width: 100%; }
 .grass-box { background: rgba(20, 20, 28, 0.7); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 15px; padding: 30px; margin: 20px auto; max-width: 800px; box-shadow: 0 10px 30px rgba(0,0,0, 0.5); }
 
+.grass-page { width: 100%; min-height: 100vh; margin: 0 auto; position: relative; box-sizing: border-box; }
+header, .grass-header { width: 100%; padding: 20px 40px; display: flex; justify-content: space-between; align-items: center; box-sizing: border-box; background: rgba(18, 18, 24, 0.8); backdrop-filter: blur(10px); border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+footer, .grass-footer { width: 100%; padding: 30px 20px; margin-top: 50px; background: rgba(14, 14, 18, 0.9); border-top: 1px solid rgba(255, 255, 255, 0.08); box-sizing: border-box; }
+nav, .grass-nav { display: flex; align-items: center; gap: 15px; flex-wrap: wrap; }
+section, .grass-section { width: 100%; max-width: 1200px; margin: 40px auto; padding: 20px; box-sizing: border-box; }
+.grass-card { background: rgba(22, 22, 30, 0.75); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 24px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); box-sizing: border-box; transition: transform 0.25s ease, box-shadow 0.25s ease; text-align: left; }
+.grass-card:hover { transform: translateY(-4px); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6); }
+.grass-table { width: 100%; border-collapse: collapse; margin: 20px 0; box-sizing: border-box; }
+.grass-table th, .grass-table td { padding: 12px 16px; text-align: left; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+.grass-table th { background: rgba(255, 255, 255, 0.05); font-weight: 600; }
+.grass-table tr:hover { background: rgba(255, 255, 255, 0.03); }
+.grass-textarea { background: rgba(0,0,0,0.45); border: 1px solid #444; padding: 14px 18px; margin: 10px; font-size: 16px; outline: none; color: #fff; border-radius: 8px; font-family: inherit; resize: vertical; min-height: 80px; box-sizing: border-box; width: calc(100% - 20px); max-width: 600px; }
+.flex-row { display: flex; flex-direction: row; }
+.flex-col { display: flex; flex-direction: column; }
+.flex-center { display: flex; justify-content: center; align-items: center; }
+.grid-container { display: grid; }
+
 @keyframes anim-pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
 @keyframes anim-float { 0% { transform: translateY(0px); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0px); } }
 @keyframes anim-spin { 100% { transform: rotate(360deg); } }

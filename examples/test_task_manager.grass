@@ -1,0 +1,202 @@
+!GrassGreen!
+!interface!
+!hardware!
+!sys!
+
+int main() {
+    take app_name = "GrassGreen Task Manager";
+    take ram_used = 0;
+    take ticks = 0;
+    take update_enabled = 1;
+
+    window {
+        title("GrassGreen VD+ System Monitor");
+        size(600, 520);
+        color(#0f1117);
+        theme("dark");
+        header("modern");
+        border-radius-app(12);
+
+        // --- Персистентный общий каркас (виден на всех вкладках) ---
+        label "Системный диспетчер задач" {
+            id(title_lbl);
+            window-ob(30, 20);
+            size(340, 28);
+            text-color(#22c55e);
+            font-size(18);
+            font-weight("bold");
+        }
+
+        label "Тиков таймера: 0" {
+            id(timer_lbl);
+            window-ob(380, 22);
+            size(190, 24);
+            text-color(#a1a1aa);
+            font-size(13);
+        }
+
+        checkbox "Авто-обновление метрик (1 сек)" {
+            id(chk_refresh);
+            window-ob(30, 55);
+            size(260, 24);
+            val("1");
+            cursor("pointer");
+            tooltip("Включение/отключение реактивного таймера every");
+        }
+
+        button "Метрики RAM / CPU" {
+            id(btn_tab1);
+            window-ob(30, 95);
+            size(160, 32);
+            button-color(#18181b);
+            text-color(#f4f4f5);
+            radius(6);
+            cursor("pointer");
+            click-sound(false);
+            click-switch("metrics");
+        }
+
+        button "Службы и процессы" {
+            id(btn_tab2);
+            window-ob(200, 95);
+            size(160, 32);
+            button-color(#18181b);
+            text-color(#f4f4f5);
+            radius(6);
+            cursor("pointer");
+            click-sound(false);
+            click-switch("services");
+        }
+
+        // --- Вкладка 1: Метрики системы ---
+        tab "metrics" {
+            label "Использование RAM: {hw_ram_used} МБ / {hw_ram_total} МБ" {
+                id(ram_lbl);
+                window-ob(30, 145);
+                size(540, 24);
+                text-color(#e4e4e7);
+                font-size(14);
+            }
+
+            progress(35) {
+                id(ram_bar);
+                window-ob(30, 175);
+                size(540, 22);
+                radius(6);
+                tooltip("Текущая загрузка оперативной памяти");
+            }
+
+            label "Ядер CPU: {hw_cpu_cores} | Частота: {hw_cpu_freq} МГц" {
+                id(cpu_lbl);
+                window-ob(30, 215);
+                size(540, 24);
+                text-color(#38bdf8);
+                font-size(14);
+            }
+
+            label "Порог предупреждения RAM (%):" {
+                id(slider_lbl);
+                window-ob(30, 255);
+                size(300, 22);
+                text-color(#a1a1aa);
+                font-size(13);
+            }
+
+            slider(10, 100, 75) {
+                id(threshold_slider);
+                window-ob(30, 280);
+                size(300, 24);
+                tooltip("Порог срабатывания подсветки памяти");
+                cursor("pointer");
+            }
+
+            button "Тест смены цвета и текста" {
+                id(btn_action);
+                window-ob(30, 330);
+                size(240, 38);
+                button-color(#16a34a);
+                text-color(#ffffff);
+                radius(8);
+                cursor("pointer");
+                click-sound(false);
+                tooltip("Нажмите для динамического вызова set_text и set_color");
+                on_click {
+                    set_text("btn_action", "Статус: Обновлено!");
+                    set_bg("btn_action", "#2563eb");
+                }
+            }
+        }
+
+        // --- Вкладка 2: Службы и процессы ---
+        tab "services" {
+            label "Список активных процессов GrassGreen:" {
+                id(serv_lbl);
+                window-ob(30, 145);
+                size(540, 24);
+                text-color(#e4e4e7);
+                font-size(14);
+            }
+
+            list {
+                id(proc_list);
+                window-ob(30, 175);
+                size(540, 180);
+                radius(8);
+                tooltip("Колесико мыши прокручивает список процессов");
+                item("grassc.exe [PID: 1042] - Active");
+                item("GrassVM.Core [PID: 2048] - Running");
+                item("VD+ Compositor Engine [PID: 3012] - 60 FPS");
+                item("Hardware Monitor Daemon [PID: 4096] - Idle");
+            }
+
+            button "Добавить процесс" {
+                id(btn_add);
+                window-ob(30, 370);
+                size(170, 36);
+                button-color(#27272a);
+                text-color(#22c55e);
+                radius(6);
+                cursor("pointer");
+                click-sound(false);
+                on_click {
+                    add_item("proc_list", "New Worker Thread [PID: 5120]");
+                }
+            }
+
+            button "Очистить список" {
+                id(btn_clear_list);
+                window-ob(215, 370);
+                size(170, 36);
+                button-color(#27272a);
+                text-color(#ef4444);
+                radius(6);
+                cursor("pointer");
+                click-sound(false);
+                on_click {
+                    clear_list("proc_list");
+                }
+            }
+        }
+
+        // --- Реактивный таймер: каждые 1000 мс ---
+        every(1000) {
+            ticks = ticks + 1;
+            set_text("timer_lbl", "Тиков таймера: " + to_str(ticks));
+            ram_used = ram_used_mb();
+            take ram_tot = ram_total_mb();
+            if (ram_tot > 0) {
+                take pct = (ram_used * 100) / ram_tot;
+                set_val("ram_bar", pct);
+                if (pct > 80) {
+                    set_color("ram_lbl", "#ef4444");
+                } else {
+                    set_color("ram_lbl", "#22c55e");
+                }
+            }
+        }
+
+        show();
+    }
+
+    return 0;
+}

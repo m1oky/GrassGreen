@@ -12,6 +12,7 @@ AUDIT_PROMPT.md
 PROMPT_FIX_V4.md
 BUGS.md
 plans/
+agent.py
 
 # Сгенерированные данные инсталлятора
 installer/payload_data.h
@@ -25,6 +26,7 @@ tools/*.exe
 *.ppm
 *.iso
 *.grassc
+*.html
 
 # Временные тестовые скрипты и дампы
 test_dir/

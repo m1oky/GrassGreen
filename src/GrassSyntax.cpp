@@ -187,7 +187,9 @@ vector<GrassToken> Lexer::tokenize() {
             "header-title-align", "auto-size-display", "border-radius-app",
             "placeholder-color", "header-buttons", "header-height",
             "header-color", "window-border", "active-color", "hover-color",
-            "button-color", "click-switch", "header-align", "font-weight",
+            "button-color", "click-switch", "click-synth", "click-sound",
+            "hover-synth", "hover-sound", "on-click",
+            "on-change", "scroll-box", "add-item", "header-align", "font-weight",
             "clock-format", "time-format", "center-all", "font-style",
             "text-color", "font-size", "window-ob", "align-all",
             "size-top", "click-ob", "z-index"
@@ -382,8 +384,23 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
     else if (fn.find("gui_") == 0 || fn == "surface" || fn == "auto_size_display" ||
              fn == "border_radius_app" || fn == "border-radius-app" ||
              fn == "switch_tab" || fn == "switch" ||
-             fn == "fullscreen" || fn == "fullscrean") {
+             fn == "fullscreen" || fn == "fullscrean" ||
+             fn == "set_text" || fn == "get_text" || fn == "set_val" || fn == "get_val" ||
+             fn == "set_color" || fn == "set_bg" || fn == "set_visible" ||
+             fn == "hide" || fn == "show" || fn == "is_checked" ||
+             fn == "add_item" || fn == "clear_list" || fn == "get_selected" ||
+             fn == "on_timer") {
         requireLib("gui", "!interface!", fn + "()", line);
+    }
+    else if (fn == "bind_synth" || fn == "bind_sound") {
+        if (!included_libs.count("gui") && !included_libs.count("audio")) {
+            reportError(line, "Ошибка: вызов '" + fn + "()' требует подключения библиотеки !interface! или !audio!.");
+        }
+    }
+    else if (fn == "attach_sound") {
+        if (!included_libs.count("audio") && !included_libs.count("gui")) {
+            reportError(line, "Ошибка: вызов 'attach_sound()' требует подключения библиотеки !audio!.");
+        }
     }
     // 7. Проверка библиотеки !time!
     else if (fn == "start_time" || fn == "stop_time" || fn == "conclus_time" ||
@@ -404,9 +421,14 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
         requireLib("json", "!json!", fn + "()", line);
     }
     // 10. Проверка библиотеки !sys!
+    else if (fn == "ram_total_mb" || fn == "ram_used_mb" || fn == "ram_free_mb") {
+        if (!included_libs.count("sys") && !included_libs.count("hardware")) {
+            requireLib("hardware", "!hardware! или !sys!", fn + "()", line);
+        }
+    }
     else if (fn == "clip_set" || fn == "clip_get" || fn == "screen_w" ||
              fn == "screen_h" || fn == "pc_name" || fn == "user_name" ||
-             fn == "cpu_cores" || fn == "ram_total_mb" || fn == "ram_free_mb" ||
+             fn == "cpu_cores" ||
              fn == "get_env" || fn == "uptime_sec" ||
              fn == "system" || fn == "exec" || fn == "shell") {
         requireLib("sys", "!sys!", fn + "()", line);
@@ -515,13 +537,13 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
 }
 
 bool BytecodeCompiler::isTypeOrFuncKeyword(const string& s) {
-    return s == "take" || s == "void" || s == "func" || s == "alt" || s == "fn" ||
+    return s == "fun" || s == "take" || s == "void" || s == "func" || s == "alt" || s == "fn" ||
            s == "int" || s == "float" || s == "double" || s == "num" ||
            s == "str" || s == "string" || s == "bool" || s == "auto" || s == "array" || s == "volatile";
 }
 
 bool BytecodeCompiler::isVarKeyword(const string& s) {
-    return s == "set" || s == "var" || s == "let" || s == "fany" || s == "invent" ||
+    return s == "set" || s == "var" || s == "let" || s == "take" || s == "fany" || s == "invent" ||
            s == "int" || s == "float" || s == "double" || s == "num" ||
            s == "str" || s == "string" || s == "bool" || s == "auto" || s == "array" || s == "volatile";
 }
@@ -912,8 +934,106 @@ bool BytecodeCompiler::parseSingleGuiDirective() {
         return true;
     }
 
-    // Элементы интерфейса: button "Текст" { ... }, label "Текст" { ... }, enter "Текст" { ... }, clock "HH:mm:ss" { ... }
-    if (cmd == "button" || cmd == "label" || cmd == "enter" || cmd == "icon" || cmd == "video" || cmd == "svg" || cmd == "clock") {
+    // Реактивный таймер: every(1000) { ... } / on_timer(ms) { ... }
+    if (cmd == "every" || cmd == "on_timer" || cmd == "timer") {
+        advance();
+        string ms = "1000";
+        if (match(TOK_LPAREN)) {
+            if (peek().kind == TOK_NUMBER) {
+                ms = to_string((int)advance().num_val);
+            } else if (peek().kind == TOK_IDENT) {
+                ms = advance().text;
+            }
+            consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')' после интервала таймера every(...)!");
+        } else if (peek().kind == TOK_NUMBER) {
+            ms = to_string((int)advance().num_val);
+        }
+
+        if (!match(TOK_LBRACE)) {
+            reportError(peek().line, "Ожидался блок '{ ... }' для таймера every(" + ms + ")!");
+            return true;
+        }
+
+        emitByte(OP_JUMP);
+        size_t skip_patch = code.size();
+        emitU32(0);
+
+        uint32_t callback_ip = (uint32_t)code.size();
+
+        while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
+            parseStatement();
+        }
+        consume(TOK_RBRACE, "Ожидалась закрывающая фигурная скобка '}' таймера every!");
+        match(TOK_SEMI);
+
+        emitByte(OP_RET);
+        patchU32(skip_patch, (uint32_t)code.size());
+
+        emitUICmd("every(" + ms + ", " + to_string(callback_ip) + ")");
+        return true;
+    }
+
+    // Обработчик события клика: on_click { ... } / on-click { ... }
+    if (cmd == "on_click" || cmd == "on-click") {
+        advance();
+        if (match(TOK_LPAREN)) match(TOK_RPAREN);
+
+        if (!match(TOK_LBRACE)) {
+            reportError(peek().line, "Ожидался блок '{ ... }' для обработчика on_click!");
+            return true;
+        }
+
+        emitByte(OP_JUMP);
+        size_t skip_patch = code.size();
+        emitU32(0);
+
+        uint32_t callback_ip = (uint32_t)code.size();
+
+        while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
+            parseStatement();
+        }
+        consume(TOK_RBRACE, "Ожидалась закрывающая фигурная скобка '}' обработчика on_click!");
+        match(TOK_SEMI);
+
+        emitByte(OP_RET);
+        patchU32(skip_patch, (uint32_t)code.size());
+
+        emitUICmd("on_click_callback(" + to_string(callback_ip) + ")");
+        return true;
+    }
+
+    // Обработчик изменения ввода/ползунка: on_change { ... } / on-change { ... }
+    if (cmd == "on_change" || cmd == "on-change") {
+        advance();
+        if (match(TOK_LPAREN)) match(TOK_RPAREN);
+
+        if (!match(TOK_LBRACE)) {
+            reportError(peek().line, "Ожидался блок '{ ... }' для обработчика on_change!");
+            return true;
+        }
+
+        emitByte(OP_JUMP);
+        size_t skip_patch = code.size();
+        emitU32(0);
+
+        uint32_t callback_ip = (uint32_t)code.size();
+
+        while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
+            parseStatement();
+        }
+        consume(TOK_RBRACE, "Ожидалась закрывающая фигурная скобка '}' обработчика on_change!");
+        match(TOK_SEMI);
+
+        emitByte(OP_RET);
+        patchU32(skip_patch, (uint32_t)code.size());
+
+        emitUICmd("on_change_callback(" + to_string(callback_ip) + ")");
+        return true;
+    }
+
+    // Элементы интерфейса: button, label, enter, icon, video, svg, clock, progress, slider, checkbox, list
+    if (cmd == "button" || cmd == "label" || cmd == "enter" || cmd == "icon" || cmd == "video" || cmd == "svg" || cmd == "clock" ||
+        cmd == "progress" || cmd == "slider" || cmd == "checkbox" || cmd == "list" || cmd == "scroll-box") {
         int el_line = peek().line;
         advance();
         string inline_id = "";
@@ -1056,7 +1176,7 @@ bool BytecodeCompiler::parseSingleGuiDirective() {
             }
             consume(TOK_RBRACE, "Ожидалась закрывающая фигурная скобка '}'!");
             match(TOK_SEMI);
-            emitUICmd("tab(main)");
+            emitUICmd("tab(__global__)");
             return true;
         }
         match(TOK_SEMI);
@@ -1106,6 +1226,10 @@ bool BytecodeCompiler::parseSingleGuiDirective() {
         cmd == "button-color" || cmd == "button_color" || cmd == "font-size" || cmd == "font_size" ||
         cmd == "font-style" || cmd == "font_style" || cmd == "font-weight" || cmd == "font_weight" ||
         cmd == "radius" || cmd == "pad" ||
+        cmd == "click-sound" || cmd == "click_sound" || cmd == "click-synth" || cmd == "click_synth" ||
+        cmd == "hover-synth" || cmd == "hover_synth" || cmd == "hover-sound" || cmd == "hover_sound" ||
+        cmd == "tooltip" || cmd == "cursor" || cmd == "disabled" ||
+        cmd == "val" || cmd == "value" || cmd == "percent" || cmd == "item" || cmd == "add_item" ||
         cmd == "click-ob" || cmd == "click-switch" || cmd == "click_switch" ||
         cmd == "switch" || cmd == "switch_tab" || cmd == "run" || cmd == "action") {
         advance();
@@ -1113,6 +1237,12 @@ bool BytecodeCompiler::parseSingleGuiDirective() {
 
         if (cmd == "auto-size-display") cmd = "auto_size_display";
         else if (cmd == "border_radius_app") cmd = "border-radius-app";
+        else if (cmd == "click_sound") cmd = "click-sound";
+        else if (cmd == "click_synth") cmd = "click-synth";
+        else if (cmd == "hover_synth") cmd = "hover-synth";
+        else if (cmd == "hover_sound") cmd = "hover-sound";
+        else if (cmd == "value" || cmd == "percent") cmd = "val";
+        else if (cmd == "add_item") cmd = "item";
         else if (cmd == "fullscrean") cmd = "fullscreen";
         else if (cmd == "z_index" || cmd == "layer") cmd = "z-index";
         else if (cmd == "clock_format" || cmd == "time_format" || cmd == "time-format") cmd = "clock-format";
@@ -1215,7 +1345,7 @@ void BytecodeCompiler::parseWindowBlock() {
 
     while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
         if (!parseSingleGuiDirective()) {
-            advance();
+            parseStatement();
         }
     }
     consume(TOK_RBRACE, "Ожидалась закрывающая фигурная скобка '}' блока 'window'!");
@@ -1335,6 +1465,7 @@ void BytecodeCompiler::parseStatement() {
             emitByte(OP_LOAD_DB);
         } else if (lib == "!audio!" || lib == "!sound!" || lib == "!GrassAudio!") {
             included_libs.insert("audio");
+            emitByte(OP_CALL_BUILTIN); emitString("audio_init"); emitByte(0); emitByte(OP_POP);
         } else if (lib == "!asm!" || lib == "!GrassASM!" || lib == "!assembler!") {
             included_libs.insert("asm");
         } else if (lib == "!keyboard!" || lib == "!kbd!" || lib == "!ps2!" || lib == "!PS2Keyboard!") {
@@ -2238,6 +2369,85 @@ void BytecodeCompiler::parseStatement() {
         cur = saved_cur;
     }
 
+    // 5.1 АУДИО И ИНТЕРФЕЙС: attach_sound, bind_synth, bind_sound
+    if (peek().kind == TOK_IDENT && peek().text == "attach_sound") {
+        int as_line = advance().line;
+        checkBuiltinLibraryRequirement("attach_sound", as_line);
+        consume(TOK_LPAREN, "Ожидалась открывающая круглая скобка '(' после attach_sound!");
+        if (peek().kind == TOK_STRING) {
+            string s = advance().text;
+            emitByte(OP_CONST_STR); emitString(s);
+        } else if (peek().kind == TOK_IDENT) {
+            string id = advance().text;
+            emitByte(OP_CONST_STR); emitString(id);
+        } else {
+            parseExpression();
+        }
+        consume(TOK_COMMA, "Ожидалась запятая после первого аргумента attach_sound!");
+        parseExpression(); // waveform
+        consume(TOK_COMMA, "Ожидалась запятая после формы волны в attach_sound!");
+        parseExpression(); // freq_hz
+        consume(TOK_COMMA, "Ожидалась запятая после частоты в attach_sound!");
+        parseExpression(); // duration_ms
+        consume(TOK_COMMA, "Ожидалась запятая после длительности в attach_sound!");
+        parseExpression(); // volume
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')' у attach_sound(...)!");
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("attach_sound"); emitByte(5);
+        emitByte(OP_POP);
+        return;
+    }
+
+    if (peek().kind == TOK_IDENT && peek().text == "bind_synth") {
+        int bs_line = advance().line;
+        checkBuiltinLibraryRequirement("bind_synth", bs_line);
+        consume(TOK_LPAREN, "Ожидалась открывающая круглая скобка '(' после bind_synth!");
+        if (peek().kind == TOK_STRING) {
+            string s = advance().text;
+            emitByte(OP_CONST_STR); emitString(s);
+        } else if (peek().kind == TOK_IDENT) {
+            string id = advance().text;
+            emitByte(OP_CONST_STR); emitString(id);
+        } else {
+            parseExpression();
+        }
+        consume(TOK_COMMA, "Ожидалась запятая после target_id в bind_synth!");
+        parseExpression(); // waveform
+        consume(TOK_COMMA, "Ожидалась запятая после формы волны в bind_synth!");
+        parseExpression(); // freq_hz
+        consume(TOK_COMMA, "Ожидалась запятая после частоты в bind_synth!");
+        parseExpression(); // duration_ms
+        consume(TOK_COMMA, "Ожидалась запятая после длительности в bind_synth!");
+        parseExpression(); // volume
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')' у bind_synth(...)!");
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("bind_synth"); emitByte(5);
+        emitByte(OP_POP);
+        return;
+    }
+
+    if (peek().kind == TOK_IDENT && peek().text == "bind_sound") {
+        int bs_line = advance().line;
+        checkBuiltinLibraryRequirement("bind_sound", bs_line);
+        consume(TOK_LPAREN, "Ожидалась открывающая круглая скобка '(' после bind_sound!");
+        if (peek().kind == TOK_STRING) {
+            string s = advance().text;
+            emitByte(OP_CONST_STR); emitString(s);
+        } else if (peek().kind == TOK_IDENT) {
+            string id = advance().text;
+            emitByte(OP_CONST_STR); emitString(id);
+        } else {
+            parseExpression();
+        }
+        consume(TOK_COMMA, "Ожидалась запятая после target_id в bind_sound!");
+        parseExpression(); // filepath
+        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')' у bind_sound(...)!");
+        match(TOK_SEMI);
+        emitByte(OP_CALL_BUILTIN); emitString("bind_sound"); emitByte(2);
+        emitByte(OP_POP);
+        return;
+    }
+
     // Объявление экземпляра структуры: Player player; или Player player = ...;
     if (peek().kind == TOK_IDENT && g_struct_registry.count(peek().text) && peek(1).kind == TOK_IDENT) {
         string s_name = advance().text;
@@ -2622,6 +2832,14 @@ void BytecodeCompiler::compileProgram() {
         if (!user_functions.count("main")) {
             reportError(1, "Отсутствует точка входа 'int main() { ... }'!");
         } else {
+            // Регистрация имен и адресов пользовательских функций в VM (для attach_sound и рефлексии)
+            for (const auto& kv : user_functions) {
+                emitByte(OP_CONST_STR); emitString(kv.first);
+                emitByte(OP_CONST_NUM); emitDouble((double)kv.second.entry_ip);
+                emitByte(OP_CALL_BUILTIN); emitString("__reg_func"); emitByte(2);
+                emitByte(OP_POP);
+            }
+
             emitByte(OP_CALL_USER);
             emitU32(user_functions["main"].entry_ip);
             emitByte(OP_POP);

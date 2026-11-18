@@ -10,6 +10,7 @@
 #include <vector>
 #include <sstream>
 #include <iomanip>
+#include <algorithm>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -18,14 +19,18 @@
 #include <ws2tcpip.h>
 #include <iphlpapi.h>
 #include <dxgi.h>
+#include <dxgi1_4.h>
 #include <winioctl.h>
 #include <psapi.h>
 #include <intrin.h>
+#include <pdh.h>
+#include <pdhmsg.h>
 
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "psapi.lib")
+#pragma comment(lib, "pdh.lib")
 
 #pragma pack(push, 1)
 struct RawSMBIOSData {
@@ -158,18 +163,72 @@ namespace GrassHardware {
 
     int64_t cpu_freq_mhz() {
 #if defined(_WIN32)
-        HKEY hKey;
-        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-            DWORD mhz = 0;
-            DWORD size = sizeof(mhz);
-            if (RegQueryValueExA(hKey, "~MHz", NULL, NULL, (LPBYTE)&mhz, &size) == ERROR_SUCCESS) {
+        // Шаг 1: читаем базовую частоту из реестра (статическая)
+        static int64_t baseMhz = 0;
+        if (baseMhz == 0) {
+            HKEY hKey;
+            if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
+                              "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
+                              0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+                DWORD mhz = 0, size = sizeof(mhz);
+                if (RegQueryValueExA(hKey, "~MHz", NULL, NULL, (LPBYTE)&mhz, &size) == ERROR_SUCCESS) {
+                    baseMhz = (int64_t)mhz;
+                }
                 RegCloseKey(hKey);
-                return (int64_t)mhz;
             }
-            RegCloseKey(hKey);
+            if (baseMhz == 0) baseMhz = 2900;
         }
-#endif
+
+        // Шаг 2: PDH — реальная текущая частота через "% Processor Performance"
+        // (Turbo Boost учитывается ядром Windows автоматически)
+        static PDH_HQUERY  pdhQuery  = NULL;
+        static PDH_HCOUNTER pdhCtr   = NULL;
+        static ULONGLONG   lastPdhTick = 0;
+        static int64_t     cachedFreq  = 0;
+
+        ULONGLONG now = GetTickCount64();
+        // Обновляем не чаще 1 раза в секунду
+        if (cachedFreq != 0 && now - lastPdhTick < 1000) {
+            return cachedFreq;
+        }
+
+        if (pdhQuery == NULL) {
+            if (PdhOpenQueryA(NULL, 0, &pdhQuery) != ERROR_SUCCESS) {
+                pdhQuery = NULL;
+                return baseMhz;
+            }
+            // Счётчик: реальная производительность относительно номинала
+            if (PdhAddEnglishCounterA(pdhQuery,
+                    "\\Processor Information(_Total)\\% Processor Performance",
+                    0, &pdhCtr) != ERROR_SUCCESS) {
+                PdhCloseQuery(pdhQuery);
+                pdhQuery = NULL;
+                return baseMhz;
+            }
+            // Первый сбор — нужен для накопления дельты
+            PdhCollectQueryData(pdhQuery);
+            cachedFreq = baseMhz;
+            lastPdhTick = now;
+            return cachedFreq;
+        }
+
+        if (PdhCollectQueryData(pdhQuery) == ERROR_SUCCESS) {
+            PDH_FMT_COUNTERVALUE val;
+            if (PdhGetFormattedCounterValue(pdhCtr, PDH_FMT_DOUBLE, NULL, &val) == ERROR_SUCCESS) {
+                // val.doubleValue — процент производительности (может превышать 100% при Turbo)
+                double perf = val.doubleValue;
+                if (perf > 0.0 && perf < 10000.0) {
+                    cachedFreq = (int64_t)(baseMhz * perf / 100.0 + 0.5);
+                    if (cachedFreq < 100)   cachedFreq = baseMhz; // защита от мусора
+                    if (cachedFreq > 10000) cachedFreq = baseMhz; // защита от мусора
+                }
+            }
+        }
+        lastPdhTick = now;
+        return cachedFreq != 0 ? cachedFreq : baseMhz;
+#else
         return 2900;
+#endif
     }
 
     int64_t cpu_base_freq_mhz() {
@@ -188,11 +247,14 @@ namespace GrassHardware {
     int64_t cpu_usage_percent() {
 #if defined(_WIN32)
         static FILETIME prevIdle = {0}, prevKernel = {0}, prevUser = {0};
-        static int64_t cachedUsage = 18;
+        static double   smoothedUsage = 0.0;
+        static int64_t  cachedUsage = 0;
         static ULONGLONG lastQueryTick = 0;
+        static bool firstSample = true;
 
         ULONGLONG now = GetTickCount64();
-        if (now - lastQueryTick < 300 && lastQueryTick != 0) {
+        // Не опрашиваем чаще 250 мс — возвращаем сглаженное значение
+        if (!firstSample && now - lastQueryTick < 250) {
             return cachedUsage;
         }
         lastQueryTick = now;
@@ -202,27 +264,34 @@ namespace GrassHardware {
             ULARGE_INTEGER uIdle, uKernel, uUser;
             ULARGE_INTEGER uPrevIdle, uPrevKernel, uPrevUser;
 
-            uIdle.LowPart = idle.dwLowDateTime; uIdle.HighPart = idle.dwHighDateTime;
+            uIdle.LowPart   = idle.dwLowDateTime;   uIdle.HighPart   = idle.dwHighDateTime;
             uKernel.LowPart = kernel.dwLowDateTime; uKernel.HighPart = kernel.dwHighDateTime;
-            uUser.LowPart = user.dwLowDateTime; uUser.HighPart = user.dwHighDateTime;
+            uUser.LowPart   = user.dwLowDateTime;   uUser.HighPart   = user.dwHighDateTime;
 
-            uPrevIdle.LowPart = prevIdle.dwLowDateTime; uPrevIdle.HighPart = prevIdle.dwHighDateTime;
+            uPrevIdle.LowPart   = prevIdle.dwLowDateTime;   uPrevIdle.HighPart   = prevIdle.dwHighDateTime;
             uPrevKernel.LowPart = prevKernel.dwLowDateTime; uPrevKernel.HighPart = prevKernel.dwHighDateTime;
-            uPrevUser.LowPart = prevUser.dwLowDateTime; uPrevUser.HighPart = prevUser.dwHighDateTime;
+            uPrevUser.LowPart   = prevUser.dwLowDateTime;   uPrevUser.HighPart   = prevUser.dwHighDateTime;
 
             prevIdle = idle; prevKernel = kernel; prevUser = user;
 
-            if (uPrevKernel.QuadPart != 0) {
-                ULONGLONG sysDiff = (uKernel.QuadPart - uPrevKernel.QuadPart) + (uUser.QuadPart - uPrevUser.QuadPart);
+            if (!firstSample && uPrevKernel.QuadPart != 0) {
+                ULONGLONG sysDiff  = (uKernel.QuadPart - uPrevKernel.QuadPart)
+                                   + (uUser.QuadPart   - uPrevUser.QuadPart);
                 ULONGLONG idleDiff = uIdle.QuadPart - uPrevIdle.QuadPart;
                 if (sysDiff > 0 && sysDiff >= idleDiff) {
-                    cachedUsage = (int64_t)((sysDiff - idleDiff) * 100 / sysDiff);
+                    double rawUsage = (double)(sysDiff - idleDiff) * 100.0 / (double)sysDiff;
+                    // EMA α=0.3 — сглаживание как в Диспетчере задач
+                    smoothedUsage = 0.3 * rawUsage + 0.7 * smoothedUsage;
+                    cachedUsage = (int64_t)(smoothedUsage + 0.5);
+                    if (cachedUsage < 0)   cachedUsage = 0;
+                    if (cachedUsage > 100) cachedUsage = 100;
                     return cachedUsage;
                 }
             }
+            firstSample = false;
         }
 #endif
-        return 24;
+        return cachedUsage;
     }
 
     int64_t cpu_temp() {
@@ -568,20 +637,95 @@ namespace GrassHardware {
         return 38; // 38°C normal SSD operating temperature
     }
 
+    // Структура для кэша дисковых метрик через PDH
+    struct DiskMetricsCache {
+        int64_t  readSpeedMBs  = 0;
+        int64_t  writeSpeedMBs = 0;
+        int64_t  respTimeMs    = 1;
+        int64_t  usagePercent  = 0;
+        ULONGLONG lastTick     = 0;
+        bool      initialized  = false;
+        PDH_HQUERY  query      = NULL;
+        PDH_HCOUNTER ctrRead   = NULL;
+        PDH_HCOUNTER ctrWrite  = NULL;
+        PDH_HCOUNTER ctrResp   = NULL;
+        PDH_HCOUNTER ctrBusy   = NULL;
+    };
+
+    static DiskMetricsCache& GetDiskCache() {
+        static DiskMetricsCache cache;
+        return cache;
+    }
+
+    static void UpdateDiskMetrics() {
+#if defined(_WIN32)
+        DiskMetricsCache& c = GetDiskCache();
+        ULONGLONG now = GetTickCount64();
+
+        // Обновляем не чаще 1 раза в секунду
+        if (c.initialized && now - c.lastTick < 1000) return;
+
+        if (!c.initialized) {
+            if (PdhOpenQueryA(NULL, 0, &c.query) != ERROR_SUCCESS) return;
+            // Суммарные байты чтения/записи для всех дисков (_Total)
+            PdhAddEnglishCounterA(c.query,
+                "\\PhysicalDisk(_Total)\\Disk Read Bytes/sec",  0, &c.ctrRead);
+            PdhAddEnglishCounterA(c.query,
+                "\\PhysicalDisk(_Total)\\Disk Write Bytes/sec", 0, &c.ctrWrite);
+            PdhAddEnglishCounterA(c.query,
+                "\\PhysicalDisk(_Total)\\Avg. Disk sec/Transfer", 0, &c.ctrResp);
+            PdhAddEnglishCounterA(c.query,
+                "\\PhysicalDisk(_Total)\\% Disk Time",          0, &c.ctrBusy);
+            PdhCollectQueryData(c.query); // первый снимок — нужна дельта
+            c.initialized = true;
+            c.lastTick    = now;
+            return;
+        }
+
+        if (PdhCollectQueryData(c.query) == ERROR_SUCCESS) {
+            PDH_FMT_COUNTERVALUE fv;
+            if (c.ctrRead && PdhGetFormattedCounterValue(c.ctrRead, PDH_FMT_DOUBLE, NULL, &fv) == ERROR_SUCCESS) {
+                c.readSpeedMBs = (int64_t)(fv.doubleValue / (1024.0 * 1024.0) + 0.5);
+                if (c.readSpeedMBs < 0) c.readSpeedMBs = 0;
+            }
+            if (c.ctrWrite && PdhGetFormattedCounterValue(c.ctrWrite, PDH_FMT_DOUBLE, NULL, &fv) == ERROR_SUCCESS) {
+                c.writeSpeedMBs = (int64_t)(fv.doubleValue / (1024.0 * 1024.0) + 0.5);
+                if (c.writeSpeedMBs < 0) c.writeSpeedMBs = 0;
+            }
+            if (c.ctrResp && PdhGetFormattedCounterValue(c.ctrResp, PDH_FMT_DOUBLE, NULL, &fv) == ERROR_SUCCESS) {
+                // Значение в секундах → конвертируем в мс
+                c.respTimeMs = (int64_t)(fv.doubleValue * 1000.0 + 0.5);
+                if (c.respTimeMs < 0) c.respTimeMs = 0;
+                if (c.respTimeMs > 9999) c.respTimeMs = 9999;
+            }
+            if (c.ctrBusy && PdhGetFormattedCounterValue(c.ctrBusy, PDH_FMT_DOUBLE, NULL, &fv) == ERROR_SUCCESS) {
+                c.usagePercent = (int64_t)(fv.doubleValue + 0.5);
+                if (c.usagePercent < 0)   c.usagePercent = 0;
+                if (c.usagePercent > 100) c.usagePercent = 100;
+            }
+        }
+        c.lastTick = now;
+#endif
+    }
+
     int64_t disk_read_speed() {
-        return 145; // MB/s active read throughput
+        UpdateDiskMetrics();
+        return GetDiskCache().readSpeedMBs;
     }
 
     int64_t disk_write_speed() {
-        return 85;  // MB/s active write throughput
+        UpdateDiskMetrics();
+        return GetDiskCache().writeSpeedMBs;
     }
 
     int64_t disk_resp_time() {
-        return 1;   // 1 ms response time
+        UpdateDiskMetrics();
+        return GetDiskCache().respTimeMs;
     }
 
     int64_t disk_usage_percent() {
-        return 5;   // 5% active time
+        UpdateDiskMetrics();
+        return GetDiskCache().usagePercent;
     }
 
     int64_t disk_is_system() {
@@ -682,81 +826,501 @@ namespace GrassHardware {
         return ip6;
     }
 
+    // Кэш сетевых метрик через PDH (скорости) и GetIfTable (накопленный трафик)
+    struct NetMetricsCache {
+        int64_t   recvSpeedKb    = 0;
+        int64_t   sendSpeedKb    = 0;
+        int64_t   recvTotalMb    = 0;
+        int64_t   sendTotalMb    = 0;
+        ULONGLONG lastTick       = 0;
+        bool      initialized    = false;
+        PDH_HQUERY  query        = NULL;
+        PDH_HCOUNTER ctrRecv     = NULL;
+        PDH_HCOUNTER ctrSend     = NULL;
+    };
+
+    static NetMetricsCache& GetNetCache() {
+        static NetMetricsCache cache;
+        return cache;
+    }
+
+    static void UpdateNetMetrics() {
+#if defined(_WIN32)
+        NetMetricsCache& c = GetNetCache();
+        ULONGLONG now = GetTickCount64();
+        if (c.initialized && now - c.lastTick < 1000) return;
+
+        // 1. Скорости через PDH: \Network Interface(*)\Bytes Received/sec & Bytes Sent/sec
+        if (!c.initialized) {
+            if (PdhOpenQueryA(NULL, 0, &c.query) == ERROR_SUCCESS) {
+                PdhAddEnglishCounterA(c.query, "\\Network Interface(*)\\Bytes Received/sec", 0, &c.ctrRecv);
+                PdhAddEnglishCounterA(c.query, "\\Network Interface(*)\\Bytes Sent/sec",     0, &c.ctrSend);
+                PdhCollectQueryData(c.query);
+            }
+            c.initialized = true;
+            c.lastTick    = now;
+        } else if (c.query != NULL) {
+            if (PdhCollectQueryData(c.query) == ERROR_SUCCESS) {
+                // Суммируем по всем физическим/виртуальным сетевым интерфейсам (исключая loopback)
+                DWORD bufSize = 0, itemCount = 0;
+                if (c.ctrRecv && PdhGetFormattedCounterArrayA(c.ctrRecv, PDH_FMT_DOUBLE, &bufSize, &itemCount, NULL) == PDH_MORE_DATA && bufSize > 0) {
+                    std::vector<BYTE> buf(bufSize);
+                    if (PdhGetFormattedCounterArrayA(c.ctrRecv, PDH_FMT_DOUBLE, &bufSize, &itemCount, (PDH_FMT_COUNTERVALUE_ITEM_A*)buf.data()) == ERROR_SUCCESS) {
+                        PDH_FMT_COUNTERVALUE_ITEM_A* items = (PDH_FMT_COUNTERVALUE_ITEM_A*)buf.data();
+                        double totalBps = 0.0;
+                        for (DWORD i = 0; i < itemCount; ++i) {
+                            if (items[i].szName && strstr(items[i].szName, "Loopback")) continue;
+                            if (items[i].FmtValue.CStatus == PDH_CSTATUS_VALID_DATA) {
+                                totalBps += items[i].FmtValue.doubleValue;
+                            }
+                        }
+                        c.recvSpeedKb = (int64_t)(totalBps / 1024.0 + 0.5);
+                    }
+                }
+                bufSize = 0; itemCount = 0;
+                if (c.ctrSend && PdhGetFormattedCounterArrayA(c.ctrSend, PDH_FMT_DOUBLE, &bufSize, &itemCount, NULL) == PDH_MORE_DATA && bufSize > 0) {
+                    std::vector<BYTE> buf(bufSize);
+                    if (PdhGetFormattedCounterArrayA(c.ctrSend, PDH_FMT_DOUBLE, &bufSize, &itemCount, (PDH_FMT_COUNTERVALUE_ITEM_A*)buf.data()) == ERROR_SUCCESS) {
+                        PDH_FMT_COUNTERVALUE_ITEM_A* items = (PDH_FMT_COUNTERVALUE_ITEM_A*)buf.data();
+                        double totalBps = 0.0;
+                        for (DWORD i = 0; i < itemCount; ++i) {
+                            if (items[i].szName && strstr(items[i].szName, "Loopback")) continue;
+                            if (items[i].FmtValue.CStatus == PDH_CSTATUS_VALID_DATA) {
+                                totalBps += items[i].FmtValue.doubleValue;
+                            }
+                        }
+                        c.sendSpeedKb = (int64_t)(totalBps / 1024.0 + 0.5);
+                    }
+                }
+            }
+        }
+
+        // 2. Накопленный трафик через GetIfTable (фильтруем NDIS intermediate miniports)
+        DWORD dwSize = 0;
+        if (GetIfTable(NULL, &dwSize, FALSE) == ERROR_INSUFFICIENT_BUFFER) {
+            std::vector<BYTE> ifBuf(dwSize);
+            MIB_IFTABLE* pTable = (MIB_IFTABLE*)ifBuf.data();
+            if (GetIfTable(pTable, &dwSize, FALSE) == NO_ERROR) {
+                ULONGLONG totalIn = 0, totalOut = 0;
+                for (DWORD i = 0; i < pTable->dwNumEntries; ++i) {
+                    const MIB_IFROW& row = pTable->table[i];
+                    if (row.dwType == MIB_IF_TYPE_LOOPBACK) continue;
+                    if (row.dwOperStatus != MIB_IF_OPER_STATUS_OPERATIONAL) continue;
+                    // Пропускаем дублирующие NDIS-фильтры QoS и WFP
+                    const char* desc = (const char*)row.bDescr;
+                    if (strstr(desc, "-WFP") != NULL || strstr(desc, "-QoS") != NULL) continue;
+                    totalIn  += row.dwInOctets;
+                    totalOut += row.dwOutOctets;
+                }
+                c.recvTotalMb = (int64_t)(totalIn  / (1024 * 1024));
+                c.sendTotalMb = (int64_t)(totalOut / (1024 * 1024));
+            }
+        }
+        c.lastTick = now;
+#endif
+    }
+
     int64_t net_recv_speed_kb() {
-        return 96;  // 96 Кбит/с
+        UpdateNetMetrics();
+        return GetNetCache().recvSpeedKb;
     }
 
     int64_t net_send_speed_kb() {
-        return 40;  // 40 Кбит/с
+        UpdateNetMetrics();
+        return GetNetCache().sendSpeedKb;
     }
 
     int64_t net_recv_total_mb() {
-        return 1248; // Total MB received
+        UpdateNetMetrics();
+        return GetNetCache().recvTotalMb;
     }
 
     int64_t net_send_total_mb() {
-        return 512;  // Total MB sent
+        UpdateNetMetrics();
+        return GetNetCache().sendTotalMb;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // 5. GPU (Графический процессор)
     // ─────────────────────────────────────────────────────────────────────────
 
-    static void QueryDXGIGpu(std::string& outName, int64_t& outVramMb, int64_t& outSharedMb) {
-        outName = "Graphics Processor";
-        outVramMb = 8135;
-        outSharedMb = 8080;
+    struct GpuInfoCache {
+        std::string name        = "Graphics Processor";
+        int64_t     vramTotalMb = 0;
+        int64_t     vramSharedMb = 0;
+        std::string luidPrefix;
+        bool        queried     = false;
+    };
 
+    static GpuInfoCache& GetGpuInfo() {
+        static GpuInfoCache info;
+        if (!info.queried) {
 #if defined(_WIN32)
-        IDXGIFactory* pFactory = nullptr;
-        if (SUCCEEDED(CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&pFactory))) {
-            IDXGIAdapter* pAdapter = nullptr;
-            if (pFactory->EnumAdapters(0, &pAdapter) != DXGI_ERROR_NOT_FOUND) {
-                DXGI_ADAPTER_DESC desc;
-                pAdapter->GetDesc(&desc);
-                char name[128] = { 0 };
-                WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, name, sizeof(name), NULL, NULL);
-                outName = std::string(name);
-                outVramMb = (int64_t)(desc.DedicatedVideoMemory / (1024 * 1024));
-                outSharedMb = (int64_t)(desc.SharedSystemMemory / (1024 * 1024));
+            IDXGIFactory* pFactory = nullptr;
+            if (SUCCEEDED(CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&pFactory))) {
+                IDXGIAdapter* pAdapter = nullptr;
+                SIZE_T        bestDed  = 0;
+                for (UINT i = 0; pFactory->EnumAdapters(i, &pAdapter) != DXGI_ERROR_NOT_FOUND; ++i) {
+                    DXGI_ADAPTER_DESC desc;
+                    pAdapter->GetDesc(&desc);
+                    // Пропускаем программный рендерер Microsoft Basic Render Driver
+                    if (desc.VendorId == 0x1414 && desc.DeviceId == 0x8c) {
+                        pAdapter->Release();
+                        continue;
+                    }
+                    if (desc.DedicatedVideoMemory >= bestDed) {
+                        bestDed = desc.DedicatedVideoMemory;
+                        char nameBuf[128] = { 0 };
+                        WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, nameBuf, sizeof(nameBuf), NULL, NULL);
+                        info.name         = std::string(nameBuf);
+                        info.vramTotalMb  = (int64_t)(desc.DedicatedVideoMemory / (1024 * 1024));
+                        info.vramSharedMb = (int64_t)(desc.SharedSystemMemory   / (1024 * 1024));
+                        char luidBuf[64];
+                        snprintf(luidBuf, sizeof(luidBuf), "luid_0x%08X_0x%08X",
+                            (unsigned int)desc.AdapterLuid.HighPart,
+                            (unsigned int)desc.AdapterLuid.LowPart);
+                        info.luidPrefix = std::string(luidBuf);
+                    }
+                    pAdapter->Release();
+                }
+                pFactory->Release();
+            }
+#endif
+            info.queried = true;
+        }
+        return info;
+    }
+
+    // VRAM Used через DXGI 1.4 QueryVideoMemoryInfo (fallback)
+    static int64_t QueryDXGI14VramUsed() {
+#if defined(_WIN32)
+        typedef HRESULT (WINAPI* PFN_CreateDXGIFactory2)(UINT, REFIID, void**);
+        HMODULE hDxgi = GetModuleHandleA("dxgi.dll");
+        if (!hDxgi) hDxgi = LoadLibraryA("dxgi.dll");
+        if (!hDxgi) return 0;
+
+        auto pfnCreate2 = (PFN_CreateDXGIFactory2)GetProcAddress(hDxgi, "CreateDXGIFactory2");
+        if (!pfnCreate2) return 0;
+
+        IDXGIFactory4* pFactory4 = nullptr;
+        if (FAILED(pfnCreate2(0, __uuidof(IDXGIFactory4), (void**)&pFactory4))) return 0;
+
+        IDXGIAdapter3* pBestAdapter3 = nullptr;
+        SIZE_T          bestDed       = 0;
+
+        IDXGIAdapter1* pAdapter = nullptr;
+        for (UINT i = 0; pFactory4->EnumAdapters1(i, &pAdapter) != DXGI_ERROR_NOT_FOUND; ++i) {
+            DXGI_ADAPTER_DESC1 desc1;
+            pAdapter->GetDesc1(&desc1);
+            if (desc1.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) {
+                pAdapter->Release();
+                continue;
+            }
+            if (desc1.DedicatedVideoMemory > bestDed) {
+                bestDed = desc1.DedicatedVideoMemory;
+                if (pBestAdapter3) pBestAdapter3->Release();
+                pBestAdapter3 = nullptr;
+                pAdapter->QueryInterface(__uuidof(IDXGIAdapter3), (void**)&pBestAdapter3);
+                pAdapter->Release();
+            } else {
                 pAdapter->Release();
             }
-            pFactory->Release();
         }
+
+        int64_t usedMb = 0;
+        if (pBestAdapter3) {
+            DXGI_QUERY_VIDEO_MEMORY_INFO memInfo = {};
+            if (SUCCEEDED(pBestAdapter3->QueryVideoMemoryInfo(
+                    0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &memInfo))) {
+                usedMb = (int64_t)(memInfo.CurrentUsage / (1024 * 1024));
+            }
+            pBestAdapter3->Release();
+        }
+        pFactory4->Release();
+        return usedMb;
+#else
+        return 0;
 #endif
     }
 
+    // GPU Usage через PDH: \GPU Engine(*engtype_3D)\Utilization Percentage
+    static int64_t QueryGpuUsagePDH() {
+#if defined(_WIN32)
+        static PDH_HQUERY   gpuQuery    = NULL;
+        static PDH_HCOUNTER gpuCounter  = NULL;
+        static ULONGLONG    lastGpuTick = 0;
+        static int64_t      cachedGpuUsage = 0;
+
+        ULONGLONG now = GetTickCount64();
+        if (cachedGpuUsage >= 0 && gpuQuery != NULL && now - lastGpuTick < 1000) {
+            return cachedGpuUsage;
+        }
+
+        if (gpuQuery == NULL) {
+            if (PdhOpenQueryA(NULL, 0, &gpuQuery) != ERROR_SUCCESS) {
+                gpuQuery = NULL;
+                return 0;
+            }
+            if (PdhAddEnglishCounterA(gpuQuery,
+                    "\\GPU Engine(*engtype_3D)\\Utilization Percentage",
+                    0, &gpuCounter) != ERROR_SUCCESS) {
+                PdhCloseQuery(gpuQuery);
+                gpuQuery = NULL;
+                return 0;
+            }
+            PdhCollectQueryData(gpuQuery); // первый снимок
+            lastGpuTick = now;
+            return 0;
+        }
+
+        if (PdhCollectQueryData(gpuQuery) == ERROR_SUCCESS && gpuCounter != NULL) {
+            DWORD bufSize = 0, itemCount = 0;
+            PdhGetFormattedCounterArrayA(gpuCounter, PDH_FMT_DOUBLE, &bufSize, &itemCount, NULL);
+            if (bufSize > 0) {
+                std::vector<BYTE> buf(bufSize);
+                if (PdhGetFormattedCounterArrayA(gpuCounter, PDH_FMT_DOUBLE, &bufSize, &itemCount,
+                        (PDH_FMT_COUNTERVALUE_ITEM_A*)buf.data()) == ERROR_SUCCESS) {
+                    PDH_FMT_COUNTERVALUE_ITEM_A* items = (PDH_FMT_COUNTERVALUE_ITEM_A*)buf.data();
+                    double totalUsage = 0.0;
+                    for (DWORD i = 0; i < itemCount; ++i) {
+                        if (items[i].FmtValue.CStatus == PDH_CSTATUS_VALID_DATA) {
+                            totalUsage += items[i].FmtValue.doubleValue;
+                        }
+                    }
+                    cachedGpuUsage = (int64_t)(totalUsage + 0.5);
+                    if (cachedGpuUsage < 0)   cachedGpuUsage = 0;
+                    if (cachedGpuUsage > 100) cachedGpuUsage = 100;
+                    lastGpuTick = now;
+                    return cachedGpuUsage;
+                }
+            }
+        }
+        lastGpuTick = now;
+        return cachedGpuUsage;
+#else
+        return 0;
+#endif
+    }
+
+    // Helper для ADL malloc callback
+    static void* __cdecl ADL_Alloc(int size) {
+        return malloc(size);
+    }
+
+    // GPU Temperature: сначала NVIDIA NVML, затем AMD ADL, иначе 0
+    static int64_t QueryGpuTemp() {
+#if defined(_WIN32)
+        // ── 1. Попытка NVIDIA NVML ──────────────────────────────────────────
+        HMODULE hNvml = LoadLibraryA("nvml.dll");
+        if (!hNvml) hNvml = LoadLibraryA("C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvml.dll");
+        if (hNvml) {
+            typedef int (*pfnNvmlInit_t)();
+            typedef int (*pfnNvmlDeviceGetHandleByIndex_t)(unsigned int, void**);
+            typedef int (*pfnNvmlDeviceGetTemperature_t)(void*, int, unsigned int*);
+            typedef int (*pfnNvmlShutdown_t)();
+
+            auto pfnInit      = (pfnNvmlInit_t)GetProcAddress(hNvml, "nvmlInit_v2");
+            if (!pfnInit) pfnInit = (pfnNvmlInit_t)GetProcAddress(hNvml, "nvmlInit");
+            auto pfnGetHandle = (pfnNvmlDeviceGetHandleByIndex_t)GetProcAddress(hNvml, "nvmlDeviceGetHandleByIndex_v2");
+            if (!pfnGetHandle) pfnGetHandle = (pfnNvmlDeviceGetHandleByIndex_t)GetProcAddress(hNvml, "nvmlDeviceGetHandleByIndex");
+            auto pfnGetTemp   = (pfnNvmlDeviceGetTemperature_t)GetProcAddress(hNvml, "nvmlDeviceGetTemperature");
+            auto pfnShutdown  = (pfnNvmlShutdown_t)GetProcAddress(hNvml, "nvmlShutdown");
+
+            if (pfnInit && pfnGetHandle && pfnGetTemp) {
+                if (pfnInit() == 0) {
+                    void* hDev = nullptr;
+                    unsigned int temp = 0;
+                    if (pfnGetHandle(0, &hDev) == 0 &&
+                        pfnGetTemp(hDev, 0 /*NVML_TEMPERATURE_GPU*/, &temp) == 0) {
+                        if (pfnShutdown) pfnShutdown();
+                        FreeLibrary(hNvml);
+                        return (int64_t)temp;
+                    }
+                    if (pfnShutdown) pfnShutdown();
+                }
+            }
+            FreeLibrary(hNvml);
+        }
+
+        // ── 2. Попытка AMD ADL ──────────────────────────────────────────────
+        HMODULE hAdl = LoadLibraryA("atiadlxx.dll");
+        if (!hAdl) hAdl = LoadLibraryA("atiadlxy.dll");
+        if (hAdl) {
+            typedef void* (*ADL_MAIN_MALLOC_CALLBACK)(int);
+            typedef int (*ADL2_Main_Control_Create_t)(ADL_MAIN_MALLOC_CALLBACK, int, void**);
+            typedef int (*ADL2_Main_Control_Destroy_t)(void*);
+            typedef int (*ADL2_Adapter_NumberOfAdapters_Get_t)(void*, int*);
+            typedef int (*ADL2_Overdrive5_Temperature_Get_t)(void*, int, int, void*);
+            typedef int (*ADL2_OverdriveN_Temperature_Get_t)(void*, int, int, int*);
+
+            struct ADL_Temperature { int iSize; int iTemperature; };
+
+            auto pfnCreate2     = (ADL2_Main_Control_Create_t)GetProcAddress(hAdl, "ADL2_Main_Control_Create");
+            auto pfnDestroy2    = (ADL2_Main_Control_Destroy_t)GetProcAddress(hAdl, "ADL2_Main_Control_Destroy");
+            auto pfnNumAdapters = (ADL2_Adapter_NumberOfAdapters_Get_t)GetProcAddress(hAdl, "ADL2_Adapter_NumberOfAdapters_Get");
+            auto pfnTemp5       = (ADL2_Overdrive5_Temperature_Get_t)GetProcAddress(hAdl, "ADL2_Overdrive5_Temperature_Get");
+            auto pfnTempN       = (ADL2_OverdriveN_Temperature_Get_t)GetProcAddress(hAdl, "ADL2_OverdriveN_Temperature_Get");
+
+            if (pfnCreate2 && pfnDestroy2 && pfnNumAdapters) {
+                void* hCtx = nullptr;
+                if (pfnCreate2(ADL_Alloc, 1, &hCtx) == 0 && hCtx) {
+                    int numAdapters = 0;
+                    pfnNumAdapters(hCtx, &numAdapters);
+                    for (int i = 0; i < numAdapters; ++i) {
+                        if (pfnTemp5) {
+                            ADL_Temperature t = { sizeof(ADL_Temperature), 0 };
+                            if (pfnTemp5(hCtx, i, 0, &t) == 0 && t.iTemperature > 0) {
+                                int64_t deg = (int64_t)(t.iTemperature / 1000);
+                                pfnDestroy2(hCtx);
+                                FreeLibrary(hAdl);
+                                return deg;
+                            }
+                        }
+                        if (pfnTempN) {
+                            int tempN = 0;
+                            if (pfnTempN(hCtx, i, 1 /*ADL_ODN_TEMPERATURE_EDGE*/, &tempN) == 0 && tempN > 0) {
+                                int64_t deg = (int64_t)(tempN / 1000);
+                                pfnDestroy2(hCtx);
+                                FreeLibrary(hAdl);
+                                return deg;
+                            }
+                        }
+                    }
+                    pfnDestroy2(hCtx);
+                }
+            }
+
+            // Fallback: ADL v1
+            typedef int (*ADL_Main_Control_Create_v1_t)(ADL_MAIN_MALLOC_CALLBACK, int);
+            typedef int (*ADL_Main_Control_Destroy_v1_t)();
+            typedef int (*ADL_Adapter_NumberOfAdapters_Get_v1_t)(int*);
+            typedef int (*ADL_Overdrive5_Temperature_Get_v1_t)(int, int, void*);
+
+            auto pfnCreate1  = (ADL_Main_Control_Create_v1_t)GetProcAddress(hAdl, "ADL_Main_Control_Create");
+            auto pfnDestroy1 = (ADL_Main_Control_Destroy_v1_t)GetProcAddress(hAdl, "ADL_Main_Control_Destroy");
+            auto pfnNumAdap1 = (ADL_Adapter_NumberOfAdapters_Get_v1_t)GetProcAddress(hAdl, "ADL_Adapter_NumberOfAdapters_Get");
+            auto pfnTemp5_1  = (ADL_Overdrive5_Temperature_Get_v1_t)GetProcAddress(hAdl, "ADL_Overdrive5_Temperature_Get");
+
+            if (pfnCreate1 && pfnCreate1(ADL_Alloc, 1) == 0) {
+                int num = 0;
+                if (pfnNumAdap1) pfnNumAdap1(&num);
+                for (int i = 0; i < num; ++i) {
+                    ADL_Temperature t = { sizeof(ADL_Temperature), 0 };
+                    if (pfnTemp5_1 && pfnTemp5_1(i, 0, &t) == 0 && t.iTemperature > 0) {
+                        int64_t deg = (int64_t)(t.iTemperature / 1000);
+                        if (pfnDestroy1) pfnDestroy1();
+                        FreeLibrary(hAdl);
+                        return deg;
+                    }
+                }
+                if (pfnDestroy1) pfnDestroy1();
+            }
+
+            FreeLibrary(hAdl);
+        }
+#endif
+        // Датчик недоступен — возвращаем 0, а не заглушку 52
+        return 0;
+    }
+
     std::string gpu_name() {
-        std::string name;
-        int64_t vram = 0, shared = 0;
-        QueryDXGIGpu(name, vram, shared);
-        return name;
+        return GetGpuInfo().name;
     }
 
     int64_t gpu_usage_percent() {
-        return 46; // 46% usage (as in user screenshot)
+        return QueryGpuUsagePDH();
     }
 
     int64_t gpu_temp() {
-        return 52; // 52 °C (exact temperature from user screenshot)
+        static int64_t   cachedTemp = -1;
+        static ULONGLONG lastTempTick = 0;
+        ULONGLONG now = GetTickCount64();
+        // Опрашиваем температуру не чаще раза в 2 секунды
+        if (cachedTemp >= 0 && now - lastTempTick < 2000) {
+            return cachedTemp;
+        }
+        cachedTemp   = QueryGpuTemp();
+        lastTempTick = now;
+        return cachedTemp;
     }
 
     int64_t gpu_vram_total_mb() {
-        std::string name;
-        int64_t vram = 0, shared = 0;
-        QueryDXGIGpu(name, vram, shared);
-        return vram > 0 ? vram : 8135;
+        return GetGpuInfo().vramTotalMb;
     }
 
     int64_t gpu_vram_used_mb() {
-        return 1450; // MB VRAM allocated
+#if defined(_WIN32)
+        static PDH_HQUERY   vramQuery   = NULL;
+        static PDH_HCOUNTER vramCounter = NULL;
+        static int64_t      cachedVramUsed = 0;
+        static ULONGLONG    lastVramTick = 0;
+
+        ULONGLONG now = GetTickCount64();
+        if (cachedVramUsed > 0 && now - lastVramTick < 1000) {
+            return cachedVramUsed;
+        }
+
+        const std::string& luid = GetGpuInfo().luidPrefix;
+
+        if (vramQuery == NULL) {
+            if (PdhOpenQueryA(NULL, 0, &vramQuery) == ERROR_SUCCESS) {
+                if (PdhAddEnglishCounterA(vramQuery,
+                        "\\GPU Adapter Memory(*)\\Dedicated Usage",
+                        0, &vramCounter) != ERROR_SUCCESS) {
+                    PdhCloseQuery(vramQuery);
+                    vramQuery = NULL;
+                } else {
+                    PdhCollectQueryData(vramQuery);
+                }
+            }
+        }
+
+        if (vramQuery != NULL && vramCounter != NULL) {
+            if (PdhCollectQueryData(vramQuery) == ERROR_SUCCESS) {
+                DWORD bufSize = 0, itemCount = 0;
+                PdhGetFormattedCounterArrayA(vramCounter, PDH_FMT_LARGE, &bufSize, &itemCount, NULL);
+                if (bufSize > 0) {
+                    std::vector<BYTE> buf(bufSize);
+                    if (PdhGetFormattedCounterArrayA(vramCounter, PDH_FMT_LARGE, &bufSize, &itemCount,
+                            (PDH_FMT_COUNTERVALUE_ITEM_A*)buf.data()) == ERROR_SUCCESS) {
+                        PDH_FMT_COUNTERVALUE_ITEM_A* items = (PDH_FMT_COUNTERVALUE_ITEM_A*)buf.data();
+                        int64_t maxUsageMb = 0;
+                        for (DWORD i = 0; i < itemCount; ++i) {
+                            if (items[i].FmtValue.CStatus == PDH_CSTATUS_VALID_DATA) {
+                                int64_t mb = (int64_t)(items[i].FmtValue.largeValue / (1024 * 1024));
+                                // Если совпадает LUID дискретной видеокарты — берём его сразу
+                                if (!luid.empty() && items[i].szName && strstr(items[i].szName, luid.c_str())) {
+                                    cachedVramUsed = mb;
+                                    lastVramTick   = now;
+                                    return cachedVramUsed;
+                                }
+                                if (mb > maxUsageMb) maxUsageMb = mb;
+                            }
+                        }
+                        if (maxUsageMb > 0) {
+                            cachedVramUsed = maxUsageMb;
+                            lastVramTick   = now;
+                            return cachedVramUsed;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback: IDXGIAdapter3::QueryVideoMemoryInfo
+        int64_t dxgiUsed = QueryDXGI14VramUsed();
+        if (dxgiUsed > 0) {
+            cachedVramUsed = dxgiUsed;
+            lastVramTick   = now;
+        }
+        return cachedVramUsed;
+#else
+        return 0;
+#endif
     }
 
     int64_t gpu_vram_shared_mb() {
-        std::string name;
-        int64_t vram = 0, shared = 0;
-        QueryDXGIGpu(name, vram, shared);
-        return shared > 0 ? shared : 8080;
+        return GetGpuInfo().vramSharedMb;
     }
 
     // ─────────────────────────────────────────────────────────────────────────

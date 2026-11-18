@@ -19,6 +19,7 @@ typedef uint32_t COLORREF;
 #include <string>
 #include <vector>
 #include <map>
+#include <functional>
 #include <cstdint>
 
 // Режимы поверхности отображения (Universal Surface Engine)
@@ -142,6 +143,65 @@ struct UIElement {
     // Виджет часов (Clock Widget)
     bool is_clock = false;                 // Флаг виджета часов
     std::string clock_format = "HH:mm:ss"; // Формат времени ("HH:mm:ss", "HH:mm", "date", "datetime")
+
+    // Видимость и доступность (Reactive State)
+    bool is_visible = true;                // Видимость элемента (set_visible / hide / show)
+    bool is_disabled = false;              // Блокировка элемента (disabled)
+    std::wstring tooltip = L"";            // Всплывающая подсказка (tooltip)
+    std::string cursor_type = "default";   // Курсор мыши: "default", "pointer", "text"
+
+    // Звук клика (по умолчанию выключен)
+    bool click_sound = false;              // click-sound(true|false)
+
+    // Звуки и процедурный синтез клика/наведения
+    bool has_click_synth = false;
+    std::string click_synth_wave = "sine";
+    double click_synth_freq = 440.0;
+    int click_synth_dur = 100;
+    double click_synth_vol = 80.0;
+
+    bool has_click_sound_file = false;
+    std::string click_sound_file = "";
+
+    bool has_hover_synth = false;
+    std::string hover_synth_wave = "sine";
+    double hover_synth_freq = 600.0;
+    int hover_synth_dur = 50;
+    double hover_synth_vol = 50.0;
+
+    bool has_hover_sound_file = false;
+    std::string hover_sound_file = "";
+
+    // Шаблонный исходный текст для повторной интерполяции {var}
+    std::wstring template_text = L"";
+
+    // Новые виджеты
+    // Progress
+    double progress_val = 0.0;             // Значение прогресса 0..100
+    
+    // Slider
+    double slider_min = 0.0;               // Мин. значение
+    double slider_max = 100.0;             // Макс. значение
+    double slider_val = 0.0;               // Текущее значение
+    bool is_slider_dragging = false;       // Зажат ли ползунок
+
+    // Checkbox
+    bool is_checked = false;               // Флаг чекбокса
+
+    // List / Scroll-box
+    std::vector<std::wstring> list_items;  // Элементы списка
+    int list_selected_idx = -1;            // Выбранный элемент (-1 если нет)
+    int list_scroll_y = 0;                 // Смещение прокрутки (px)
+
+    // Коллбэки байткода VM
+    uint32_t on_click_ip = 0;              // Точка входа on_click
+    uint32_t on_change_ip = 0;             // Точка входа on_change
+};
+
+struct TimerEntry {
+    int interval_ms = 1000;
+    uint32_t callback_ip = 0;
+    uint64_t last_tick = 0;
 };
 
 namespace GrassGUI {
@@ -219,6 +279,35 @@ namespace GrassGUI {
     // Обмен переменными между виртуальной машиной GrassGreen и GUI
     void set_variable(const std::string& name, const std::string& val);
     std::string get_input_value(const std::string& element_id);
+
+    // Реактивное управление элементами по ID (Dynamic Widget API)
+    void set_text(const std::string& id, const std::string& val);
+    std::string get_text(const std::string& id);
+    void set_val(const std::string& id, double val);
+    void set_val(const std::string& id, const std::string& val);
+    double get_val(const std::string& id);
+    std::string get_val_str(const std::string& id);
+    void set_color(const std::string& id, const std::string& hex);
+    void set_bg(const std::string& id, const std::string& hex);
+    void set_visible(const std::string& id, bool visible);
+    bool is_checked(const std::string& id);
+    void add_list_item(const std::string& id, const std::string& text);
+    void clear_list(const std::string& id);
+    std::string get_list_selected(const std::string& id);
+    bool has_element(const std::string& id);
+    void refresh_elements();
+
+    // Проверка активности GUI окна
+    bool is_window_active();
+
+    // Привязка звуков и синтеза (Sound & Synth Binding)
+    void bind_synth(const std::string& target_id, const std::string& waveform, double freq_hz, int duration_ms, double volume);
+    void bind_sound(const std::string& target_id, const std::string& filepath);
+
+    // Интеграция с виртуальной машиной GrassGreen (VM Callbacks & Timers)
+    typedef std::function<void(uint32_t callback_ip)> VMCallbackRunner;
+    void set_vm_callback_runner(VMCallbackRunner runner);
+    void add_timer(int interval_ms, uint32_t callback_ip);
 
     // Построчное выполнение команд разметки interface.txt
     void exec_command(const std::string& raw_line);
