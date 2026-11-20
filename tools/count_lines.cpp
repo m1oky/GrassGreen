@@ -1,5 +1,5 @@
 // =============================================================================
-//  GrassGreen 4.0 — Project Line Counter Utility (count_lines.cpp) [FIXED]
+//  GrassGreen 4.0 — Project Line Counter Utility (count_lines.cpp)
 // =============================================================================
 
 #include <iostream>
@@ -27,11 +27,10 @@ struct FileInfo {
     std::string ext;
 };
 
-bool isIgnoredDirectory(const std::string& name) {
-    static const std::unordered_set<std::string> ignored_dirs = {
-        ".git", "node_modules", ".cache", ".vscode", "build", "bin", "obj"
-    };
-    return ignored_dirs.contains(name);
+bool isIgnoredDir(const std::string& dirName) {
+    return dirName == ".vs" || dirName == ".git" || dirName == "packages" ||
+        dirName == "bin" || dirName == "obj" || dirName == "x64" ||
+        dirName == "Debug" || dirName == "Release" || dirName == "ipch";
 }
 
 bool isBinaryOrIgnoredFile(const fs::path& p) {
@@ -43,10 +42,11 @@ bool isBinaryOrIgnoredFile(const fs::path& p) {
 
     static const std::unordered_set<std::string> ignored_exts = {
         ".exe", ".ico", ".png", ".jpg", ".jpeg", ".vsix",
-        ".o", ".obj", ".gdb", ".bin", ".a", ".lib", ".dll", ".so", ".dylib"
+        ".o", ".obj", ".gdb", ".bin", ".a", ".lib", ".dll", ".so", ".dylib",
+        ".pdb", ".ipch", ".db", ".db-wal", ".db-shm", ".sqlite", ".nupkg", ".p7s"
     };
 
-    return ignored_exts.contains(ext);
+    return ignored_exts.count(ext) > 0;
 }
 
 int main(int argc, char* argv[]) {
@@ -64,8 +64,8 @@ int main(int argc, char* argv[]) {
 
     std::error_code ec;
     auto it = fs::recursive_directory_iterator(
-        root, 
-        fs::directory_options::skip_permission_denied, 
+        root,
+        fs::directory_options::skip_permission_denied,
         ec
     );
 
@@ -77,9 +77,8 @@ int main(int argc, char* argv[]) {
 
         const auto& entry = *it;
 
-        // Отсекаем служебные тяжелые папки на корню, не углубляясь внутрь
         if (entry.is_directory()) {
-            if (isIgnoredDirectory(entry.path().filename().string())) {
+            if (isIgnoredDir(entry.path().filename().string())) {
                 it.disable_recursion_pending();
             }
             continue;
@@ -94,7 +93,6 @@ int main(int argc, char* argv[]) {
         if (ext.empty()) ext = "[no ext]";
         std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
 
-        // Открываем с binary, чтобы не спотыкаться о ^Z (0x1A) на Windows
         std::ifstream file(p, std::ios::binary);
         if (!file.is_open()) continue;
 
@@ -137,52 +135,52 @@ int main(int argc, char* argv[]) {
     std::vector<std::pair<std::string, ExtStats>> sorted_ext(stats.begin(), stats.end());
     std::sort(sorted_ext.begin(), sorted_ext.end(), [](const auto& a, const auto& b) {
         return a.second.total_lines > b.second.total_lines;
-    });
+        });
 
     std::sort(all_files.begin(), all_files.end(), [](const auto& a, const auto& b) {
         return a.lines > b.lines;
-    });
+        });
 
     std::cout << "\n";
     std::cout << "========================================================================================\n";
     std::cout << "           СТАТИСТИКА КОДА ПРОЕКТА GRASSGREEN 4.0 (G&G CODEBASE METRICS)               \n";
     std::cout << "========================================================================================\n";
     std::cout << std::left
-              << std::setw(14) << "Расширение"
-              << std::setw(12) << "Файлов"
-              << std::setw(16) << "Всего строк"
-              << std::setw(16) << "Чистый код"
-              << std::setw(14) << "Пустые строки"
-              << "Доля (%)\n";
+        << std::setw(14) << "Расширение"
+        << std::setw(12) << "Файлов"
+        << std::setw(16) << "Всего строк"
+        << std::setw(16) << "Чистый код"
+        << std::setw(14) << "Пустые строки"
+        << "Доля (%)\n";
     std::cout << "----------------------------------------------------------------------------------------\n";
 
     for (const auto& [ext, st] : sorted_ext) {
         double pct = (grand_total_lines > 0) ? (st.total_lines * 100.0 / grand_total_lines) : 0.0;
         std::cout << std::left
-                  << std::setw(14) << ext
-                  << std::setw(12) << st.file_count
-                  << std::setw(16) << st.total_lines
-                  << std::setw(16) << st.code_lines
-                  << std::setw(14) << st.blank_lines
-                  << std::fixed << std::setprecision(1) << pct << " %\n";
+            << std::setw(14) << ext
+            << std::setw(12) << st.file_count
+            << std::setw(16) << st.total_lines
+            << std::setw(16) << st.code_lines
+            << std::setw(14) << st.blank_lines
+            << std::fixed << std::setprecision(1) << pct << " %\n";
     }
 
     std::cout << "========================================================================================\n";
     std::cout << std::left
-              << std::setw(14) << "ИТОГО:"
-              << std::setw(12) << grand_total_files
-              << std::setw(16) << grand_total_lines
-              << std::setw(16) << grand_total_code
-              << std::setw(14) << grand_total_blank
-              << "100.0 %\n";
+        << std::setw(14) << "ИТОГО:"
+        << std::setw(12) << grand_total_files
+        << std::setw(16) << grand_total_lines
+        << std::setw(16) << grand_total_code
+        << std::setw(14) << grand_total_blank
+        << "100.0 %\n";
     std::cout << "========================================================================================\n\n";
 
     std::cout << "--- Топ-10 крупнейших исходных файлов проекта ---\n";
     size_t top_n = std::min((size_t)10, all_files.size());
     for (size_t i = 0; i < top_n; ++i) {
         std::cout << "  " << std::setw(2) << (i + 1) << ". "
-                  << std::setw(50) << std::left << all_files[i].path
-                  << " : " << all_files[i].lines << " строк\n";
+            << std::setw(50) << std::left << all_files[i].path
+            << " : " << all_files[i].lines << " строк\n";
     }
     std::cout << "\n";
 

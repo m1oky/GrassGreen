@@ -81,6 +81,8 @@ namespace GrassPhysics {
     PhysRayHit raycast(uint32_t world_id, float ox, float oy, float oz, float dx, float dy, float dz, float max_dist);
     GrassVec3 get_pos(uint32_t world_id, uint32_t body_id);
     GrassVec3 get_rot(uint32_t world_id, uint32_t body_id);
+    void set_pos(uint32_t world_id, uint32_t body_id, float x, float y, float z);
+    void set_vel(uint32_t world_id, uint32_t body_id, float vx, float vy, float vz);
 }
 
 #endif // GRASS_PHYSICS_H

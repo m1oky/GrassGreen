@@ -51,6 +51,12 @@ namespace GrassGfx3D {
     void transform_mat(uint32_t mesh_id, const GrassMat4& mat);
     void draw(uint32_t mesh_id);
 
+    bool key_down(int key_code);
+    bool key_down_str(const std::string& key);
+    int mouse_x();
+    int mouse_y();
+    bool mouse_btn(int btn);
+
     void set_dir_light(const GrassVec3& dir, float r, float g, float b, float intensity);
     void set_point_light(const GrassVec3& pos, float r, float g, float b, float range);
     void set_fog(float r, float g, float b, float density);

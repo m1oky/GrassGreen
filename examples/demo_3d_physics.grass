@@ -1,72 +1,251 @@
 !GrassGreen!
+!FastMath!
 !math3d!
 !gfx3d!
 !physics!
 
 int main() {
-    gout << "=== GrassGreen 3D Graphics and XPBD Physics Demo ===" << endl;
+    gout << "=== GrassGreen Interactive 3D Physics Sandbox ===" << endl;
+    gout << "Controls:" << endl;
+    gout << "  [W/A/S/D]        - Move camera" << endl;
+    gout << "  [Hold LMB / Drag]- Look around with mouse" << endl;
+    gout << "  [Arrow Keys]     - Rotate camera" << endl;
+    gout << "  [Space]          - Launch heavy ball towards crosshair" << endl;
+    gout << "  [R]              - Reset pyramid to initial positions" << endl;
+    gout << "  [Esc]            - Exit simulation" << endl;
 
-    g3d_window("GrassGreen 3D Physics Simulation", 800, 600);
+    g3d_window("GrassGreen Interactive 3D Physics Sandbox", 800, 600);
 
-    // Setup 3D camera
-    take cam_pos = v3_create(0.0, 8.0, 15.0);
-    take cam_target = v3_create(0.0, 2.0, 0.0);
-    g3d_camera(cam_pos, cam_target, 60.0);
+    // Initial Camera Transform
+    take cam_x = 0.0;
+    take cam_y = 3.5;
+    take cam_z = 10.0;
+    take yaw = 0.0;
+    take pitch = -0.12;
 
-    // Setup directional sunlight
-    take light_dir = v3_create(0.5, -1.0, 0.3);
+    // Directional Sunlight (normalized from above)
+    take light_dir = v3_create(0.4, 0.9, 0.5);
     g3d_dir_light(light_dir, 0xFFFFFF);
 
-    // Initialize XPBD Physics World with standard gravity
+    // Initialize XPBD Physics World with gravity
     take world = phys_world(0.0, -9.81, 0.0);
 
-    // Static floor ground (mass = 0.0)
-    take ground_body = phys_box(world, 0.0, -0.5, 0.0, 20.0, 1.0, 20.0, 0.0);
-    take ground_mesh = g3d_plane(20.0, 20.0);
-    g3d_set_color(ground_mesh, 0x1b3820);
+    // Static Floor Ground
+    take ground_body = phys_box(world, 0.0, -0.5, 0.0, 30.0, 1.0, 30.0, 0.0);
+    take ground_mesh = g3d_plane(30.0, 30.0);
+    g3d_set_color(ground_mesh, 0x1e293b);
 
-    // Dynamic falling box
-    take box_body = phys_box(world, 0.0, 6.0, 0.0, 1.5, 1.5, 1.5, 2.0);
-    take box_mesh = g3d_cube(1.5);
-    g3d_set_color(box_mesh, 0x22c55e);
+    // Dynamic Cubes Pyramid (9 cubes: 4 in base, 3 in middle, 2 on top)
+    // Layer 1 (bottom: 4 cubes at y = 0.5)
+    take b0 = phys_box(world, -1.65, 0.5, 0.0, 1.0, 1.0, 1.0, 1.5);
+    take m0 = g3d_cube(1.0);
+    g3d_set_color(m0, 0xef4444);
 
-    // Dynamic projectile sphere
-    take sphere_body = phys_sphere(world, 0.0, 4.0, -3.0, 1.0, 3.0);
-    take sphere_mesh = g3d_sphere(1.0, 16, 16);
+    take b1 = phys_box(world, -0.55, 0.5, 0.0, 1.0, 1.0, 1.0, 1.5);
+    take m1 = g3d_cube(1.0);
+    g3d_set_color(m1, 0xf97316);
+
+    take b2 = phys_box(world, 0.55, 0.5, 0.0, 1.0, 1.0, 1.0, 1.5);
+    take m2 = g3d_cube(1.0);
+    g3d_set_color(m2, 0xeab308);
+
+    take b3 = phys_box(world, 1.65, 0.5, 0.0, 1.0, 1.0, 1.0, 1.5);
+    take m3 = g3d_cube(1.0);
+    g3d_set_color(m3, 0x10b981);
+
+    // Layer 2 (middle: 3 cubes at y = 1.55)
+    take b4 = phys_box(world, -1.1, 1.55, 0.0, 1.0, 1.0, 1.0, 1.5);
+    take m4 = g3d_cube(1.0);
+    g3d_set_color(m4, 0x06b6d4);
+
+    take b5 = phys_box(world, 0.0, 1.55, 0.0, 1.0, 1.0, 1.0, 1.5);
+    take m5 = g3d_cube(1.0);
+    g3d_set_color(m5, 0x3b82f6);
+
+    take b6 = phys_box(world, 1.1, 1.55, 0.0, 1.0, 1.0, 1.0, 1.5);
+    take m6 = g3d_cube(1.0);
+    g3d_set_color(m6, 0x8b5cf6);
+
+    // Layer 3 (top: 2 cubes at y = 2.6)
+    take b7 = phys_box(world, -0.55, 2.6, 0.0, 1.0, 1.0, 1.0, 1.5);
+    take m7 = g3d_cube(1.0);
+    g3d_set_color(m7, 0xec4899);
+
+    take b8 = phys_box(world, 0.55, 2.6, 0.0, 1.0, 1.0, 1.0, 1.5);
+    take m8 = g3d_cube(1.0);
+    g3d_set_color(m8, 0x84cc16);
+
+    // Projectile Wrecking Sphere (mass = 8.0)
+    take sphere_body = phys_sphere(world, 0.0, -10.0, 0.0, 0.8, 8.0);
+    take sphere_mesh = g3d_sphere(0.8, 16, 16);
     g3d_set_color(sphere_mesh, 0x38bdf8);
 
+    take prev_mx = g3d_mouse_x();
+    take prev_my = g3d_mouse_y();
+    take prev_mouse_down = 0;
+    take prev_space_down = 0;
+    take prev_r_down = 0;
     take frame_count = 0;
+
     while (g3d_is_open()) {
         take dt = g3d_dt();
         frame_count += 1;
 
-        // Step physics simulation with 4 sub-steps
+        if (g3d_key_down(27)) {
+            break;
+        }
+
+        // Camera Looking Direction
+        take cos_p = cos(pitch);
+        take dir_x = sin(yaw) * cos_p;
+        take dir_y = sin(pitch);
+        take dir_z = -cos(yaw) * cos_p;
+
+        // Camera Right Direction
+        take right_x = cos(yaw);
+        take right_z = sin(yaw);
+
+        // Movement with WASD
+        take move_speed = 8.0;
+        if (g3d_key_down(87) || g3d_key_down("W") || g3d_key_down("w")) {
+            cam_x += dir_x * move_speed * dt;
+            cam_z += dir_z * move_speed * dt;
+        }
+        if (g3d_key_down(83) || g3d_key_down("S") || g3d_key_down("s")) {
+            cam_x -= dir_x * move_speed * dt;
+            cam_z -= dir_z * move_speed * dt;
+        }
+        if (g3d_key_down(65) || g3d_key_down("A") || g3d_key_down("a")) {
+            cam_x -= right_x * move_speed * dt;
+            cam_z -= right_z * move_speed * dt;
+        }
+        if (g3d_key_down(68) || g3d_key_down("D") || g3d_key_down("d")) {
+            cam_x += right_x * move_speed * dt;
+            cam_z += right_z * move_speed * dt;
+        }
+
+        // Mouse View Rotation when LMB is held
+        take mx = g3d_mouse_x();
+        take my = g3d_mouse_y();
+        take mouse_down = g3d_mouse_btn(0);
+        if (mouse_down && prev_mouse_down) {
+            take dmx = mx - prev_mx;
+            take dmy = my - prev_my;
+            yaw += dmx * 0.005;
+            pitch -= dmy * 0.005;
+        }
+        prev_mx = mx;
+        prev_my = my;
+        prev_mouse_down = mouse_down;
+
+        // Keyboard Arrow Rotation
+        take rot_speed = 2.0;
+        if (g3d_key_down(37)) { yaw -= rot_speed * dt; }
+        if (g3d_key_down(39)) { yaw += rot_speed * dt; }
+        if (g3d_key_down(38)) { pitch += rot_speed * dt; }
+        if (g3d_key_down(40)) { pitch -= rot_speed * dt; }
+
+        if (pitch > 1.4) {
+            pitch = 1.4;
+        }
+        if (pitch < -1.4) {
+            pitch = -1.4;
+        }
+
+        // Space: Launch Heavy Sphere along Camera Direction
+        take space_down = g3d_key_down(32) || g3d_key_down("SPACE");
+        if (space_down && !prev_space_down) {
+            take sx = cam_x + dir_x * 1.5;
+            take sy = cam_y + dir_y * 1.5;
+            take sz = cam_z + dir_z * 1.5;
+            phys_set_pos(world, sphere_body, sx, sy, sz);
+            take launch_speed = 30.0;
+            phys_set_vel(world, sphere_body, dir_x * launch_speed, dir_y * launch_speed, dir_z * launch_speed);
+            take imp_pwr = 180.0;
+            phys_impulse(world, sphere_body, dir_x * imp_pwr, dir_y * imp_pwr, dir_z * imp_pwr);
+        }
+        prev_space_down = space_down;
+
+        // R: Reset all 9 cubes and sphere to starting positions
+        take r_down = g3d_key_down(82) || g3d_key_down("R") || g3d_key_down("r");
+        if (r_down && !prev_r_down) {
+            phys_set_pos(world, b0, -1.65, 0.5, 0.0);
+            phys_set_pos(world, b1, -0.55, 0.5, 0.0);
+            phys_set_pos(world, b2, 0.55, 0.5, 0.0);
+            phys_set_pos(world, b3, 1.65, 0.5, 0.0);
+            phys_set_pos(world, b4, -1.1, 1.55, 0.0);
+            phys_set_pos(world, b5, 0.0, 1.55, 0.0);
+            phys_set_pos(world, b6, 1.1, 1.55, 0.0);
+            phys_set_pos(world, b7, -0.55, 2.6, 0.0);
+            phys_set_pos(world, b8, 0.55, 2.6, 0.0);
+            phys_set_pos(world, sphere_body, 0.0, -10.0, 0.0);
+        }
+        prev_r_down = r_down;
+
+        // Step Physics Simulation
         phys_step(world, dt, 4);
 
-        // Clear screen with deep night color and reset Z-buffer
+        // Update Camera
+        take cam_pos = v3_create(cam_x, cam_y, cam_z);
+        take cam_target = v3_create(cam_x + dir_x * 5.0, cam_y + dir_y * 5.0, cam_z + dir_z * 5.0);
+        g3d_camera(cam_pos, cam_target, 60.0);
+
+        // Clear Screen with deep slate background
         g3d_clear(0x0f172a);
 
-        // Draw ground plane
+        // Draw Ground Plane
         take m_ground = m4_identity();
         g3d_transform(ground_mesh, m_ground);
         g3d_draw(ground_mesh);
 
-        // Update and draw box
-        take b_pos = phys_get_pos(box_body);
-        take m_box = m4_translate(b_pos.x, b_pos.y, b_pos.z);
-        g3d_transform(box_mesh, m_box);
-        g3d_draw(box_mesh);
+        // Draw Cubes
+        take p0 = phys_get_pos(b0);
+        g3d_transform(m0, m4_translate(p0.x, p0.y, p0.z));
+        g3d_draw(m0);
 
-        // Update and draw sphere
-        take s_pos = phys_get_pos(sphere_body);
-        take m_sphere = m4_translate(s_pos.x, s_pos.y, s_pos.z);
-        g3d_transform(sphere_mesh, m_sphere);
-        g3d_draw(sphere_mesh);
+        take p1 = phys_get_pos(b1);
+        g3d_transform(m1, m4_translate(p1.x, p1.y, p1.z));
+        g3d_draw(m1);
 
-        // Present frame
+        take p2 = phys_get_pos(b2);
+        g3d_transform(m2, m4_translate(p2.x, p2.y, p2.z));
+        g3d_draw(m2);
+
+        take p3 = phys_get_pos(b3);
+        g3d_transform(m3, m4_translate(p3.x, p3.y, p3.z));
+        g3d_draw(m3);
+
+        take p4 = phys_get_pos(b4);
+        g3d_transform(m4, m4_translate(p4.x, p4.y, p4.z));
+        g3d_draw(m4);
+
+        take p5 = phys_get_pos(b5);
+        g3d_transform(m5, m4_translate(p5.x, p5.y, p5.z));
+        g3d_draw(m5);
+
+        take p6 = phys_get_pos(b6);
+        g3d_transform(m6, m4_translate(p6.x, p6.y, p6.z));
+        g3d_draw(m6);
+
+        take p7 = phys_get_pos(b7);
+        g3d_transform(m7, m4_translate(p7.x, p7.y, p7.z));
+        g3d_draw(m7);
+
+        take p8 = phys_get_pos(b8);
+        g3d_transform(m8, m4_translate(p8.x, p8.y, p8.z));
+        g3d_draw(m8);
+
+        // Draw Sphere
+        take ps = phys_get_pos(sphere_body);
+        if (ps.y > -5.0) {
+            g3d_transform(sphere_mesh, m4_translate(ps.x, ps.y, ps.z));
+            g3d_draw(sphere_mesh);
+        }
+
+        // Present Frame to Screen
         g3d_present();
     }
 
-    gout << "3D Physics simulation completed successfully (" << frame_count << " frames)." << endl;
+    gout << "Demo finished successfully (" << frame_count << " frames)." << endl;
     return 0;
 }

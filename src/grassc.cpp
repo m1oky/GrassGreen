@@ -2028,6 +2028,23 @@ public:
                     else if (fn == "g3d_dt") {
                         push(GrassValue::Num((double)GrassGfx3D::dt()));
                     }
+                    else if (fn == "g3d_key_down" && argc >= 1) {
+                        if (args[0].is_str()) {
+                            push(GrassValue::Num(GrassGfx3D::key_down_str(args[0].toString()) ? 1.0 : 0.0));
+                        } else {
+                            push(GrassValue::Num(GrassGfx3D::key_down((int)args[0].toNumber()) ? 1.0 : 0.0));
+                        }
+                    }
+                    else if (fn == "g3d_mouse_x") {
+                        push(GrassValue::Num((double)GrassGfx3D::mouse_x()));
+                    }
+                    else if (fn == "g3d_mouse_y") {
+                        push(GrassValue::Num((double)GrassGfx3D::mouse_y()));
+                    }
+                    else if (fn == "g3d_mouse_btn") {
+                        int btn = (argc >= 1) ? (int)args[0].toNumber() : 0;
+                        push(GrassValue::Num(GrassGfx3D::mouse_btn(btn) ? 1.0 : 0.0));
+                    }
                     else if (fn == "g3d_camera") {
                         auto getV = [](const GrassValue& g) -> GrassVec3 {
                             if (g.is_array() && g.asArray() && g.asArray()->elements.size() >= 3)
@@ -2253,6 +2270,38 @@ public:
                         GrassVec3 r = GrassPhysics::get_rot(wid, bid);
                         GrassArray* arr = new GrassArray(); arr->elements = {GrassValue::Num(r.x), GrassValue::Num(r.y), GrassValue::Num(r.z)};
                         heap_arrays.push_back(arr); push(GrassValue::Array(arr));
+                    }
+                    else if (fn == "phys_set_pos" && argc >= 2) {
+                        auto getV = [](const GrassValue& g) -> GrassVec3 {
+                            if (g.is_array() && g.asArray() && g.asArray()->elements.size() >= 3)
+                                return GrassVec3((float)g.asArray()->elements[0].toNumber(), (float)g.asArray()->elements[1].toNumber(), (float)g.asArray()->elements[2].toNumber());
+                            return GrassVec3((float)g.toNumber(), 0, 0);
+                        };
+                        if (argc >= 5) {
+                            GrassPhysics::set_pos((uint32_t)args[0].toNumber(), (uint32_t)args[1].toNumber(), (float)args[2].toNumber(), (float)args[3].toNumber(), (float)args[4].toNumber());
+                        } else if (argc >= 4) {
+                            GrassPhysics::set_pos(1, (uint32_t)args[0].toNumber(), (float)args[1].toNumber(), (float)args[2].toNumber(), (float)args[3].toNumber());
+                        } else {
+                            GrassVec3 p = getV(args[1]);
+                            GrassPhysics::set_pos(1, (uint32_t)args[0].toNumber(), p.x, p.y, p.z);
+                        }
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "phys_set_vel" && argc >= 2) {
+                        auto getV = [](const GrassValue& g) -> GrassVec3 {
+                            if (g.is_array() && g.asArray() && g.asArray()->elements.size() >= 3)
+                                return GrassVec3((float)g.asArray()->elements[0].toNumber(), (float)g.asArray()->elements[1].toNumber(), (float)g.asArray()->elements[2].toNumber());
+                            return GrassVec3((float)g.toNumber(), 0, 0);
+                        };
+                        if (argc >= 5) {
+                            GrassPhysics::set_vel((uint32_t)args[0].toNumber(), (uint32_t)args[1].toNumber(), (float)args[2].toNumber(), (float)args[3].toNumber(), (float)args[4].toNumber());
+                        } else if (argc >= 4) {
+                            GrassPhysics::set_vel(1, (uint32_t)args[0].toNumber(), (float)args[1].toNumber(), (float)args[2].toNumber(), (float)args[3].toNumber());
+                        } else {
+                            GrassVec3 v = getV(args[1]);
+                            GrassPhysics::set_vel(1, (uint32_t)args[0].toNumber(), v.x, v.y, v.z);
+                        }
+                        push(GrassValue::Num(1.0));
                     }
 
                     // Файлы и ОС

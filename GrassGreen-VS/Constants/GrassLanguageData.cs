@@ -462,6 +462,10 @@ namespace GrassGreen.VisualStudio.Constants
             new BuiltinFunctionInfo("g3d_clear", "void g3d_clear(int color_hex)", "Очищает цветовой буфер и Z-буфер глубины.", "g3d_clear(0x000000);", "!gfx3d!"),
             new BuiltinFunctionInfo("g3d_present", "void g3d_present()", "Выводит отрисованный 3D кадр на экран.", "g3d_present();", "!gfx3d!"),
             new BuiltinFunctionInfo("g3d_dt", "float g3d_dt()", "Дельта времени кадра 3D симуляции.", "g3d_dt()", "!gfx3d!"),
+            new BuiltinFunctionInfo("g3d_key_down", "bool g3d_key_down(take key)", "Проверяет зажатие клавиши клавиатуры по ASCII/VK коду или имени (\"W\", \"SPACE\", 32).", "g3d_key_down(key)", "!gfx3d!"),
+            new BuiltinFunctionInfo("g3d_mouse_x", "int g3d_mouse_x()", "Координата X курсора мыши внутри окна 3D сцены.", "g3d_mouse_x()", "!gfx3d!"),
+            new BuiltinFunctionInfo("g3d_mouse_y", "int g3d_mouse_y()", "Координата Y курсора мыши внутри окна 3D сцены.", "g3d_mouse_y()", "!gfx3d!"),
+            new BuiltinFunctionInfo("g3d_mouse_btn", "bool g3d_mouse_btn(int btn = 0)", "Проверяет нажатие кнопки мыши (0=left, 1=right, 2=middle).", "g3d_mouse_btn(0)", "!gfx3d!"),
             new BuiltinFunctionInfo("g3d_camera", "void g3d_camera(take pos, take target, float fov)", "Задает параметры 3D камеры сцены.", "g3d_camera(pos, target, 60.0);", "!gfx3d!"),
             new BuiltinFunctionInfo("g3d_cube", "int g3d_cube(float size)", "Создает процедурный меш куба.", "g3d_cube(1.0);", "!gfx3d!"),
             new BuiltinFunctionInfo("g3d_sphere", "int g3d_sphere(float radius, int slices = 16, int stacks = 16)", "Создает процедурный меш сферы.", "g3d_sphere(1.0, 16, 16);", "!gfx3d!"),
@@ -486,7 +490,9 @@ namespace GrassGreen.VisualStudio.Constants
             new BuiltinFunctionInfo("phys_impulse", "void phys_impulse(take body, float ix, float iy, float iz)", "Прикладывает мгновенный линейный импульс к физическому телу.", "phys_impulse(body, ix, iy, iz);", "!physics!"),
             new BuiltinFunctionInfo("phys_raycast", "take phys_raycast(take world, take origin, take dir, float max_dist)", "Бросает луч в физическом мире для проверки коллизий.", "phys_raycast(world, origin, dir, 100.0);", "!physics!"),
             new BuiltinFunctionInfo("phys_get_pos", "take phys_get_pos(take body)", "Возвращает текущую трехмерную позицию тела (Vector3).", "phys_get_pos(body);", "!physics!"),
-            new BuiltinFunctionInfo("phys_get_rot", "take phys_get_rot(take body)", "Возвращает ориентацию тела в пространстве.", "phys_get_rot(body);", "!physics!")
+            new BuiltinFunctionInfo("phys_get_rot", "take phys_get_rot(take body)", "Возвращает ориентацию тела в пространстве.", "phys_get_rot(body);", "!physics!"),
+            new BuiltinFunctionInfo("phys_set_pos", "void phys_set_pos(take body, float x, float y, float z)", "Устанавливает новую позицию физического тела и сбрасывает скорость.", "phys_set_pos(body, x, y, z);", "!physics!"),
+            new BuiltinFunctionInfo("phys_set_vel", "void phys_set_vel(take body, float vx, float vy, float vz)", "Задает линейную скорость физическому телу.", "phys_set_vel(body, vx, vy, vz);", "!physics!")
         };
 
         private static Dictionary<string, BuiltinFunctionInfo> _builtinMap;

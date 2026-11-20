@@ -262,6 +262,105 @@ void set_camera(const GrassVec3& pos, const GrassVec3& target, float fov_deg) {
     g_cam_fov = fov_deg;
 }
 
+bool key_down(int vk) {
+#if defined(_WIN32)
+    if (vk >= 'a' && vk <= 'z') vk = toupper(vk);
+    if (vk > 0 && vk < 256) {
+        return (GetAsyncKeyState(vk) & 0x8000) != 0;
+    }
+#elif defined(__linux__)
+    return false;
+#else
+    return false;
+#endif
+    return false;
+}
+
+bool key_down_str(const string& key) {
+#if defined(_WIN32)
+    char* endp = nullptr;
+    long vk = strtol(key.c_str(), &endp, 10);
+    if (endp && *endp == '\0' && vk > 0 && vk < 256) {
+        return (GetAsyncKeyState((int)vk) & 0x8000) != 0;
+    }
+    if (key == "SPACE" || key == "space") return (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
+    if (key == "SHIFT" || key == "shift") return (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+    if (key == "ENTER" || key == "enter") return (GetAsyncKeyState(VK_RETURN) & 0x8000) != 0;
+    if (key == "ESCAPE" || key == "ESC" || key == "esc") return (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
+    if (key == "UP" || key == "up") return (GetAsyncKeyState(VK_UP) & 0x8000) != 0;
+    if (key == "DOWN" || key == "down") return (GetAsyncKeyState(VK_DOWN) & 0x8000) != 0;
+    if (key == "LEFT" || key == "left") return (GetAsyncKeyState(VK_LEFT) & 0x8000) != 0;
+    if (key == "RIGHT" || key == "right") return (GetAsyncKeyState(VK_RIGHT) & 0x8000) != 0;
+    if (key == "W" || key == "w") return (GetAsyncKeyState('W') & 0x8000) != 0;
+    if (key == "A" || key == "a") return (GetAsyncKeyState('A') & 0x8000) != 0;
+    if (key == "S" || key == "s") return (GetAsyncKeyState('S') & 0x8000) != 0;
+    if (key == "D" || key == "d") return (GetAsyncKeyState('D') & 0x8000) != 0;
+    if (key == "R" || key == "r") return (GetAsyncKeyState('R') & 0x8000) != 0;
+    if (key.size() == 1) {
+        char c = (char)toupper((unsigned char)key[0]);
+        return (GetAsyncKeyState(c) & 0x8000) != 0;
+    }
+#elif defined(__linux__)
+    return false;
+#else
+    return false;
+#endif
+    return false;
+}
+
+int mouse_x() {
+#if defined(_WIN32)
+    POINT p;
+    if (g_hwnd && GetCursorPos(&p)) {
+        ScreenToClient(g_hwnd, &p);
+        RECT cr;
+        GetClientRect(g_hwnd, &cr);
+        int cw = cr.right - cr.left;
+        if (cw > 0 && g_width > 0) {
+            return (int)((float)p.x * ((float)g_width / (float)cw));
+        }
+        return p.x;
+    }
+#elif defined(__linux__)
+    return 0;
+#else
+    return 0;
+#endif
+    return 0;
+}
+
+int mouse_y() {
+#if defined(_WIN32)
+    POINT p;
+    if (g_hwnd && GetCursorPos(&p)) {
+        ScreenToClient(g_hwnd, &p);
+        RECT cr;
+        GetClientRect(g_hwnd, &cr);
+        int ch = cr.bottom - cr.top;
+        if (ch > 0 && g_height > 0) {
+            return (int)((float)p.y * ((float)g_height / (float)ch));
+        }
+        return p.y;
+    }
+#elif defined(__linux__)
+    return 0;
+#else
+    return 0;
+#endif
+    return 0;
+}
+
+bool mouse_btn(int btn) {
+#if defined(_WIN32)
+    int vk = (btn == 0) ? VK_LBUTTON : ((btn == 1) ? VK_RBUTTON : VK_MBUTTON);
+    return (GetAsyncKeyState(vk) & 0x8000) != 0;
+#elif defined(__linux__)
+    return false;
+#else
+    return false;
+#endif
+}
+
 uint32_t create_cube(float size) {
     uint32_t id = g_next_mesh_id++;
     GfxMesh mesh;
@@ -484,9 +583,30 @@ void draw(uint32_t mesh_id) {
         float area = (sx1 - sx0) * (sy2 - sy0) - (sy1 - sy0) * (sx2 - sx0);
         if (std::fabs(area) < 0.0001f) continue;
 
-        // Shading
-        GrassVec3 norm = mesh.vertices[mesh.indices[i]].normal;
-        float diff = max(0.2f, GrassMath3D::dot(norm, g_dir_light.pos_or_dir) * g_dir_light.intensity_or_range);
+        // Shading with face normal calculation and ambient illumination
+        GrassVec3 p0 = mesh.vertices[mesh.indices[i]].pos;
+        GrassVec3 p1 = mesh.vertices[mesh.indices[i+1]].pos;
+        GrassVec3 p2 = mesh.vertices[mesh.indices[i+2]].pos;
+
+        GrassVec4 w0 = GrassMath3D::transform_vec4(model, GrassVec4(p0.x, p0.y, p0.z, 1.0f));
+        GrassVec4 w1 = GrassMath3D::transform_vec4(model, GrassVec4(p1.x, p1.y, p1.z, 1.0f));
+        GrassVec4 w2 = GrassMath3D::transform_vec4(model, GrassVec4(p2.x, p2.y, p2.z, 1.0f));
+
+        GrassVec3 e1(w1.x - w0.x, w1.y - w0.y, w1.z - w0.z);
+        GrassVec3 e2(w2.x - w0.x, w2.y - w0.y, w2.z - w0.z);
+        GrassVec3 face_norm = GrassMath3D::cross(e1, e2);
+        float norm_len = GrassMath3D::length(face_norm);
+        GrassVec3 norm = (norm_len > 0.0001f) ? GrassMath3D::mul_scalar(face_norm, 1.0f / norm_len) : mesh.vertices[mesh.indices[i]].normal;
+
+        // Ambient Light ~0.28 ensures shadow sides remain clear and readable
+        float ambient = 0.28f;
+        GrassVec3 light_dir = GrassMath3D::normalize(g_dir_light.pos_or_dir);
+        if (light_dir.y < 0.0f) light_dir = GrassMath3D::mul_scalar(light_dir, -1.0f);
+        float NdotL = GrassMath3D::dot(norm, light_dir);
+        if (NdotL < 0.0f) NdotL = 0.0f;
+        float diff = ambient + (1.0f - ambient) * (NdotL * g_dir_light.intensity_or_range);
+        if (diff > 1.0f) diff = 1.0f;
+
         uint8_t cr = (uint8_t)(min(255.0f, ((mesh.color >> 16) & 0xFF) * diff));
         uint8_t cg = (uint8_t)(min(255.0f, ((mesh.color >> 8) & 0xFF) * diff));
         uint8_t cb = (uint8_t)(min(255.0f, (mesh.color & 0xFF) * diff));

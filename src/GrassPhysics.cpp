@@ -327,4 +327,28 @@ GrassVec3 get_rot(uint32_t world_id, uint32_t body_id) {
     return b ? b->rot : GrassVec3();
 }
 
+void set_pos(uint32_t world_id, uint32_t body_id, float x, float y, float z) {
+    auto it = g_worlds.find(world_id);
+    if (it != g_worlds.end()) {
+        PhysBody* b = it->second.get_body(body_id);
+        if (b) {
+            b->pos = GrassVec3(x, y, z);
+            b->prev_pos = b->pos;
+            b->vel = GrassVec3(0, 0, 0);
+            b->rot = GrassVec3(0, 0, 0);
+        }
+    }
+}
+
+void set_vel(uint32_t world_id, uint32_t body_id, float vx, float vy, float vz) {
+    auto it = g_worlds.find(world_id);
+    if (it != g_worlds.end()) {
+        PhysBody* b = it->second.get_body(body_id);
+        if (b) {
+            b->vel = GrassVec3(vx, vy, vz);
+            b->prev_pos = GrassMath3D::sub(b->pos, GrassMath3D::mul_scalar(b->vel, 0.016f));
+        }
+    }
+}
+
 }
