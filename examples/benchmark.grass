@@ -5,13 +5,13 @@ int main() {
     start_time();
 
     take total = 0;
-    for (take i = 1; i <= 30000; i++) {
+    for (take i = 1; i <= 100000000; i++) {
         total = total + i;
     }
 
     stop_time();
 
-    gout << "Сумма от 1 до 30000: " << total << endl;
+    gout << "Сумма от 1 до 100000000: " << total << endl;
     gout << "Время работы: " << conclus_time() << endl;
     gout << "Дата запуска: " << get_date() << " " << get_time_str() << endl;
 

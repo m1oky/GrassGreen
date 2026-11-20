@@ -602,16 +602,16 @@ namespace grass::backend {
             if (frame.use_frame_pointer && (reg == Reg::RBP || reg == Reg::EBP)) {
                 continue;
             }
-            uint8_t r = static_cast<uint8_t>(reg);
+            uint8_t r = reg_raw_index(reg);
             if (is_64) {
-                if (r <= static_cast<uint8_t>(Reg::RDI)) {
+                if (r <= 7) {
                     out.emit_u8(0x50 + r);
-                } else if (r >= static_cast<uint8_t>(Reg::R8) && r <= static_cast<uint8_t>(Reg::R15)) {
+                } else if (r >= 8 && r <= 15) {
                     out.emit_u8(0x41);
-                    out.emit_u8(0x50 + (r - static_cast<uint8_t>(Reg::R8)));
+                    out.emit_u8(0x50 + (r - 8));
                 }
             } else {
-                if (r <= static_cast<uint8_t>(Reg::RDI)) {
+                if (r <= 7) {
                     out.emit_u8(0x50 + r);
                 }
             }
@@ -677,16 +677,16 @@ namespace grass::backend {
             if (frame.use_frame_pointer && (*it == Reg::RBP || *it == Reg::EBP)) {
                 continue;
             }
-            uint8_t r = static_cast<uint8_t>(*it);
+            uint8_t r = reg_raw_index(*it);
             if (is_64) {
-                if (r <= static_cast<uint8_t>(Reg::RDI)) {
+                if (r <= 7) {
                     out.emit_u8(0x58 + r);
-                } else if (r >= static_cast<uint8_t>(Reg::R8) && r <= static_cast<uint8_t>(Reg::R15)) {
+                } else if (r >= 8 && r <= 15) {
                     out.emit_u8(0x41);
-                    out.emit_u8(0x58 + (r - static_cast<uint8_t>(Reg::R8)));
+                    out.emit_u8(0x58 + (r - 8));
                 }
             } else {
-                if (r <= static_cast<uint8_t>(Reg::RDI)) {
+                if (r <= 7) {
                     out.emit_u8(0x58 + r);
                 }
             }

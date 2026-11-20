@@ -1,0 +1,10 @@
+int kernel_main() {
+    take a = 1;
+    take b = 1;
+    for (take i = 0; i < 10; i++) {
+        take c = a + b;
+        a = b;
+        b = c;
+    }
+    return b;
+}

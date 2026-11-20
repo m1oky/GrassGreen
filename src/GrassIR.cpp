@@ -2981,7 +2981,7 @@ namespace grass::ir {
         if (abi == TargetABI::Win64) {
             gpr_caller_saved = {PhysReg::RAX, PhysReg::RCX, PhysReg::RDX,
                                 PhysReg::R8,  PhysReg::R9,  PhysReg::R10, PhysReg::R11};
-            gpr_callee_saved = {PhysReg::RBX, PhysReg::RBP, PhysReg::RDI, PhysReg::RSI,
+            gpr_callee_saved = {PhysReg::RBX, PhysReg::RDI, PhysReg::RSI,
                                 PhysReg::R12, PhysReg::R13, PhysReg::R14, PhysReg::R15};
             xmm_caller_saved = {PhysReg::XMM0, PhysReg::XMM1, PhysReg::XMM2,
                                 PhysReg::XMM3, PhysReg::XMM4, PhysReg::XMM5};
@@ -2992,7 +2992,7 @@ namespace grass::ir {
             gpr_caller_saved = {PhysReg::RAX, PhysReg::RCX, PhysReg::RDX,
                                 PhysReg::RSI, PhysReg::RDI, PhysReg::R8,
                                 PhysReg::R9,  PhysReg::R10, PhysReg::R11};
-            gpr_callee_saved = {PhysReg::RBX, PhysReg::RBP, PhysReg::R12,
+            gpr_callee_saved = {PhysReg::RBX, PhysReg::R12,
                                 PhysReg::R13, PhysReg::R14, PhysReg::R15};
             xmm_caller_saved = {PhysReg::XMM0, PhysReg::XMM1, PhysReg::XMM2, PhysReg::XMM3,
                                 PhysReg::XMM4, PhysReg::XMM5, PhysReg::XMM6, PhysReg::XMM7,
@@ -3001,7 +3001,7 @@ namespace grass::ir {
         } else {
             // Cdecl32
             gpr_caller_saved = {PhysReg::RAX, PhysReg::RCX, PhysReg::RDX};
-            gpr_callee_saved = {PhysReg::RBX, PhysReg::RBP, PhysReg::RSI, PhysReg::RDI};
+            gpr_callee_saved = {PhysReg::RBX, PhysReg::RSI, PhysReg::RDI};
             xmm_caller_saved = {PhysReg::XMM0, PhysReg::XMM1, PhysReg::XMM2, PhysReg::XMM3,
                                 PhysReg::XMM4, PhysReg::XMM5, PhysReg::XMM6, PhysReg::XMM7};
         }

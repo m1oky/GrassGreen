@@ -52,6 +52,7 @@
 #include "GrassThread.h"
 #include "GrassMMIO.h"
 #include "GrassAudio.h"
+#include "GrassNativeCodegen.h"
 
 using namespace std;
 namespace fs = std::filesystem;
@@ -3737,6 +3738,15 @@ struct CompilerOptions {
     bool show_version = false;       // -V, --version
     bool show_help = false;          // -h, --help
     bool install = false;            // --install, install, -i
+    bool native_mode = false;        // --native
+    bool emit_ir = false;            // --emit-ir
+    bool emit_obj = false;           // --emit-obj
+    string emit_obj_path = "";
+    bool emit_bin = false;           // --emit-bin
+    string emit_bin_path = "";
+    string arch_str = "x64";         // --arch x64|x32
+    string abi_str = "win64";        // --abi win64|sysv64|cdecl32|baremetal64|baremetal32
+    uint64_t base_addr = 0x100000;   // --base-addr
 };
 
 void PrintVersion(bool lang_ru) {
@@ -3775,6 +3785,14 @@ void PrintHelp(bool lang_ru) {
              << "  --dump-ast       Распечатать дерево токенов (AST) и C-ABI структуры\n"
              << "  -S               Распечатать читаемый дизассемблер байт-кода\n"
              << "  --time           Замерить время каждого этапа компиляции (мс)\n\n"
+             << "Нативная кодогенерация и контейнеры (G&G Native Backend):\n"
+             << "  --native         Скомпилировать напрямую в нативный исполняемый .exe (без VM)\n"
+             << "  --emit-ir        Вывести текстовый дамп SSA GrassIR до и после оптимизаций\n"
+             << "  --emit-obj <путь> Сохранить объектный файл COFF (.obj) или ELF (.o)\n"
+             << "  --emit-bin <путь> Сохранить плоский бинарный образ ядра (.bin)\n"
+             << "  --arch <x64|x32> Целевая архитектура (по умолчанию: x64)\n"
+             << "  --abi <win64|sysv64|cdecl32|baremetal64|baremetal32> Соглашение о вызовах\n"
+             << "  --base-addr <hex> Базовый адрес загрузки ядра (по умолчанию: 0x100000)\n\n"
              << "Локализация и справка:\n"
              << "  --ru             Выводить сообщения компилятора на русском\n"
              << "  --en             Выводить сообщения компилятора на английском (по умолчанию)\n"
@@ -3804,6 +3822,14 @@ void PrintHelp(bool lang_ru) {
              << "  --dump-ast       Dump syntax tree (AST) and C-ABI struct layouts\n"
              << "  -S               Print disassembled human-readable bytecode\n"
              << "  --time           Display execution time for each compilation stage (ms)\n\n"
+             << "Native Backend & Containers (G&G Native Backend):\n"
+             << "  --native         Compile directly to native standalone .exe without bytecode VM\n"
+             << "  --emit-ir        Dump text SSA GrassIR before and after optimizations\n"
+             << "  --emit-obj <path> Save object file COFF (.obj) or ELF (.o)\n"
+             << "  --emit-bin <path> Save bare-metal flat binary kernel (.bin)\n"
+             << "  --arch <x64|x32> Target architecture (default: x64)\n"
+             << "  --abi <win64|sysv64|cdecl32|baremetal64|baremetal32> Calling convention\n"
+             << "  --base-addr <hex> Kernel base load address (default: 0x100000)\n\n"
              << "Localization & Info:\n"
              << "  --ru             Switch compiler messages to Russian\n"
              << "  --en             Switch compiler messages to English (default)\n"
@@ -4090,6 +4116,79 @@ bool ProcessCompilation(CompilerOptions& opt) {
     auto t_lex_end = chrono::high_resolution_clock::now();
     double lex_ms = chrono::duration<double, std::milli>(t_lex_end - t_lex_start).count();
 
+    // 2.2. Нативный бэкенд (Native Backend: GrassIR + GrassX86Encoder + GrassObjWriter)
+    if (opt.native_mode || opt.emit_ir || opt.emit_obj || opt.emit_bin) {
+        auto t_native_start = chrono::high_resolution_clock::now();
+        grass::codegen::NativeCodegenOptions nopt;
+        nopt.arch = grass::codegen::NativeCompiler::parse_arch(opt.arch_str);
+        nopt.abi = grass::codegen::NativeCompiler::parse_abi(opt.abi_str);
+        nopt.opt_level = opt.opt_level;
+        nopt.base_address = opt.base_addr;
+        nopt.emit_ir = opt.emit_ir;
+        nopt.emit_obj_path = opt.emit_obj_path;
+        nopt.emit_bin_path = opt.emit_bin_path;
+        nopt.lang_ru = opt.lang_ru;
+        nopt.run_after_build = opt.run_after_build;
+
+        string base_name = input_path;
+        size_t last_dot = base_name.rfind('.');
+        if (last_dot != string::npos) base_name = base_name.substr(0, last_dot);
+
+        if (opt.native_mode) {
+            nopt.output_exe_path = opt.output_file.empty() ? (base_name + ".exe") : opt.output_file;
+        }
+
+        grass::codegen::NativeCompiler native_compiler(nopt);
+        auto nres = native_compiler.compile(tokens, input_path);
+
+        if (!nres.success) {
+            if (opt.lang_ru) cerr << "[GrassNativeCompiler]: Ошибка сборки: " << nres.error_message << "\n";
+            else cerr << "[GrassNativeCompiler]: Build error: " << nres.error_message << "\n";
+            return false;
+        }
+
+        if (opt.emit_ir) {
+            if (opt.lang_ru) {
+                cout << "\n=== ДАМП GRASS-IR (ДО ОПТИМИЗАЦИЙ) ===\n" << nres.ir_dump_initial << "\n";
+                cout << "=== ДАМП GRASS-IR (ПОСЛЕ ОПТИМИЗАЦИЙ) ===\n" << nres.ir_dump_optimized << "\n";
+            } else {
+                cout << "\n=== GRASS-IR DUMP (BEFORE OPTIMIZATIONS) ===\n" << nres.ir_dump_initial << "\n";
+                cout << "=== GRASS-IR DUMP (AFTER OPTIMIZATIONS) ===\n" << nres.ir_dump_optimized << "\n";
+            }
+        }
+
+        if (!nres.obj_file_created.empty() && (opt.emit_obj || opt.native_mode)) {
+            if (opt.lang_ru) cout << "[GrassNativeCompiler]: Сгенерирован объектный файл -> " << nres.obj_file_created << "\n";
+            else cout << "[GrassNativeCompiler]: Object file generated -> " << nres.obj_file_created << "\n";
+        }
+
+        if (!nres.bin_file_created.empty()) {
+            if (opt.lang_ru) cout << "[GrassNativeCompiler]: Сгенерирован bare-metal бинарник -> " << nres.bin_file_created
+                                  << " (базовый адрес: 0x" << hex << opt.base_addr << dec << ")\n";
+            else cout << "[GrassNativeCompiler]: Bare-metal binary generated -> " << nres.bin_file_created
+                      << " (base address: 0x" << hex << opt.base_addr << dec << ")\n";
+        }
+
+        if (!nres.exe_file_created.empty()) {
+            if (opt.lang_ru) cout << "[GrassNativeCompiler]: Успешно слинкован исполняемый файл -> " << nres.exe_file_created << "\n";
+            else cout << "[GrassNativeCompiler]: Executable linked successfully -> " << nres.exe_file_created << "\n";
+        }
+
+        auto t_native_end = chrono::high_resolution_clock::now();
+        double native_ms = chrono::duration<double, std::milli>(t_native_end - t_native_start).count();
+        if (opt.print_timing) {
+            cout << "[NativeCodegen]: Total native pipeline time: " << native_ms << " ms\n";
+        }
+
+        if (opt.run_after_build && !nres.exe_file_created.empty()) {
+            if (opt.lang_ru) cout << "[GrassNative]: Запуск нативного исполняемого файла...\n\n";
+            else cout << "[GrassNative]: Executing native binary...\n\n";
+            int run_code = std::system(nres.exe_file_created.c_str());
+            return (run_code == 0);
+        }
+        return true;
+    }
+
     // 3. Этап Парсера и Компилятора байт-кода
     auto t_comp_start = chrono::high_resolution_clock::now();
     BytecodeCompiler compiler(tokens, input_path);
@@ -4361,6 +4460,35 @@ int main(int argc, char* argv[]) {
                 } else {
                     cerr << (opt.lang_ru ? "[GrassError]: Пропущен аргумент для -o\n" : "[GrassError]: Missing argument for -o\n");
                     return 1;
+                }
+            } else if (arg == "--native") {
+                opt.native_mode = true;
+                opt.emit_bytecode_only = false;
+            } else if (arg == "--emit-ir") {
+                opt.emit_ir = true;
+            } else if (arg == "--emit-obj") {
+                opt.emit_obj = true;
+                if (i + 1 < argc) {
+                    opt.emit_obj_path = argv[++i];
+                }
+            } else if (arg == "--emit-bin") {
+                opt.emit_bin = true;
+                if (i + 1 < argc) {
+                    opt.emit_bin_path = argv[++i];
+                }
+            } else if (arg == "--arch") {
+                if (i + 1 < argc) {
+                    opt.arch_str = argv[++i];
+                }
+            } else if (arg == "--abi") {
+                if (i + 1 < argc) {
+                    opt.abi_str = argv[++i];
+                }
+            } else if (arg == "--base-addr") {
+                if (i + 1 < argc) {
+                    try {
+                        opt.base_addr = std::stoull(argv[++i], nullptr, 0);
+                    } catch (...) {}
                 }
             } else if (!arg.empty() && arg[0] == '-') {
                 cerr << (opt.lang_ru ? "[GrassError]: Неизвестный флаг: " : "[GrassError]: Unknown flag: ") << arg << "\n";

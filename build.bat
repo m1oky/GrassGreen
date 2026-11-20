@@ -38,6 +38,10 @@ g++ -std=c++20 -O3 -s -static -static-libgcc -static-libstdc++ ^
   src/GrassMath3D.cpp ^
   src/GrassGfx3D.cpp ^
   src/GrassPhysics.cpp ^
+  src/GrassIR.cpp ^
+  src/GrassX86Encoder.cpp ^
+  src/GrassObjWriter.cpp ^
+  src/GrassNativeCodegen.cpp ^
   -o bin/grassc.exe ^
   -lgdiplus -lgdi32 -lcomctl32 -lwinmm -lws2_32 -lwininet -lurlmon -lpsapi -liphlpapi -ldxgi -lpdh
 
