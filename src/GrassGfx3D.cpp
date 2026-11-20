@@ -361,18 +361,20 @@ bool mouse_btn(int btn) {
 #endif
 }
 
-uint32_t create_cube(float size) {
+uint32_t create_box(float sx, float sy, float sz) {
     uint32_t id = g_next_mesh_id++;
     GfxMesh mesh;
     mesh.id = id;
     mesh.scale = GrassVec3(1, 1, 1);
     mesh.color = 0x22c55e;
-    float h = size * 0.5f;
+    float hx = sx * 0.5f;
+    float hy = sy * 0.5f;
+    float hz = sz * 0.5f;
 
-    // 8 cube vertices
+    // 8 box vertices
     GrassVec3 p[8] = {
-        {-h, -h, -h}, { h, -h, -h}, { h,  h, -h}, {-h,  h, -h},
-        {-h, -h,  h}, { h, -h,  h}, { h,  h,  h}, {-h,  h,  h}
+        {-hx, -hy, -hz}, { hx, -hy, -hz}, { hx,  hy, -hz}, {-hx,  hy, -hz},
+        {-hx, -hy,  hz}, { hx, -hy,  hz}, { hx,  hy,  hz}, {-hx,  hy,  hz}
     };
     uint32_t ind[36] = {
         0,1,2, 0,2,3, 4,6,5, 4,7,6,
@@ -390,6 +392,10 @@ uint32_t create_cube(float size) {
     }
     g_meshes[id] = mesh;
     return id;
+}
+
+uint32_t create_cube(float size) {
+    return create_box(size, size, size);
 }
 
 uint32_t create_sphere(float radius, int segments) {

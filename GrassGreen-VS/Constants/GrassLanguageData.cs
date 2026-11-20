@@ -468,6 +468,7 @@ namespace GrassGreen.VisualStudio.Constants
             new BuiltinFunctionInfo("g3d_mouse_btn", "bool g3d_mouse_btn(int btn = 0)", "Проверяет нажатие кнопки мыши (0=left, 1=right, 2=middle).", "g3d_mouse_btn(0)", "!gfx3d!"),
             new BuiltinFunctionInfo("g3d_camera", "void g3d_camera(take pos, take target, float fov)", "Задает параметры 3D камеры сцены.", "g3d_camera(pos, target, 60.0);", "!gfx3d!"),
             new BuiltinFunctionInfo("g3d_cube", "int g3d_cube(float size)", "Создает процедурный меш куба.", "g3d_cube(1.0);", "!gfx3d!"),
+            new BuiltinFunctionInfo("g3d_box", "int g3d_box(float sx, float sy, float sz)", "Создает процедурный меш параллелепипеда (box) заданных размеров.", "g3d_box(1.0, 1.0, 1.0);", "!gfx3d!"),
             new BuiltinFunctionInfo("g3d_sphere", "int g3d_sphere(float radius, int slices = 16, int stacks = 16)", "Создает процедурный меш сферы.", "g3d_sphere(1.0, 16, 16);", "!gfx3d!"),
             new BuiltinFunctionInfo("g3d_plane", "int g3d_plane(float size_x, float size_z)", "Создает процедурный меш плоскости.", "g3d_plane(10.0, 10.0);", "!gfx3d!"),
             new BuiltinFunctionInfo("g3d_load_obj", "int g3d_load_obj(string path)", "Загружает 3D меш из файла формата Wavefront OBJ.", "g3d_load_obj(\"model.obj\");", "!gfx3d!"),

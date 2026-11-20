@@ -2061,6 +2061,9 @@ public:
                     else if (fn == "g3d_cube" && argc >= 1) {
                         push(GrassValue::Num((double)GrassGfx3D::create_cube((float)args[0].toNumber())));
                     }
+                    else if (fn == "g3d_box" && argc >= 3) {
+                        push(GrassValue::Num((double)GrassGfx3D::create_box((float)args[0].toNumber(), (float)args[1].toNumber(), (float)args[2].toNumber())));
+                    }
                     else if (fn == "g3d_sphere" && argc >= 1) {
                         int segs = (argc >= 2) ? (int)args[1].toNumber() : 16;
                         push(GrassValue::Num((double)GrassGfx3D::create_sphere((float)args[0].toNumber(), segs)));
@@ -2163,7 +2166,8 @@ public:
                         push(GrassValue::Num((double)GrassPhysics::create_world(g_y)));
                     }
                     else if (fn == "phys_step" && argc >= 2) {
-                        int substeps = (argc >= 3) ? (int)args[2].toNumber() : 4;
+                        int substeps = (argc >= 3) ? (int)args[2].toNumber() : 8;
+                        if (substeps < 8) substeps = 8;
                         GrassPhysics::step_world((uint32_t)args[0].toNumber(), (float)args[1].toNumber(), substeps);
                         push(GrassValue::Num(1.0));
                     }
@@ -2180,15 +2184,43 @@ public:
                             float sx = (float)args[4].toNumber();
                             float sy = (float)args[5].toNumber();
                             float sz = (float)args[6].toNumber();
-                            string mat = (argc >= 8 && args[7].is_str()) ? args[7].toString() : "wood";
-                            float brk = (argc >= 9) ? (float)args[8].toNumber() : 0.0f;
-                            push(GrassValue::Num((double)GrassPhysics::add_box((uint32_t)args[0].toNumber(), px, py, pz, sx, sy, sz, mat, brk)));
+                            float mass = 1.0f;
+                            string mat = "wood";
+                            float brk = 0.0f;
+                            if (argc >= 8) {
+                                if (args[7].is_str()) {
+                                    mat = args[7].toString();
+                                    if (argc >= 9) brk = (float)args[8].toNumber();
+                                } else {
+                                    mass = (float)args[7].toNumber();
+                                    if (argc >= 9) {
+                                        if (args[8].is_str()) mat = args[8].toString();
+                                        else brk = (float)args[8].toNumber();
+                                    }
+                                    if (argc >= 10) brk = (float)args[9].toNumber();
+                                }
+                            }
+                            push(GrassValue::Num((double)GrassPhysics::add_box((uint32_t)args[0].toNumber(), px, py, pz, sx, sy, sz, mass, mat, brk)));
                         } else {
-                            string mat = (argc >= 4) ? args[3].toString() : "wood";
-                            float brk = (argc >= 5) ? (float)args[4].toNumber() : 0.0f;
                             GrassVec3 p = getV(args[1]);
                             GrassVec3 s = getV(args[2]);
-                            push(GrassValue::Num((double)GrassPhysics::add_box((uint32_t)args[0].toNumber(), p.x, p.y, p.z, s.x, s.y, s.z, mat, brk)));
+                            float mass = 1.0f;
+                            string mat = "wood";
+                            float brk = 0.0f;
+                            if (argc >= 4) {
+                                if (args[3].is_str()) {
+                                    mat = args[3].toString();
+                                    if (argc >= 5) brk = (float)args[4].toNumber();
+                                } else {
+                                    mass = (float)args[3].toNumber();
+                                    if (argc >= 5) {
+                                        if (args[4].is_str()) mat = args[4].toString();
+                                        else brk = (float)args[5].toNumber();
+                                    }
+                                    if (argc >= 6) brk = (float)args[5].toNumber();
+                                }
+                            }
+                            push(GrassValue::Num((double)GrassPhysics::add_box((uint32_t)args[0].toNumber(), p.x, p.y, p.z, s.x, s.y, s.z, mass, mat, brk)));
                         }
                     }
                     else if (fn == "phys_sphere" && argc >= 3) {
@@ -2202,13 +2234,25 @@ public:
                             float py = (float)args[2].toNumber();
                             float pz = (float)args[3].toNumber();
                             float r = (float)args[4].toNumber();
-                            string mat = (argc >= 6 && args[5].is_str()) ? args[5].toString() : "steel";
-                            push(GrassValue::Num((double)GrassPhysics::add_sphere((uint32_t)args[0].toNumber(), px, py, pz, r, mat)));
+                            float mass = 1.0f;
+                            string mat = "steel";
+                            if (argc >= 6) {
+                                if (args[5].is_str()) mat = args[5].toString();
+                                else mass = (float)args[5].toNumber();
+                            }
+                            if (argc >= 7 && args[6].is_str()) mat = args[6].toString();
+                            push(GrassValue::Num((double)GrassPhysics::add_sphere((uint32_t)args[0].toNumber(), px, py, pz, r, mass, mat)));
                         } else {
                             GrassVec3 p = getV(args[1]);
                             float r = (float)args[2].toNumber();
-                            string mat = (argc >= 4) ? args[3].toString() : "steel";
-                            push(GrassValue::Num((double)GrassPhysics::add_sphere((uint32_t)args[0].toNumber(), p.x, p.y, p.z, r, mat)));
+                            float mass = 1.0f;
+                            string mat = "steel";
+                            if (argc >= 4) {
+                                if (args[3].is_str()) mat = args[3].toString();
+                                else mass = (float)args[3].toNumber();
+                            }
+                            if (argc >= 5 && args[4].is_str()) mat = args[4].toString();
+                            push(GrassValue::Num((double)GrassPhysics::add_sphere((uint32_t)args[0].toNumber(), p.x, p.y, p.z, r, mass, mat)));
                         }
                     }
                     else if (fn == "phys_cloth" && argc >= 4) {

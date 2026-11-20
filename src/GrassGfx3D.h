@@ -41,6 +41,7 @@ namespace GrassGfx3D {
     float dt();
     void set_camera(const GrassVec3& pos, const GrassVec3& target, float fov_deg);
 
+    uint32_t create_box(float sx, float sy, float sz);
     uint32_t create_cube(float size);
     uint32_t create_sphere(float radius, int segments);
     uint32_t create_plane(float w, float d, int segments = 10);

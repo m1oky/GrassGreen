@@ -37,41 +37,41 @@ int main() {
 
     // Dynamic Cubes Pyramid (9 cubes: 4 in base, 3 in middle, 2 on top)
     // Layer 1 (bottom: 4 cubes at y = 0.5)
-    take b0 = phys_box(world, -1.65, 0.5, 0.0, 1.0, 1.0, 1.0, 1.5);
+    take b0 = phys_box(world, -1.53, 0.5, 0.0, 1.0, 1.0, 1.0, 1.5);
     take m0 = g3d_cube(1.0);
     g3d_set_color(m0, 0xef4444);
 
-    take b1 = phys_box(world, -0.55, 0.5, 0.0, 1.0, 1.0, 1.0, 1.5);
+    take b1 = phys_box(world, -0.51, 0.5, 0.0, 1.0, 1.0, 1.0, 1.5);
     take m1 = g3d_cube(1.0);
     g3d_set_color(m1, 0xf97316);
 
-    take b2 = phys_box(world, 0.55, 0.5, 0.0, 1.0, 1.0, 1.0, 1.5);
+    take b2 = phys_box(world, 0.51, 0.5, 0.0, 1.0, 1.0, 1.0, 1.5);
     take m2 = g3d_cube(1.0);
     g3d_set_color(m2, 0xeab308);
 
-    take b3 = phys_box(world, 1.65, 0.5, 0.0, 1.0, 1.0, 1.0, 1.5);
+    take b3 = phys_box(world, 1.53, 0.5, 0.0, 1.0, 1.0, 1.0, 1.5);
     take m3 = g3d_cube(1.0);
     g3d_set_color(m3, 0x10b981);
 
-    // Layer 2 (middle: 3 cubes at y = 1.55)
-    take b4 = phys_box(world, -1.1, 1.55, 0.0, 1.0, 1.0, 1.0, 1.5);
+    // Layer 2 (middle: 3 cubes at y = 1.505)
+    take b4 = phys_box(world, -1.02, 1.505, 0.0, 1.0, 1.0, 1.0, 1.5);
     take m4 = g3d_cube(1.0);
     g3d_set_color(m4, 0x06b6d4);
 
-    take b5 = phys_box(world, 0.0, 1.55, 0.0, 1.0, 1.0, 1.0, 1.5);
+    take b5 = phys_box(world, 0.0, 1.505, 0.0, 1.0, 1.0, 1.0, 1.5);
     take m5 = g3d_cube(1.0);
     g3d_set_color(m5, 0x3b82f6);
 
-    take b6 = phys_box(world, 1.1, 1.55, 0.0, 1.0, 1.0, 1.0, 1.5);
+    take b6 = phys_box(world, 1.02, 1.505, 0.0, 1.0, 1.0, 1.0, 1.5);
     take m6 = g3d_cube(1.0);
     g3d_set_color(m6, 0x8b5cf6);
 
-    // Layer 3 (top: 2 cubes at y = 2.6)
-    take b7 = phys_box(world, -0.55, 2.6, 0.0, 1.0, 1.0, 1.0, 1.5);
+    // Layer 3 (top: 2 cubes at y = 2.51)
+    take b7 = phys_box(world, -0.51, 2.51, 0.0, 1.0, 1.0, 1.0, 1.5);
     take m7 = g3d_cube(1.0);
     g3d_set_color(m7, 0xec4899);
 
-    take b8 = phys_box(world, 0.55, 2.6, 0.0, 1.0, 1.0, 1.0, 1.5);
+    take b8 = phys_box(world, 0.51, 2.51, 0.0, 1.0, 1.0, 1.0, 1.5);
     take m8 = g3d_cube(1.0);
     g3d_set_color(m8, 0x84cc16);
 
@@ -169,21 +169,21 @@ int main() {
         // R: Reset all 9 cubes and sphere to starting positions
         take r_down = g3d_key_down(82) || g3d_key_down("R") || g3d_key_down("r");
         if (r_down && !prev_r_down) {
-            phys_set_pos(world, b0, -1.65, 0.5, 0.0);
-            phys_set_pos(world, b1, -0.55, 0.5, 0.0);
-            phys_set_pos(world, b2, 0.55, 0.5, 0.0);
-            phys_set_pos(world, b3, 1.65, 0.5, 0.0);
-            phys_set_pos(world, b4, -1.1, 1.55, 0.0);
-            phys_set_pos(world, b5, 0.0, 1.55, 0.0);
-            phys_set_pos(world, b6, 1.1, 1.55, 0.0);
-            phys_set_pos(world, b7, -0.55, 2.6, 0.0);
-            phys_set_pos(world, b8, 0.55, 2.6, 0.0);
+            phys_set_pos(world, b0, -1.53, 0.5, 0.0);
+            phys_set_pos(world, b1, -0.51, 0.5, 0.0);
+            phys_set_pos(world, b2, 0.51, 0.5, 0.0);
+            phys_set_pos(world, b3, 1.53, 0.5, 0.0);
+            phys_set_pos(world, b4, -1.02, 1.505, 0.0);
+            phys_set_pos(world, b5, 0.0, 1.505, 0.0);
+            phys_set_pos(world, b6, 1.02, 1.505, 0.0);
+            phys_set_pos(world, b7, -0.51, 2.51, 0.0);
+            phys_set_pos(world, b8, 0.51, 2.51, 0.0);
             phys_set_pos(world, sphere_body, 0.0, -10.0, 0.0);
         }
         prev_r_down = r_down;
 
         // Step Physics Simulation
-        phys_step(world, dt, 4);
+        phys_step(world, dt, 8);
 
         // Update Camera
         take cam_pos = v3_create(cam_x, cam_y, cam_z);

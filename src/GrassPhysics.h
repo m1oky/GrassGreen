@@ -60,8 +60,8 @@ public:
     uint32_t next_id;
 
     PhysWorld(float grav_y = -9.81f);
-    uint32_t add_box(const GrassVec3& pos, const GrassVec3& size, const std::string& mat, float break_f);
-    uint32_t add_sphere(const GrassVec3& pos, float r, const std::string& mat);
+    uint32_t add_box(const GrassVec3& pos, const GrassVec3& size, float mass = 1.0f, const std::string& mat = "wood", float break_f = 0.0f);
+    uint32_t add_sphere(const GrassVec3& pos, float r, float mass = 1.0f, const std::string& mat = "steel");
     uint32_t add_cloth(const GrassVec3& pos, float w, float h, int segments);
     void add_link(uint32_t a, uint32_t b, float stiffness, float break_f);
     void step(float dt, int substeps);
@@ -73,8 +73,8 @@ public:
 namespace GrassPhysics {
     uint32_t create_world(float gravity_y);
     void step_world(uint32_t world_id, float dt, int substeps);
-    uint32_t add_box(uint32_t world_id, float x, float y, float z, float sx, float sy, float sz, const std::string& mat, float break_f);
-    uint32_t add_sphere(uint32_t world_id, float x, float y, float z, float r, const std::string& mat);
+    uint32_t add_box(uint32_t world_id, float x, float y, float z, float sx, float sy, float sz, float mass = 1.0f, const std::string& mat = "wood", float break_f = 0.0f);
+    uint32_t add_sphere(uint32_t world_id, float x, float y, float z, float r, float mass = 1.0f, const std::string& mat = "steel");
     uint32_t add_cloth(uint32_t world_id, float x, float y, float z, float w, float h, int segments);
     void add_link(uint32_t world_id, uint32_t a, uint32_t b, float stiffness, float break_f);
     void apply_impulse(uint32_t world_id, uint32_t body_id, float fx, float fy, float fz);
