@@ -65,10 +65,6 @@ int main() {
 
         // Present frame
         g3d_present();
-
-        if (frame_count > 600) {
-            break;
-        }
     }
 
     gout << "3D Physics simulation completed successfully (" << frame_count << " frames)." << endl;

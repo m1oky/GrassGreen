@@ -1811,7 +1811,13 @@ public:
                                 return GrassVec3((float)g.asArray()->elements[0].toNumber(), (float)g.asArray()->elements[1].toNumber(), (float)g.asArray()->elements[2].toNumber());
                             return GrassVec3((float)g.toNumber(), 0, 0);
                         };
-                        GrassMat4 m = GrassMath3D::translate(getV(args[0]));
+                        GrassVec3 v;
+                        if (argc >= 3) {
+                            v = GrassVec3((float)args[0].toNumber(), (float)args[1].toNumber(), (float)args[2].toNumber());
+                        } else {
+                            v = getV(args[0]);
+                        }
+                        GrassMat4 m = GrassMath3D::translate(v);
                         GrassArray* arr = new GrassArray(); arr->elements.resize(16);
                         for (int i = 0; i < 16; i++) arr->elements[i] = GrassValue::Num(m.m[i]);
                         heap_arrays.push_back(arr); push(GrassValue::Array(arr));
@@ -1822,7 +1828,13 @@ public:
                                 return GrassVec3((float)g.asArray()->elements[0].toNumber(), (float)g.asArray()->elements[1].toNumber(), (float)g.asArray()->elements[2].toNumber());
                             return GrassVec3((float)g.toNumber(), 0, 0);
                         };
-                        GrassMat4 m = GrassMath3D::rotate((float)args[0].toNumber(), getV(args[1]));
+                        GrassVec3 axis;
+                        if (argc >= 4) {
+                            axis = GrassVec3((float)args[1].toNumber(), (float)args[2].toNumber(), (float)args[3].toNumber());
+                        } else {
+                            axis = getV(args[1]);
+                        }
+                        GrassMat4 m = GrassMath3D::rotate((float)args[0].toNumber(), axis);
                         GrassArray* arr = new GrassArray(); arr->elements.resize(16);
                         for (int i = 0; i < 16; i++) arr->elements[i] = GrassValue::Num(m.m[i]);
                         heap_arrays.push_back(arr); push(GrassValue::Array(arr));
@@ -1833,7 +1845,13 @@ public:
                                 return GrassVec3((float)g.asArray()->elements[0].toNumber(), (float)g.asArray()->elements[1].toNumber(), (float)g.asArray()->elements[2].toNumber());
                             return GrassVec3((float)g.toNumber(), 0, 0);
                         };
-                        GrassMat4 m = GrassMath3D::scale(getV(args[0]));
+                        GrassVec3 v;
+                        if (argc >= 3) {
+                            v = GrassVec3((float)args[0].toNumber(), (float)args[1].toNumber(), (float)args[2].toNumber());
+                        } else {
+                            v = getV(args[0]);
+                        }
+                        GrassMat4 m = GrassMath3D::scale(v);
                         GrassArray* arr = new GrassArray(); arr->elements.resize(16);
                         for (int i = 0; i < 16; i++) arr->elements[i] = GrassValue::Num(m.m[i]);
                         heap_arrays.push_back(arr); push(GrassValue::Array(arr));
@@ -1870,14 +1888,40 @@ public:
                     }
 
                     // ===== !2DGraphics! (g2d_) =====
-                    else if (fn == "g2d_window" && argc >= 3) {
-                        push(GrassValue::Num(Grass2D::init_window((int)args[0].toNumber(), (int)args[1].toNumber(), args[2].toString()) ? 1.0 : 0.0));
+                    else if (fn == "g2d_window" && argc >= 1) {
+                        string title = "GrassGreen 2D Window";
+                        int w = 800, h = 600;
+                        if (argc >= 3) {
+                            if (args[0].is_str()) {
+                                title = args[0].toString();
+                                w = (int)args[1].toNumber();
+                                h = (int)args[2].toNumber();
+                            } else {
+                                w = (int)args[0].toNumber();
+                                h = (int)args[1].toNumber();
+                                title = args[2].toString();
+                            }
+                        } else if (argc == 2) {
+                            w = (int)args[0].toNumber();
+                            h = (int)args[1].toNumber();
+                        } else if (argc == 1) {
+                            title = args[0].toString();
+                        }
+                        push(GrassValue::Num(Grass2D::init_window(w, h, title) ? 1.0 : 0.0));
                     }
                     else if (fn == "g2d_is_open") {
                         push(GrassValue::Num(Grass2D::is_open() ? 1.0 : 0.0));
                     }
-                    else if (fn == "g2d_clear" && argc >= 3) {
-                        Grass2D::clear((float)args[0].toNumber(), (float)args[1].toNumber(), (float)args[2].toNumber());
+                    else if (fn == "g2d_clear" && argc >= 1) {
+                        if (argc >= 3) {
+                            Grass2D::clear((float)args[0].toNumber(), (float)args[1].toNumber(), (float)args[2].toNumber());
+                        } else {
+                            uint32_t hex = (uint32_t)args[0].toNumber();
+                            float r = ((hex >> 16) & 0xFF) / 255.0f;
+                            float g = ((hex >> 8) & 0xFF) / 255.0f;
+                            float b = (hex & 0xFF) / 255.0f;
+                            Grass2D::clear(r, g, b);
+                        }
                         push(GrassValue::Num(1.0));
                     }
                     else if (fn == "g2d_present") {
@@ -1941,14 +1985,40 @@ public:
                     }
 
                     // ===== !gfx3d! (g3d_) =====
-                    else if (fn == "g3d_window" && argc >= 3) {
-                        push(GrassValue::Num(GrassGfx3D::init_window((int)args[0].toNumber(), (int)args[1].toNumber(), args[2].toString()) ? 1.0 : 0.0));
+                    else if (fn == "g3d_window" && argc >= 1) {
+                        string title = "GrassGreen 3D Window";
+                        int w = 800, h = 600;
+                        if (argc >= 3) {
+                            if (args[0].is_str()) {
+                                title = args[0].toString();
+                                w = (int)args[1].toNumber();
+                                h = (int)args[2].toNumber();
+                            } else {
+                                w = (int)args[0].toNumber();
+                                h = (int)args[1].toNumber();
+                                title = args[2].toString();
+                            }
+                        } else if (argc == 2) {
+                            w = (int)args[0].toNumber();
+                            h = (int)args[1].toNumber();
+                        } else if (argc == 1) {
+                            title = args[0].toString();
+                        }
+                        push(GrassValue::Num(GrassGfx3D::init_window(w, h, title) ? 1.0 : 0.0));
                     }
                     else if (fn == "g3d_is_open") {
                         push(GrassValue::Num(GrassGfx3D::is_open() ? 1.0 : 0.0));
                     }
-                    else if (fn == "g3d_clear" && argc >= 3) {
-                        GrassGfx3D::clear((float)args[0].toNumber(), (float)args[1].toNumber(), (float)args[2].toNumber());
+                    else if (fn == "g3d_clear" && argc >= 1) {
+                        if (argc >= 3) {
+                            GrassGfx3D::clear((float)args[0].toNumber(), (float)args[1].toNumber(), (float)args[2].toNumber());
+                        } else {
+                            uint32_t hex = (uint32_t)args[0].toNumber();
+                            float r = ((hex >> 16) & 0xFF) / 255.0f;
+                            float g = ((hex >> 8) & 0xFF) / 255.0f;
+                            float b = (hex & 0xFF) / 255.0f;
+                            GrassGfx3D::clear(r, g, b);
+                        }
                         push(GrassValue::Num(1.0));
                     }
                     else if (fn == "g3d_present") {
@@ -1984,20 +2054,39 @@ public:
                     else if (fn == "g3d_load_obj" && argc >= 1) {
                         push(GrassValue::Num((double)GrassGfx3D::load_obj(args[0].toString())));
                     }
-                    else if (fn == "g3d_set_color" && argc >= 4) {
-                        GrassGfx3D::set_color((uint32_t)args[0].toNumber(), (float)args[1].toNumber(), (float)args[2].toNumber(), (float)args[3].toNumber());
+                    else if (fn == "g3d_set_color" && argc >= 2) {
+                        if (argc >= 4) {
+                            GrassGfx3D::set_color((uint32_t)args[0].toNumber(), (float)args[1].toNumber(), (float)args[2].toNumber(), (float)args[3].toNumber());
+                        } else {
+                            uint32_t hex = (uint32_t)args[1].toNumber();
+                            float r = ((hex >> 16) & 0xFF) / 255.0f;
+                            float g = ((hex >> 8) & 0xFF) / 255.0f;
+                            float b = (hex & 0xFF) / 255.0f;
+                            GrassGfx3D::set_color((uint32_t)args[0].toNumber(), r, g, b);
+                        }
                         push(GrassValue::Num(1.0));
                     }
-                    else if (fn == "g3d_transform" && argc >= 4) {
+                    else if (fn == "g3d_transform" && argc >= 2) {
                         auto getV = [](const GrassValue& g) -> GrassVec3 {
                             if (g.is_array() && g.asArray() && g.asArray()->elements.size() >= 3)
                                 return GrassVec3((float)g.asArray()->elements[0].toNumber(), (float)g.asArray()->elements[1].toNumber(), (float)g.asArray()->elements[2].toNumber());
                             return GrassVec3((float)g.toNumber(), 0, 0);
                         };
-                        if (argc >= 10) {
-                            GrassGfx3D::transform((uint32_t)args[0].toNumber(), GrassVec3((float)args[1].toNumber(), (float)args[2].toNumber(), (float)args[3].toNumber()), GrassVec3((float)args[4].toNumber(), (float)args[5].toNumber(), (float)args[6].toNumber()), GrassVec3((float)args[7].toNumber(), (float)args[8].toNumber(), (float)args[9].toNumber()));
-                        } else {
-                            GrassGfx3D::transform((uint32_t)args[0].toNumber(), getV(args[1]), getV(args[2]), getV(args[3]));
+                        uint32_t mid = (uint32_t)args[0].toNumber();
+                        if (argc == 2 && args[1].is_array() && args[1].asArray() && args[1].asArray()->elements.size() >= 16) {
+                            GrassMat4 mat;
+                            for (int i = 0; i < 16; i++) {
+                                mat.m[i] = (float)args[1].asArray()->elements[i].toNumber();
+                            }
+                            GrassGfx3D::transform_mat(mid, mat);
+                        } else if (argc >= 4) {
+                            if (argc >= 10) {
+                                GrassGfx3D::transform(mid, GrassVec3((float)args[1].toNumber(), (float)args[2].toNumber(), (float)args[3].toNumber()), GrassVec3((float)args[4].toNumber(), (float)args[5].toNumber(), (float)args[6].toNumber()), GrassVec3((float)args[7].toNumber(), (float)args[8].toNumber(), (float)args[9].toNumber()));
+                            } else {
+                                GrassGfx3D::transform(mid, getV(args[1]), getV(args[2]), getV(args[3]));
+                            }
+                        } else if (argc == 2) {
+                            GrassGfx3D::transform(mid, getV(args[1]), GrassVec3(0, 0, 0), GrassVec3(1, 1, 1));
                         }
                         push(GrassValue::Num(1.0));
                     }
@@ -2005,14 +2094,22 @@ public:
                         GrassGfx3D::draw((uint32_t)args[0].toNumber());
                         push(GrassValue::Num(1.0));
                     }
-                    else if (fn == "g3d_dir_light" && argc >= 4) {
+                    else if (fn == "g3d_dir_light" && argc >= 2) {
                         auto getV = [](const GrassValue& g) -> GrassVec3 {
                             if (g.is_array() && g.asArray() && g.asArray()->elements.size() >= 3)
                                 return GrassVec3((float)g.asArray()->elements[0].toNumber(), (float)g.asArray()->elements[1].toNumber(), (float)g.asArray()->elements[2].toNumber());
                             return GrassVec3((float)g.toNumber(), 0, 0);
                         };
-                        float intensity = (argc >= 5) ? (float)args[4].toNumber() : 1.0f;
-                        GrassGfx3D::set_dir_light(getV(args[0]), (float)args[1].toNumber(), (float)args[2].toNumber(), (float)args[3].toNumber(), intensity);
+                        if (argc >= 4) {
+                            float intensity = (argc >= 5) ? (float)args[4].toNumber() : 1.0f;
+                            GrassGfx3D::set_dir_light(getV(args[0]), (float)args[1].toNumber(), (float)args[2].toNumber(), (float)args[3].toNumber(), intensity);
+                        } else {
+                            uint32_t hex = (uint32_t)args[1].toNumber();
+                            float r = ((hex >> 16) & 0xFF) / 255.0f;
+                            float g = ((hex >> 8) & 0xFF) / 255.0f;
+                            float b = (hex & 0xFF) / 255.0f;
+                            GrassGfx3D::set_dir_light(getV(args[0]), r, g, b, 1.0f);
+                        }
                         push(GrassValue::Num(1.0));
                     }
                     else if (fn == "g3d_point_light" && argc >= 4) {
@@ -2042,7 +2139,9 @@ public:
 
                     // ===== !physics! (phys_) =====
                     else if (fn == "phys_world") {
-                        float g_y = (argc >= 1) ? (float)args[0].toNumber() : -9.81f;
+                        float g_y = -9.81f;
+                        if (argc >= 3) g_y = (float)args[1].toNumber();
+                        else if (argc >= 1) g_y = (float)args[0].toNumber();
                         push(GrassValue::Num((double)GrassPhysics::create_world(g_y)));
                     }
                     else if (fn == "phys_step" && argc >= 2) {
@@ -2056,11 +2155,23 @@ public:
                                 return GrassVec3((float)g.asArray()->elements[0].toNumber(), (float)g.asArray()->elements[1].toNumber(), (float)g.asArray()->elements[2].toNumber());
                             return GrassVec3((float)g.toNumber(), 0, 0);
                         };
-                        string mat = (argc >= 4) ? args[3].toString() : "wood";
-                        float brk = (argc >= 5) ? (float)args[4].toNumber() : 0.0f;
-                        GrassVec3 p = getV(args[1]);
-                        GrassVec3 s = getV(args[2]);
-                        push(GrassValue::Num((double)GrassPhysics::add_box((uint32_t)args[0].toNumber(), p.x, p.y, p.z, s.x, s.y, s.z, mat, brk)));
+                        if (argc >= 7) {
+                            float px = (float)args[1].toNumber();
+                            float py = (float)args[2].toNumber();
+                            float pz = (float)args[3].toNumber();
+                            float sx = (float)args[4].toNumber();
+                            float sy = (float)args[5].toNumber();
+                            float sz = (float)args[6].toNumber();
+                            string mat = (argc >= 8 && args[7].is_str()) ? args[7].toString() : "wood";
+                            float brk = (argc >= 9) ? (float)args[8].toNumber() : 0.0f;
+                            push(GrassValue::Num((double)GrassPhysics::add_box((uint32_t)args[0].toNumber(), px, py, pz, sx, sy, sz, mat, brk)));
+                        } else {
+                            string mat = (argc >= 4) ? args[3].toString() : "wood";
+                            float brk = (argc >= 5) ? (float)args[4].toNumber() : 0.0f;
+                            GrassVec3 p = getV(args[1]);
+                            GrassVec3 s = getV(args[2]);
+                            push(GrassValue::Num((double)GrassPhysics::add_box((uint32_t)args[0].toNumber(), p.x, p.y, p.z, s.x, s.y, s.z, mat, brk)));
+                        }
                     }
                     else if (fn == "phys_sphere" && argc >= 3) {
                         auto getV = [](const GrassValue& g) -> GrassVec3 {
@@ -2068,10 +2179,19 @@ public:
                                 return GrassVec3((float)g.asArray()->elements[0].toNumber(), (float)g.asArray()->elements[1].toNumber(), (float)g.asArray()->elements[2].toNumber());
                             return GrassVec3((float)g.toNumber(), 0, 0);
                         };
-                        GrassVec3 p = getV(args[1]);
-                        float r = (float)args[2].toNumber();
-                        string mat = (argc >= 4) ? args[3].toString() : "steel";
-                        push(GrassValue::Num((double)GrassPhysics::add_sphere((uint32_t)args[0].toNumber(), p.x, p.y, p.z, r, mat)));
+                        if (argc >= 5) {
+                            float px = (float)args[1].toNumber();
+                            float py = (float)args[2].toNumber();
+                            float pz = (float)args[3].toNumber();
+                            float r = (float)args[4].toNumber();
+                            string mat = (argc >= 6 && args[5].is_str()) ? args[5].toString() : "steel";
+                            push(GrassValue::Num((double)GrassPhysics::add_sphere((uint32_t)args[0].toNumber(), px, py, pz, r, mat)));
+                        } else {
+                            GrassVec3 p = getV(args[1]);
+                            float r = (float)args[2].toNumber();
+                            string mat = (argc >= 4) ? args[3].toString() : "steel";
+                            push(GrassValue::Num((double)GrassPhysics::add_sphere((uint32_t)args[0].toNumber(), p.x, p.y, p.z, r, mat)));
+                        }
                     }
                     else if (fn == "phys_cloth" && argc >= 4) {
                         auto getV = [](const GrassValue& g) -> GrassVec3 {
@@ -2965,6 +3085,19 @@ public:
                 } else {
                     push(GrassValue::Nil());
                 }
+            } else if (obj.is_array() && obj.asArray()) {
+                GrassArray* arr = obj.asArray();
+                if (f_name == "x" || f_name == "r" || f_name == "u") {
+                    push(arr->elements.size() > 0 ? arr->elements[0] : GrassValue::Num(0.0));
+                } else if (f_name == "y" || f_name == "g" || f_name == "v") {
+                    push(arr->elements.size() > 1 ? arr->elements[1] : GrassValue::Num(0.0));
+                } else if (f_name == "z" || f_name == "b") {
+                    push(arr->elements.size() > 2 ? arr->elements[2] : GrassValue::Num(0.0));
+                } else if (f_name == "w" || f_name == "a") {
+                    push(arr->elements.size() > 3 ? arr->elements[3] : GrassValue::Num(0.0));
+                } else {
+                    push(GrassValue::Nil());
+                }
             } else {
                 push(GrassValue::Nil());
             }
@@ -3004,6 +3137,17 @@ public:
                                 break;
                         }
                     }
+                }
+            } else if (obj.is_array() && obj.asArray()) {
+                GrassArray* arr = obj.asArray();
+                if (f_name == "x" || f_name == "r" || f_name == "u") {
+                    if (arr->elements.size() > 0) arr->elements[0] = val;
+                } else if (f_name == "y" || f_name == "g" || f_name == "v") {
+                    if (arr->elements.size() > 1) arr->elements[1] = val;
+                } else if (f_name == "z" || f_name == "b") {
+                    if (arr->elements.size() > 2) arr->elements[2] = val;
+                } else if (f_name == "w" || f_name == "a") {
+                    if (arr->elements.size() > 3) arr->elements[3] = val;
                 }
             }
         }

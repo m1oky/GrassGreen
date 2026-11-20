@@ -20,6 +20,8 @@ struct GfxMesh {
     GrassVec3 pos;
     GrassVec3 rot;
     GrassVec3 scale;
+    GrassMat4 model_matrix;
+    bool has_custom_matrix = false;
     uint32_t color;
     std::string texture_path;
 };
@@ -46,6 +48,7 @@ namespace GrassGfx3D {
     void set_texture(uint32_t mesh_id, const std::string& path);
     void set_color(uint32_t mesh_id, float r, float g, float b);
     void transform(uint32_t mesh_id, const GrassVec3& pos, const GrassVec3& rot, const GrassVec3& scale);
+    void transform_mat(uint32_t mesh_id, const GrassMat4& mat);
     void draw(uint32_t mesh_id);
 
     void set_dir_light(const GrassVec3& dir, float r, float g, float b, float intensity);

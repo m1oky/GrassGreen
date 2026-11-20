@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <algorithm>
+#include <thread>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -18,7 +19,7 @@ static int g_height = 600;
 static int g_pitch = 800 * 4;
 static uint32_t* g_framebuffer = nullptr;
 static bool g_is_open = false;
-static float g_dt = 0.016f;
+static float g_dt = 1.0f / 60.0f;
 static auto g_last_time = chrono::high_resolution_clock::now();
 
 static float g_cam_x = 0.0f;
@@ -36,16 +37,47 @@ static uint32_t g_next_tex_id = 1;
 #if defined(_WIN32)
 static HWND g_hwnd = NULL;
 static HDC g_hdc = NULL;
-static HDC g_mem_dc = NULL;
-static HBITMAP g_dib = NULL;
+static BITMAPINFO g_bmi = {};
 
 static LRESULT CALLBACK WndProc2D(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    if (msg == WM_CLOSE || msg == WM_DESTROY) {
-        g_is_open = false;
-        PostQuitMessage(0);
-        return 0;
+    switch (msg) {
+        case WM_CLOSE:
+            g_is_open = false;
+            DestroyWindow(hwnd);
+            return 0;
+        case WM_DESTROY:
+            g_is_open = false;
+            g_hwnd = NULL;
+            PostQuitMessage(0);
+            return 0;
+        case WM_KEYDOWN:
+            if (wParam == VK_ESCAPE) {
+                g_is_open = false;
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            break;
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd, &ps);
+            if (g_framebuffer && g_width > 0 && g_height > 0) {
+                RECT cr;
+                GetClientRect(hwnd, &cr);
+                StretchDIBits(
+                    hdc,
+                    0, 0, cr.right - cr.left, cr.bottom - cr.top,
+                    0, 0, g_width, g_height,
+                    g_framebuffer,
+                    &g_bmi,
+                    DIB_RGB_COLORS,
+                    SRCCOPY
+                );
+            }
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
     }
-    return DefWindowProc(hwnd, msg, wParam, lParam);
+    return DefWindowProcA(hwnd, msg, wParam, lParam);
 }
 #endif
 
@@ -57,48 +89,75 @@ void bind_framebuffer(void* addr, int w, int h, int pitch) {
 }
 
 bool init_window(int w, int h, const string& title) {
+    if (w <= 0) w = 800;
+    if (h <= 0) h = 600;
     g_width = w;
     g_height = h;
     g_pitch = w * 4;
 
-#if defined(_WIN32)
-    HINSTANCE hInst = GetModuleHandle(NULL);
-    WNDCLASS wc = {};
-    wc.lpfnWndProc = WndProc2D;
-    wc.hInstance = hInst;
-    wc.lpszClassName = "Grass2DClass";
-    RegisterClass(&wc);
-
-    RECT rc = {0, 0, w, h};
-    AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
-    g_hwnd = CreateWindow("Grass2DClass", title.c_str(), WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-                          CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top,
-                          NULL, NULL, hInst, NULL);
-    if (!g_hwnd) return false;
-
-    g_hdc = GetDC(g_hwnd);
-    g_mem_dc = CreateCompatibleDC(g_hdc);
-
-    BITMAPINFO bmi = {};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = w;
-    bmi.bmiHeader.biHeight = -h; // top-down
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    void* bits = nullptr;
-    g_dib = CreateDIBSection(g_mem_dc, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
-    SelectObject(g_mem_dc, g_dib);
-    g_framebuffer = (uint32_t*)bits;
-#else
     if (!g_framebuffer) {
         g_framebuffer = new uint32_t[w * h];
     }
+
+#if defined(_WIN32)
+    HINSTANCE hInst = GetModuleHandleA(NULL);
+    const char* className = "GrassGreen_2D_Window";
+
+    WNDCLASSEXA wc = {};
+    wc.cbSize = sizeof(WNDCLASSEXA);
+    wc.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
+    wc.lpfnWndProc = WndProc2D;
+    wc.hInstance = hInst;
+    wc.hCursor = LoadCursorA(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    wc.lpszClassName = className;
+
+    RegisterClassExA(&wc);
+
+    RECT rc = { 0, 0, w, h };
+    AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+    int win_w = rc.right - rc.left;
+    int win_h = rc.bottom - rc.top;
+    int screen_w = GetSystemMetrics(SM_CXSCREEN);
+    int screen_h = GetSystemMetrics(SM_CYSCREEN);
+    int win_x = (screen_w > win_w) ? (screen_w - win_w) / 2 : CW_USEDEFAULT;
+    int win_y = (screen_h > win_h) ? (screen_h - win_h) / 2 : CW_USEDEFAULT;
+
+    string win_title = title.empty() ? "GrassGreen 2D Window" : title;
+
+    g_hwnd = CreateWindowExA(
+        0,
+        className,
+        win_title.c_str(),
+        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+        win_x, win_y,
+        win_w, win_h,
+        NULL, NULL, hInst, NULL
+    );
+
+    if (!g_hwnd) {
+        g_is_open = false;
+        return false;
+    }
+
+    g_hdc = GetDC(g_hwnd);
+
+    ZeroMemory(&g_bmi, sizeof(BITMAPINFO));
+    g_bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    g_bmi.bmiHeader.biWidth = w;
+    g_bmi.bmiHeader.biHeight = -h; // Top-down
+    g_bmi.bmiHeader.biPlanes = 1;
+    g_bmi.bmiHeader.biBitCount = 32;
+    g_bmi.bmiHeader.biCompression = BI_RGB;
+
+    ShowWindow(g_hwnd, SW_SHOW);
+    UpdateWindow(g_hwnd);
+    SetForegroundWindow(g_hwnd);
 #endif
 
     g_is_open = true;
     g_last_time = chrono::high_resolution_clock::now();
+    g_dt = 1.0f / 60.0f;
     return true;
 }
 
@@ -106,10 +165,16 @@ bool is_open() {
 #if defined(_WIN32)
     if (g_hwnd) {
         MSG msg;
-        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+        while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT) {
+                g_is_open = false;
+                break;
+            }
             TranslateMessage(&msg);
-            DispatchMessage(&msg);
+            DispatchMessageA(&msg);
         }
+    } else {
+        g_is_open = false;
     }
 #endif
     return g_is_open;
@@ -127,31 +192,77 @@ void clear(float r, float g, float b) {
 void present() {
     update_particles(g_dt);
 #if defined(_WIN32)
-    if (g_hwnd && g_mem_dc && g_hdc) {
-        BitBlt(g_hdc, 0, 0, g_width, g_height, g_mem_dc, 0, 0, SRCCOPY);
+    if (g_hwnd && g_hdc && g_framebuffer && g_width > 0 && g_height > 0) {
+        RECT clientRect;
+        GetClientRect(g_hwnd, &clientRect);
+        int cw = clientRect.right - clientRect.left;
+        int ch = clientRect.bottom - clientRect.top;
+
+        StretchDIBits(
+            g_hdc,
+            0, 0, cw, ch,
+            0, 0, g_width, g_height,
+            g_framebuffer,
+            &g_bmi,
+            DIB_RGB_COLORS,
+            SRCCOPY
+        );
     }
 #endif
+
+    // High precision ~60 FPS frame limiting and delta time calculation
+    const float target_frame_time = 1.0f / 60.0f; // ~0.016667s
     auto now = chrono::high_resolution_clock::now();
-    g_dt = chrono::duration<float>(now - g_last_time).count();
+    float elapsed = chrono::duration<float>(now - g_last_time).count();
+
+    if (elapsed < target_frame_time) {
+        float remaining = target_frame_time - elapsed;
+        int sleep_ms = (int)(remaining * 1000.0f);
+        if (sleep_ms > 0) {
+#if defined(_WIN32)
+            Sleep((DWORD)sleep_ms);
+#else
+            this_thread::sleep_for(chrono::milliseconds(sleep_ms));
+#endif
+        }
+        while (chrono::duration<float>(chrono::high_resolution_clock::now() - g_last_time).count() < target_frame_time) {
+            // spin wait
+        }
+        now = chrono::high_resolution_clock::now();
+        elapsed = chrono::duration<float>(now - g_last_time).count();
+    }
+
+    g_dt = elapsed;
+    if (g_dt > 0.1f) g_dt = 0.1f;
     g_last_time = now;
 }
 
 float dt() {
-    return g_dt > 0.0001f ? g_dt : 0.016f;
+    return (g_dt > 0.0001f && g_dt < 0.2f) ? g_dt : (1.0f / 60.0f);
 }
 
 bool key_down(const string& key) {
 #if defined(_WIN32)
-    if (key == "SPACE") return (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
-    if (key == "ENTER") return (GetAsyncKeyState(VK_RETURN) & 0x8000) != 0;
-    if (key == "UP")    return (GetAsyncKeyState(VK_UP) & 0x8000) != 0;
-    if (key == "DOWN")  return (GetAsyncKeyState(VK_DOWN) & 0x8000) != 0;
-    if (key == "LEFT")  return (GetAsyncKeyState(VK_LEFT) & 0x8000) != 0;
-    if (key == "RIGHT") return (GetAsyncKeyState(VK_RIGHT) & 0x8000) != 0;
+    char* endp = nullptr;
+    long vk = strtol(key.c_str(), &endp, 10);
+    if (endp && *endp == '\0' && vk > 0 && vk < 256) {
+        return (GetAsyncKeyState((int)vk) & 0x8000) != 0;
+    }
+    if (key == "SPACE" || key == "space") return (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
+    if (key == "ENTER" || key == "enter") return (GetAsyncKeyState(VK_RETURN) & 0x8000) != 0;
+    if (key == "ESCAPE" || key == "ESC" || key == "esc") return (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
+    if (key == "UP" || key == "up")    return (GetAsyncKeyState(VK_UP) & 0x8000) != 0;
+    if (key == "DOWN" || key == "down")  return (GetAsyncKeyState(VK_DOWN) & 0x8000) != 0;
+    if (key == "LEFT" || key == "left")  return (GetAsyncKeyState(VK_LEFT) & 0x8000) != 0;
+    if (key == "RIGHT" || key == "right") return (GetAsyncKeyState(VK_RIGHT) & 0x8000) != 0;
     if (key == "W" || key == "w") return (GetAsyncKeyState('W') & 0x8000) != 0;
     if (key == "A" || key == "a") return (GetAsyncKeyState('A') & 0x8000) != 0;
     if (key == "S" || key == "s") return (GetAsyncKeyState('S') & 0x8000) != 0;
     if (key == "D" || key == "d") return (GetAsyncKeyState('D') & 0x8000) != 0;
+    if (key.size() == 1) {
+        char c = (char)toupper((unsigned char)key[0]);
+        return (GetAsyncKeyState(c) & 0x8000) != 0;
+    }
 #endif
     return false;
 }

@@ -44,7 +44,7 @@ int main() {
         // Present frame to screen
         g2d_present();
 
-        if (g2d_key_down(27) || frame_count > 600) {
+        if (g2d_key_down(27)) {
             break;
         }
     }
