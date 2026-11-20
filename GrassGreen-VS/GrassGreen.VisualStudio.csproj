@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildProjectDirectory)\packages\Microsoft.VSSDK.BuildTools.17.11.435\build\Microsoft.VSSDK.BuildTools.props" Condition="Exists('$(MSBuildProjectDirectory)\packages\Microsoft.VSSDK.BuildTools.17.11.435\build\Microsoft.VSSDK.BuildTools.props')" />
+  <PropertyGroup>
+    <MinimumVisualStudioVersion>17.0</MinimumVisualStudioVersion>
+    <VSToolsPath Condition="'$(VSToolsPath)' == ''">$(MSBuildProjectDirectory)\packages\Microsoft.VSSDK.BuildTools.17.11.435\tools\vssdk</VSToolsPath>
+  </PropertyGroup>
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <SchemaVersion>2.0</SchemaVersion>
+    <ProjectTypeGuids>{82b43b9b-e64c-4715-b499-d71e9ca2bd60};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
+    <ProjectGuid>{B72E1B54-4C51-4E67-961A-28B368A6B11F}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>GrassGreen.VisualStudio</RootNamespace>
+    <AssemblyName>GrassGreen.VisualStudio</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <GeneratePkgDefFile>false</GeneratePkgDefFile>
+    <IncludeAssemblyInVSIXContainer>true</IncludeAssemblyInVSIXContainer>
+    <IncludeDebugSymbolsInVSIXContainer>false</IncludeDebugSymbolsInVSIXContainer>
+    <IncludeDebugSymbolsInLocalVSIXDeployment>false</IncludeDebugSymbolsInLocalVSIXDeployment>
+    <CopyBuildOutputToOutputDirectory>true</CopyBuildOutputToOutputDirectory>
+    <CopyOutputSymbolsToOutputDirectory>false</CopyOutputSymbolsToOutputDirectory>
+    <StartAction>Program</StartAction>
+    <StartProgram Condition="'$(DevEnvDir)' != ''">$(DevEnvDir)devenv.exe</StartProgram>
+    <StartArguments>/rootsuffix Exp</StartArguments>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Design" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xaml" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="System.ComponentModel.Composition" />
+    <Reference Include="EnvDTE">
+      <HintPath>packages\envdte.17.0.31902.203\lib\net472\envdte.dll</HintPath>
+      <EmbedInteropTypes>False</EmbedInteropTypes>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="EnvDTE80">
+      <HintPath>packages\envdte80.17.0.31902.203\lib\net472\envdte80.dll</HintPath>
+      <EmbedInteropTypes>False</EmbedInteropTypes>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.OLE.Interop">
+      <HintPath>packages\Microsoft.VisualStudio.OLE.Interop.17.0.31902.203\lib\net20\Microsoft.VisualStudio.OLE.Interop.dll</HintPath>
+      <EmbedInteropTypes>False</EmbedInteropTypes>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Interop">
+      <HintPath>packages\Microsoft.VisualStudio.Interop.17.0.31902.203\lib\net472\Microsoft.VisualStudio.Interop.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Shell.Interop">
+      <HintPath>packages\Microsoft.VisualStudio.Shell.Interop.17.0.31902.203\lib\net20\Microsoft.VisualStudio.Shell.Interop.dll</HintPath>
+      <EmbedInteropTypes>False</EmbedInteropTypes>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Shell.Interop.8.0">
+      <HintPath>packages\Microsoft.VisualStudio.Shell.Interop.8.0.17.0.31902.203\lib\net20\Microsoft.VisualStudio.Shell.Interop.8.0.dll</HintPath>
+      <EmbedInteropTypes>False</EmbedInteropTypes>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.TextManager.Interop">
+      <HintPath>packages\Microsoft.VisualStudio.TextManager.Interop.17.0.31902.203\lib\net20\Microsoft.VisualStudio.TextManager.Interop.dll</HintPath>
+      <EmbedInteropTypes>False</EmbedInteropTypes>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Editor">
+      <HintPath>packages\Microsoft.VisualStudio.Editor.17.0.487\lib\net472\Microsoft.VisualStudio.Editor.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.CoreUtility">
+      <HintPath>packages\Microsoft.VisualStudio.CoreUtility.17.0.487\lib\net472\Microsoft.VisualStudio.CoreUtility.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Text.Data">
+      <HintPath>packages\Microsoft.VisualStudio.Text.Data.17.0.487\lib\net472\Microsoft.VisualStudio.Text.Data.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Text.Logic">
+      <HintPath>packages\Microsoft.VisualStudio.Text.Logic.17.0.487\lib\net472\Microsoft.VisualStudio.Text.Logic.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Text.UI">
+      <HintPath>packages\Microsoft.VisualStudio.Text.UI.17.0.487\lib\net472\Microsoft.VisualStudio.Text.UI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Text.UI.Wpf">
+      <HintPath>packages\Microsoft.VisualStudio.Text.UI.Wpf.17.0.487\lib\net472\Microsoft.VisualStudio.Text.UI.Wpf.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Language">
+      <HintPath>packages\Microsoft.VisualStudio.Language.17.0.487\lib\net472\Microsoft.VisualStudio.Language.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Language.Intellisense">
+      <HintPath>packages\Microsoft.VisualStudio.Language.Intellisense.17.0.487\lib\net472\Microsoft.VisualStudio.Language.Intellisense.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Language.StandardClassification">
+      <HintPath>packages\Microsoft.VisualStudio.Language.StandardClassification.17.0.487\lib\net472\Microsoft.VisualStudio.Language.StandardClassification.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Imaging">
+      <HintPath>packages\Microsoft.VisualStudio.Imaging.17.0.31902.203\lib\net472\Microsoft.VisualStudio.Imaging.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Imaging.Interop.14.0.DesignTime">
+      <HintPath>packages\Microsoft.VisualStudio.Imaging.Interop.14.0.DesignTime.17.0.31902.203\lib\net20\Microsoft.VisualStudio.Imaging.Interop.14.0.DesignTime.dll</HintPath>
+      <EmbedInteropTypes>False</EmbedInteropTypes>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.ImageCatalog">
+      <HintPath>packages\Microsoft.VisualStudio.ImageCatalog.17.0.31902.203\lib\net472\Microsoft.VisualStudio.ImageCatalog.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Shell.15.0">
+      <HintPath>packages\Microsoft.VisualStudio.Shell.15.0.17.0.31902.203\lib\net472\Microsoft.VisualStudio.Shell.15.0.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Shell.Framework">
+      <HintPath>packages\Microsoft.VisualStudio.Shell.Framework.17.0.31902.203\lib\net472\Microsoft.VisualStudio.Shell.Framework.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Threading">
+      <HintPath>packages\Microsoft.VisualStudio.Threading.17.0.64\lib\net472\Microsoft.VisualStudio.Threading.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="System.Collections.Immutable">
+      <HintPath>packages\System.Collections.Immutable.5.0.0\lib\net461\System.Collections.Immutable.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="GrassGreenPackage.cs" />
+    <Compile Include="Constants\GrassConstants.cs" />
+    <Compile Include="Constants\GrassLanguageData.cs" />
+    <Compile Include="ContentType\GrassContentTypeDefinition.cs" />
+    <Compile Include="Classification\GrassClassificationTypes.cs" />
+    <Compile Include="Classification\GrassClassifier.cs" />
+    <Compile Include="Classification\GrassClassifierProvider.cs" />
+    <Compile Include="Parser\GrassTokenKind.cs" />
+    <Compile Include="Parser\GrassToken.cs" />
+    <Compile Include="Parser\GrassLexer.cs" />
+    <Compile Include="Parser\GrassAst.cs" />
+    <Compile Include="Parser\GrassParser.cs" />
+    <Compile Include="ErrorTagging\GrassErrorTagger.cs" />
+    <Compile Include="ErrorTagging\GrassErrorTaggerProvider.cs" />
+    <Compile Include="Completion\GrassAsyncCompletionSource.cs" />
+    <Compile Include="Completion\GrassAsyncCompletionSourceProvider.cs" />
+    <Compile Include="Completion\GrassCompletionSource.cs" />
+    <Compile Include="Completion\GrassCompletionSourceProvider.cs" />
+    <Compile Include="QuickInfo\GrassQuickInfoSource.cs" />
+    <Compile Include="QuickInfo\GrassQuickInfoSourceProvider.cs" />
+    <Compile Include="Execution\GrassExecutionService.cs" />
+    <Compile Include="Commands\GrassEditorCommandFilter.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="source.extension.vsixmanifest">
+      <SubType>Designer</SubType>
+    </None>
+    <Content Include="GrassGreenPackage.pkgdef">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
+    <Content Include="Resources\icon.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
+    <Content Include="Resources\GrassGreen.ico">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <Import Project="$(MSBuildProjectDirectory)\packages\Microsoft.NETFramework.ReferenceAssemblies.net48.1.0.3\build\Microsoft.NETFramework.ReferenceAssemblies.net48.targets" Condition="Exists('$(MSBuildProjectDirectory)\packages\Microsoft.NETFramework.ReferenceAssemblies.net48.1.0.3\build\Microsoft.NETFramework.ReferenceAssemblies.net48.targets')" />
+  <Import Project="$(VsSDKInstall)\Microsoft.VsSDK.targets" Condition="Exists('$(VsSDKInstall)\Microsoft.VsSDK.targets')" />
+  <Import Project="$(MSBuildProjectDirectory)\packages\Microsoft.VSSDK.BuildTools.17.11.435\build\Microsoft.VSSDK.BuildTools.targets" Condition="Exists('$(MSBuildProjectDirectory)\packages\Microsoft.VSSDK.BuildTools.17.11.435\build\Microsoft.VSSDK.BuildTools.targets')" />
+</Project>

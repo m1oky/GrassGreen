@@ -1,0 +1,15 @@
+[$RootKey$\ContentType\grassgreen]
+@="GrassGreen Language"
+
+[$RootKey$\FileExtensionMapping\.grass]
+@="grassgreen"
+
+[$RootKey$\FileAssociation\.grass]
+@="GrassGreenFile"
+"DefaultIcon"="$PackageFolder$\Resources\GrassGreen.ico,0"
+
+[$RootKey$\ShellFolder\.grass]
+@="GrassGreen File"
+
+[$RootKey$\Default Icon]
+".grass"="$PackageFolder$\Resources\GrassGreen.ico,0"

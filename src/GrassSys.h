@@ -2,8 +2,12 @@
 #define GRASS_SYS_H
 
 #include <string>
+#include <vector>
 
 namespace GrassSys {
+    // Аргументы командной строки
+    void set_cli_args(const std::vector<std::string>& args);
+    const std::vector<std::string>& get_cli_args();
     // Буфер обмена Windows (Clipboard)
     bool clip_set(const std::string& text);
     std::string clip_get();

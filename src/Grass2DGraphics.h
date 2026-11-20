@@ -1,45 +1,56 @@
 #ifndef GRASS_2D_GRAPHICS_H
 #define GRASS_2D_GRAPHICS_H
 
-#if defined(_WIN32)
-#include <windows.h>
-#else
-#include <cstdint>
-typedef void* HWND;
-typedef void* HDC;
-typedef void* HBITMAP;
-typedef uint32_t COLORREF;
-typedef int64_t LRESULT;
-typedef uint32_t UINT;
-typedef uintptr_t WPARAM;
-typedef intptr_t LPARAM;
-#endif
 #include <string>
+#include <vector>
 #include <cstdint>
 
+struct G2DParticle {
+    float x, y;
+    float vx, vy;
+    float life;
+    float max_life;
+    uint32_t color;
+};
+
+struct G2DTexture {
+    uint32_t id;
+    int width;
+    int height;
+    std::vector<uint32_t> pixels;
+};
+
+namespace Grass2D {
+    bool init_window(int w, int h, const std::string& title);
+    bool is_open();
+    void clear(float r, float g, float b);
+    void present();
+    float dt();
+    bool key_down(const std::string& key);
+    int mouse_x();
+    int mouse_y();
+    bool mouse_btn(int btn);
+
+    uint32_t load_tex(const std::string& path);
+    void draw_sprite(uint32_t tex_id, float x, float y, float w, float h, float angle, float alpha);
+    void draw_frame(uint32_t tex_id, float fx, float fy, float fw, float fh, float x, float y, float w, float h);
+
+    void cam_set(float x, float y, float zoom, float angle);
+    void cam_shake(float intensity, float duration);
+    void emit_particles(float x, float y, int count, uint32_t color, float speed, float lifetime);
+    void update_particles(float delta);
+    void bind_framebuffer(void* addr, int w, int h, int pitch);
+}
+
+// Backward compatibility class wrapper
 class Grass2DGraphics {
-private:
-    static HWND hwnd;
-    static HDC hdc_screen;
-    static HDC hdc_mem;
-    static HBITMAP hbm_mem;
-    static HBITMAP hbm_old;
-    static int win_width;
-    static int win_height;
-    static bool is_running;
-    static uint64_t last_frame_time;
-
-    static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
-    static COLORREF parseColor(const std::string& hex);
-    static int parseVkKey(const std::string& key);
-
 public:
     static bool init(const std::string& title, int width, int height);
     static bool running();
     static void clear(const std::string& hex_color);
     static void rect(int x, int y, int w, int h, const std::string& hex_color);
     static void circle(int x, int y, int r, const std::string& hex_color);
-    static void line(int x1, int y1, int x2, int y2, const std::string& hex_color, int width);
+    static void line(int x1, int y1, int x2, int y2, const std::string& hex_color, int width = 1);
     static void text(int x, int y, const std::string& str, int size, const std::string& hex_color);
     static void draw_svg(const std::string& path, int x, int y, int w, int h);
     static bool key(const std::string& key_name);

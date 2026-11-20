@@ -136,6 +136,39 @@ bool GrassFsys::write(const std::string& path, const std::string& content) {
     return true;
 }
 
+std::vector<uint8_t> GrassFsys::read_bytes(const std::string& path) {
+    if (GrassHAL::is_freestanding()) {
+        std::string s = GrassHAL::vfs_read(path);
+        return std::vector<uint8_t>(s.begin(), s.end());
+    }
+    if (!is_safe_fsys_path(path)) return {};
+    std::ifstream f(path, std::ios::binary | std::ios::ate);
+    if (!f.is_open()) return {};
+    std::streamsize sz = f.tellg();
+    f.seekg(0, std::ios::beg);
+    if (sz <= 0) return {};
+    std::vector<uint8_t> buf((size_t)sz);
+    f.read(reinterpret_cast<char*>(buf.data()), sz);
+    return buf;
+}
+
+bool GrassFsys::write_bytes(const std::string& path, const std::vector<uint8_t>& bytes) {
+    if (GrassHAL::is_freestanding()) {
+        std::string s(bytes.begin(), bytes.end());
+        return GrassHAL::vfs_write(path, s);
+    }
+    if (!is_safe_fsys_path(path)) return false;
+    std::error_code ec;
+    auto parent = fs::path(path).parent_path();
+    if (!parent.empty()) fs::create_directories(parent, ec);
+    std::ofstream f(path, std::ios::binary);
+    if (!f.is_open()) return false;
+    if (!bytes.empty()) {
+        f.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    }
+    return true;
+}
+
 bool GrassFsys::exists(const std::string& path) {
     if (GrassHAL::is_freestanding()) {
         return GrassHAL::vfs_exists(path);

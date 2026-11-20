@@ -37,6 +37,8 @@ enum OpCode : uint8_t {
     OP_BIT_OR        = 0x17,
     OP_BIT_XOR       = 0x18,
     OP_BIT_NOT       = 0x19,
+    OP_BIT_SHL       = 0x1A,
+    OP_BIT_SHR       = 0x1B,
 
     OP_CMP_EQ        = 0x20,
     OP_CMP_NEQ       = 0x21,
@@ -255,6 +257,7 @@ struct GrassStructDef {
     std::string name;
     std::vector<GrassFieldDef> fields;
     std::unordered_map<std::string, size_t> field_indices;
+    std::vector<std::string> methods;
     size_t total_size = 0;
     size_t alignment = 1;
 };
@@ -396,6 +399,7 @@ class BytecodeCompiler {
     int loop_counter = 0;
     bool inside_function = false;
     bool is_special_file = false; // Для чистых .gdb или !GrassWeb! файлов
+    bool in_stream_io = false;
     int recursion_depth = 0;
     static constexpr int MAX_RECURSION_DEPTH = 256;
 
@@ -417,6 +421,11 @@ class BytecodeCompiler {
     };
     std::unordered_map<std::string, UserFunction> user_functions;
     std::vector<std::pair<size_t, std::string>> thread_spawn_fixups;
+    std::unordered_map<std::string, std::vector<std::string>> struct_methods;
+    std::unordered_map<std::string, std::vector<std::string>> method_to_structs;
+    std::unordered_map<std::string, std::string> var_struct_types;
+    std::string current_struct_context;
+    std::vector<std::pair<size_t, std::string>> method_call_fixups;
 
     GrassToken& peek(int offset = 0);
     GrassToken advance();
@@ -446,6 +455,7 @@ class BytecodeCompiler {
     void parseBitwiseXor();
     void parseBitwiseAnd();
     void parseComparison();
+    void parseShift();
     void parseTerm();
     void parseFactor();
     void parseUnary();

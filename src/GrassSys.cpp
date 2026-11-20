@@ -14,6 +14,16 @@
 
 namespace GrassSys {
 
+    static std::vector<std::string> g_cli_args;
+
+    void set_cli_args(const std::vector<std::string>& args) {
+        g_cli_args = args;
+    }
+
+    const std::vector<std::string>& get_cli_args() {
+        return g_cli_args;
+    }
+
     bool clip_set(const std::string& text) {
         if (GrassHAL::is_freestanding()) {
             return GrassHAL::clipboard_set(text);

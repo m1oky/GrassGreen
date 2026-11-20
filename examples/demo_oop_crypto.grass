@@ -1,0 +1,84 @@
+!GrassGreen!
+!CoreMath!
+
+struct Player {
+    take name;
+    take hp;
+    take max_hp;
+
+    take take_damage(dmg) {
+        this.hp -= dmg;
+        if (this.hp < 0) {
+            this.hp = 0;
+        }
+    }
+
+    take heal(amount) {
+        this.hp += amount;
+        if (this.hp > this.max_hp) {
+            this.hp = this.max_hp;
+        }
+    }
+
+    take is_alive() {
+        return this.hp > 0;
+    }
+
+    take status() {
+        gout << "[Player: " << this.name << "] HP: " << this.hp << "/" << this.max_hp << endl;
+    }
+}
+
+int main() {
+    gout << "=== GrassGreen OOP and Lightweight Methods Demo ===" << endl;
+    Player hero;
+    hero.name = "Knight";
+    hero.hp = 100;
+    hero.max_hp = 100;
+
+    hero.status();
+    gout << "Hero takes 35 damage..." << endl;
+    hero.take_damage(35);
+    hero.status();
+    gout << "Is hero alive: " << hero.is_alive() << endl;
+
+    gout << "Hero heals 15 HP..." << endl;
+    hero.heal(15);
+    hero.status();
+
+    gout << endl;
+    gout << "=== GrassGreen CoreMath Cryptography and Quantum Gates ===" << endl;
+    take message = "GrassGreen-v4.3-Universal-Kernel";
+    take hash = sha256(message);
+    gout << "SHA-256 ('" << message << "'): " << hash << endl;
+
+    take base = 7;
+    take exp = 13;
+    take mod = 19;
+    take pmod = pow_mod(base, exp, mod);
+    gout << "pow_mod(" << base << ", " << exp << ", " << mod << ") = " << pmod << endl;
+
+    take crand = crypto_rand(100, 999);
+    gout << "crypto_rand(100, 999) = " << crand << endl;
+
+    take my_pi = pi();
+    gout << "pi() = " << my_pi << endl;
+
+    take d = gcd(48, 18);
+    gout << "gcd(48, 18) = " << d << endl;
+
+    gout << endl;
+    gout << "=== Quantum Circuit Simulation ===" << endl;
+    qb_init(0);
+    qb_init(1);
+    h(0);
+    cnot(0, 1);
+    take m0 = q_measure(0);
+    take m1 = q_measure(1);
+    gout << "Bell State (|00> + |11>) measured: q0 = " << m0 << ", q1 = " << m1 << endl;
+
+    take qbit = q_rand();
+    gout << "q_rand() = " << qbit << endl;
+
+    return 0;
+}

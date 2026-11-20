@@ -82,6 +82,8 @@ namespace GrassOptimizer {
                 case OP_BIT_OR:
                 case OP_BIT_XOR:
                 case OP_BIT_NOT:
+                case OP_BIT_SHL:
+                case OP_BIT_SHR:
                 case OP_RET:
                 case OP_LOG:
                 case OP_LOG_EMPTY:

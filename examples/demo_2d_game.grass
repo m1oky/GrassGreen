@@ -1,0 +1,54 @@
+!GrassGreen!
+!2DGraphics!
+
+int main() {
+    gout << "=== GrassGreen 2D Graphics Engine Demo ===" << endl;
+    gout << "Controls: Arrow keys / WASD to move, Space to emit particles and shake camera" << endl;
+
+    g2d_window("GrassGreen 2D Game Demo", 800, 600);
+
+    take player_x = 400.0;
+    take player_y = 300.0;
+    take speed = 250.0;
+    take frame_count = 0;
+
+    while (g2d_is_open()) {
+        take dt = g2d_dt();
+        frame_count += 1;
+
+        // Key codes: 37=Left, 38=Up, 39=Right, 40=Down, 32=Space, 27=Esc
+        if (g2d_key_down(37) || g2d_key_down(65)) {
+            player_x -= speed * dt;
+        }
+        if (g2d_key_down(39) || g2d_key_down(68)) {
+            player_x += speed * dt;
+        }
+        if (g2d_key_down(38) || g2d_key_down(87)) {
+            player_y -= speed * dt;
+        }
+        if (g2d_key_down(40) || g2d_key_down(83)) {
+            player_y += speed * dt;
+        }
+
+        if (g2d_key_down(32)) {
+            g2d_emit_particles(player_x, player_y, 15, 0x00FF88);
+            g2d_cam_shake(4.0, 0.2);
+        }
+
+        // Clear background with dark emerald tint
+        g2d_clear(0x0a140d);
+
+        // Update and draw active particles
+        g2d_update_particles(dt);
+
+        // Present frame to screen
+        g2d_present();
+
+        if (g2d_key_down(27) || frame_count > 600) {
+            break;
+        }
+    }
+
+    gout << "Demo finished after " << frame_count << " frames." << endl;
+    return 0;
+}

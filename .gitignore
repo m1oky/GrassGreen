@@ -36,3 +36,8 @@ test_*.py
 trace_*.py
 __pycache__/
 *.py[cod]
+
+# Visual Studio Extension intermediate and package files
+GrassGreen-VS/packages/
+GrassGreen-VS/obj/
+GrassGreen-VS/.vs/

@@ -359,12 +359,25 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
         requireLib("fastmath", "!FastMath!", fn + "()", line);
     }
     // 2. Проверка !CoreMath!
-    else if (fn == "qb_init" || fn == "h" || fn == "x" || fn == "cnot" ||
-             fn == "q_rand" || fn == "pi" || fn == "gcd" || fn == "pow_e") {
+    else if (fn == "qb_init" || fn == "h" || fn == "x" || fn == "z" || fn == "cnot" ||
+             fn == "q_rand" || fn == "q_measure" || fn == "pi" || fn == "gcd" || fn == "pow_e" ||
+             fn == "sha256" || fn == "pow_mod" || fn == "crypto_rand") {
         requireLib("coremath", "!CoreMath!", fn + "()", line);
     }
+    // 2.1. Проверка !math3d!
+    else if (fn.rfind("v3_", 0) == 0 || fn.rfind("m4_", 0) == 0) {
+        requireLib("math3d", "!math3d!", fn + "()", line);
+    }
+    // 2.2. Проверка !gfx3d!
+    else if (fn.rfind("g3d_", 0) == 0) {
+        requireLib("gfx3d", "!gfx3d!", fn + "()", line);
+    }
+    // 2.3. Проверка !physics!
+    else if (fn.rfind("phys_", 0) == 0) {
+        requireLib("physics", "!physics!", fn + "()", line);
+    }
     // 3. Проверка !memory!
-    else if (fn.find("memory_") == 0 && fn != "memory_barrier") {
+    else if ((fn.find("memory_") == 0 && fn != "memory_barrier") || fn == "pack_u16" || fn == "pack_u32" || fn == "pack_u64") {
         requireLib("memory", "!memory!", fn + "()", line);
     }
     // 4. Проверка !random!
@@ -429,7 +442,7 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
     else if (fn == "clip_set" || fn == "clip_get" || fn == "screen_w" ||
              fn == "screen_h" || fn == "pc_name" || fn == "user_name" ||
              fn == "cpu_cores" ||
-             fn == "get_env" || fn == "uptime_sec" ||
+             fn == "get_env" || fn == "uptime_sec" || fn == "cli_args" ||
              fn == "system" || fn == "exec" || fn == "shell") {
         requireLib("sys", "!sys!", fn + "()", line);
     }
@@ -441,8 +454,20 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
     }
     // 12. Проверка библиотеки !fsys!
     else if (fn == "fs_mkdir" || fn == "fs_is_dir" || fn == "fs_size" ||
-             fn == "fs_copy"  || fn == "fs_list" || fn == "fs_read" || fn == "fs_write" || fn == "fs_exists" || fn == "fs_remove") {
+             fn == "fs_copy"  || fn == "fs_list" || fn == "fs_read" || fn == "fs_write" ||
+             fn == "fs_read_bytes" || fn == "fs_write_bytes" ||
+             fn == "fs_exists" || fn == "fs_remove") {
         requireLib("fsys", "!fsys!", fn + "()", line);
+    }
+    // 12.1. Проверка библиотеки !ffi!
+    else if (fn == "ffi_open" || fn == "ffi_sym" || fn == "ffi_call" || fn == "ffi_close") {
+        requireLib("ffi", "!ffi!", fn + "()", line);
+    }
+    // 12.2. Проверка библиотеки !langgen!
+    else if (fn == "lang_new" || fn == "lang_comment" || fn == "lang_rule" || fn == "lang_parse" ||
+             fn == "lang_count" || fn == "lang_cmd" || fn == "lang_arg" || fn == "lang_eval" ||
+             fn == "lang_set_var" || fn == "lang_get_var") {
+        requireLib("langgen", "!langgen!", fn + "()", line);
     }
     // 13. Проверка библиотеки !tg!
     else if (fn == "tg_init" || fn == "tg_poll" || fn == "tg_get_user" ||
@@ -453,7 +478,8 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
         requireLib("tg", "!tg!", fn + "()", line);
     }
     // 14. Проверка библиотеки !2DGraphics!
-    else if (fn == "gfx_init" || fn == "gfx_running" || fn == "gfx_clear" ||
+    else if (fn.rfind("g2d_", 0) == 0 ||
+             fn == "gfx_init" || fn == "gfx_running" || fn == "gfx_clear" ||
              fn == "gfx_rect" || fn == "gfx_circle"  || fn == "gfx_line" ||
              fn == "gfx_text" || fn == "gfx_key"     || fn == "gfx_mouse_x" ||
              fn == "gfx_mouse_y" || fn == "gfx_mouse_down" || fn == "gfx_collide" ||
@@ -545,7 +571,7 @@ bool BytecodeCompiler::isTypeOrFuncKeyword(const string& s) {
 bool BytecodeCompiler::isVarKeyword(const string& s) {
     return s == "set" || s == "var" || s == "let" || s == "take" || s == "fany" || s == "invent" ||
            s == "int" || s == "float" || s == "double" || s == "num" ||
-           s == "str" || s == "string" || s == "bool" || s == "auto" || s == "array" || s == "volatile";
+           s == "str" || s == "string" || s == "bool" || s == "auto" || s == "array" || s == "volatile" || s == "void";
 }
 
 void BytecodeCompiler::emitByte(uint8_t b) { code.push_back(b); }
@@ -629,18 +655,29 @@ void BytecodeCompiler::parseBitwiseAnd() {
 }
 
 void BytecodeCompiler::parseComparison() {
-    parseTerm();
+    parseShift();
     while (peek().kind == TOK_EQ || peek().kind == TOK_NEQ ||
            peek().kind == TOK_LT || peek().kind == TOK_GT ||
            peek().kind == TOK_LTE || peek().kind == TOK_GTE) {
         GrassTokenKind op = advance().kind;
-        parseTerm();
+        parseShift();
         if (op == TOK_EQ)  emitByte(OP_CMP_EQ);
         if (op == TOK_NEQ) emitByte(OP_CMP_NEQ);
         if (op == TOK_LT)  emitByte(OP_CMP_LT);
         if (op == TOK_GT)  emitByte(OP_CMP_GT);
         if (op == TOK_LTE) emitByte(OP_CMP_LTE);
         if (op == TOK_GTE) emitByte(OP_CMP_GTE);
+    }
+}
+
+void BytecodeCompiler::parseShift() {
+    parseTerm();
+    if (!in_stream_io) {
+        while (peek().kind == TOK_SHL || peek().kind == TOK_SHR) {
+            GrassTokenKind op = advance().kind;
+            parseTerm();
+            emitByte(op == TOK_SHL ? OP_BIT_SHL : OP_BIT_SHR);
+        }
     }
 }
 
@@ -686,7 +723,10 @@ void BytecodeCompiler::parsePrimary() {
         return;
     }
     if (match(TOK_LPAREN)) {
+        bool prev_stream = in_stream_io;
+        in_stream_io = false;
         parseExpression();
+        in_stream_io = prev_stream;
         consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         return;
     }
@@ -758,6 +798,38 @@ void BytecodeCompiler::parsePrimary() {
                     emitByte(OP_LOAD_VAR); emitString(obj_name);
                     emitByte(OP_ARRAY_POP);
                     return;
+                } else {
+                    // Вызов метода структуры: obj.method(args...) -> Struct_method(obj, args...)
+                    emitByte(OP_LOAD_VAR); emitString(obj_name);
+                    uint8_t argc = 1;
+                    if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
+                        do {
+                            parseExpression();
+                            argc++;
+                        } while (match(TOK_COMMA));
+                    }
+                    consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')' у метода '" + member + "'!");
+
+                    string target_fn;
+                    if (var_struct_types.count(obj_name)) {
+                        target_fn = var_struct_types[obj_name] + "_" + member;
+                    } else if (obj_name == "this" && !current_struct_context.empty()) {
+                        target_fn = current_struct_context + "_" + member;
+                    } else if (method_to_structs.count(member) && !method_to_structs[member].empty()) {
+                        target_fn = method_to_structs[member][0] + "_" + member;
+                    } else {
+                        target_fn = obj_name + "_" + member;
+                    }
+
+                    if (user_functions.count(target_fn)) {
+                        emitByte(OP_CALL_USER);
+                        emitU32(user_functions[target_fn].entry_ip);
+                    } else {
+                        emitByte(OP_CALL_USER);
+                        method_call_fixups.push_back({code.size(), target_fn});
+                        emitU32(0);
+                    }
+                    return;
                 }
             } else {
                 emitByte(OP_LOAD_VAR); emitString(obj_name);
@@ -780,6 +852,38 @@ void BytecodeCompiler::parsePrimary() {
                     consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
                     emitByte(OP_LOAD_VAR); emitString(name);
                     emitByte(OP_ARRAY_POP);
+                    return;
+                } else {
+                    // Вызов метода структуры: obj.method(args...) -> Struct_method(obj, args...)
+                    emitByte(OP_LOAD_VAR); emitString(name);
+                    uint8_t argc = 1;
+                    if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
+                        do {
+                            parseExpression();
+                            argc++;
+                        } while (match(TOK_COMMA));
+                    }
+                    consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')' у метода '" + member + "'!");
+
+                    string target_fn;
+                    if (var_struct_types.count(name)) {
+                        target_fn = var_struct_types[name] + "_" + member;
+                    } else if (name == "this" && !current_struct_context.empty()) {
+                        target_fn = current_struct_context + "_" + member;
+                    } else if (method_to_structs.count(member) && !method_to_structs[member].empty()) {
+                        target_fn = method_to_structs[member][0] + "_" + member;
+                    } else {
+                        target_fn = name + "_" + member;
+                    }
+
+                    if (user_functions.count(target_fn)) {
+                        emitByte(OP_CALL_USER);
+                        emitU32(user_functions[target_fn].entry_ip);
+                    } else {
+                        emitByte(OP_CALL_USER);
+                        method_call_fixups.push_back({code.size(), target_fn});
+                        emitU32(0);
+                    }
                     return;
                 }
             } else {
@@ -1428,8 +1532,14 @@ void BytecodeCompiler::parseStatement() {
             included_libs.insert("json");
         } else if (lib == "!tg!") {
             included_libs.insert("tg");
-        } else if (lib == "!2DGraphics!") {
+        } else if (lib == "!2DGraphics!" || lib == "!2dgraphics!") {
             included_libs.insert("2DGraphics");
+        } else if (lib == "!math3d!" || lib == "!Math3D!") {
+            included_libs.insert("math3d");
+        } else if (lib == "!gfx3d!" || lib == "!Gfx3D!") {
+            included_libs.insert("gfx3d");
+        } else if (lib == "!physics!" || lib == "!Physics!") {
+            included_libs.insert("physics");
         } else if (lib == "!proc!") {
             included_libs.insert("proc");
         } else if (lib == "!fsys!") {
@@ -1476,6 +1586,10 @@ void BytecodeCompiler::parseStatement() {
             emitByte(OP_START_WEB);
             emitString(source_filename);
             emitByte(OP_HALT);
+        } else if (lib == "!ffi!" || lib == "!FFI!") {
+            included_libs.insert("ffi");
+        } else if (lib == "!langgen!" || lib == "!LANGGEN!" || lib == "!lang!") {
+            included_libs.insert("langgen");
         } else {
             reportError(peek(-1).line, "Неизвестная библиотека: " + lib);
         }
@@ -1856,11 +1970,15 @@ void BytecodeCompiler::parseStatement() {
         return;
     }
 
-    // Запрет на выполнение кода вне int main() {} или пользовательских функций
+    // Разрешаем объявление глобальных переменных (take, int, string, void и т.д.) на верхнем уровне
     if (!inside_function && !is_special_file) {
-        reportError(peek().line, "Инструкция '" + peek().text + "' находится вне функции! Весь исполняемый код должен быть внутри int main() { ... }.");
-        synchronize();
-        return;
+        bool is_var_decl = (peek().kind == TOK_IDENT &&
+            (isVarKeyword(peek().text) || peek().text == "take" || peek().text == "volatile"));
+        if (!is_var_decl) {
+            reportError(peek().line, "Инструкция '" + peek().text + "' находится вне функции! Весь исполняемый код (кроме объявлений переменных через take/тип) должен быть внутри функций.");
+            synchronize();
+            return;
+        }
     }
 
     if (peek().kind == TOK_LBRACE) {
@@ -2250,6 +2368,8 @@ void BytecodeCompiler::parseStatement() {
 
     // 3. ПОТОКОВЫЙ ВЫВОД GRASSGREEN / C++: gout / cout << ... << endl;
     if (matchIdent("gout") || matchIdent("cout")) {
+        bool prev_stream = in_stream_io;
+        in_stream_io = true;
         while (match(TOK_SHL)) {
             if (matchIdent("endl")) {
                 emitByte(OP_LOG_EMPTY);
@@ -2267,12 +2387,15 @@ void BytecodeCompiler::parseStatement() {
                 emitByte(OP_PRINT_RAW);
             }
         }
+        in_stream_io = prev_stream;
         match(TOK_SEMI);
         return;
     }
 
     // Потоковый ввод GRASSGREEN / C++: gin / cin >> var;
     if (matchIdent("gin") || matchIdent("cin")) {
+        bool prev_stream = in_stream_io;
+        in_stream_io = true;
         while (match(TOK_SHR)) {
             if (peek().kind == TOK_IDENT) {
                 string vname = advance().text;
@@ -2283,6 +2406,7 @@ void BytecodeCompiler::parseStatement() {
                 emitString(vname);
             }
         }
+        in_stream_io = prev_stream;
         match(TOK_SEMI);
         return;
     }
@@ -2452,6 +2576,7 @@ void BytecodeCompiler::parseStatement() {
     if (peek().kind == TOK_IDENT && g_struct_registry.count(peek().text) && peek(1).kind == TOK_IDENT) {
         string s_name = advance().text;
         string v_name = advance().text;
+        var_struct_types[v_name] = s_name;
         if (match(TOK_ASSIGN)) {
             parseExpression();
         } else {
@@ -2470,6 +2595,9 @@ void BytecodeCompiler::parseStatement() {
     }
     if (peek().kind == TOK_IDENT && (isVarKeyword(peek().text) || peek().text == "take")) {
         string decl_kw = advance().text;
+        if (peek().kind == TOK_STAR) {
+            advance();
+        }
         if (match(TOK_ASSIGN) && peek().kind == TOK_IDENT &&
             (peek(1).kind == TOK_SEMI || peek(1).kind == TOK_EOF)) {
             string var_name = advance().text;
@@ -2484,6 +2612,9 @@ void BytecodeCompiler::parseStatement() {
         while (peek().kind == TOK_IDENT) {
             string var_name = advance().text;
             if (match(TOK_ASSIGN)) {
+                if (peek().kind == TOK_IDENT && g_struct_registry.count(peek().text) && peek(1).kind == TOK_LPAREN) {
+                    var_struct_types[var_name] = peek().text;
+                }
                 parseExpression();
             } else if (decl_kw == "array") {
                 emitByte(OP_NEW_ARRAY);
@@ -2745,31 +2876,68 @@ void BytecodeCompiler::parseStatement() {
     if (peek().kind == TOK_IDENT) {
         string ident_text = peek().text;
         size_t dot = ident_text.find('.');
-        if (dot != string::npos && peek(1).kind == TOK_ASSIGN) {
+        if (dot != string::npos &&
+            (peek(1).kind == TOK_ASSIGN || peek(1).kind == TOK_PLUS_ASSIGN ||
+             peek(1).kind == TOK_MINUS_ASSIGN || peek(1).kind == TOK_MUL_ASSIGN ||
+             peek(1).kind == TOK_DIV_ASSIGN)) {
             string obj_name = ident_text.substr(0, dot);
             string field_name = ident_text.substr(dot + 1);
             advance(); // consume token with dot
-            match(TOK_ASSIGN);
-            parseExpression(); // value
-            match(TOK_SEMI);
-            emitByte(OP_LOAD_VAR); emitString(obj_name);
-            emitByte(OP_SET_FIELD); emitString(field_name);
+            GrassTokenKind op = advance().kind;
+            if (op == TOK_ASSIGN) {
+                parseExpression(); // value
+                match(TOK_SEMI);
+                emitByte(OP_LOAD_VAR); emitString(obj_name);
+                emitByte(OP_SET_FIELD); emitString(field_name);
+            } else {
+                emitByte(OP_LOAD_VAR); emitString(obj_name);
+                emitByte(OP_GET_FIELD); emitString(field_name);
+                parseExpression();
+                if (op == TOK_PLUS_ASSIGN) emitByte(OP_ADD);
+                else if (op == TOK_MINUS_ASSIGN) emitByte(OP_SUB);
+                else if (op == TOK_MUL_ASSIGN) emitByte(OP_MUL);
+                else emitByte(OP_DIV);
+                match(TOK_SEMI);
+                emitByte(OP_LOAD_VAR); emitString(obj_name);
+                emitByte(OP_SET_FIELD); emitString(field_name);
+            }
             return;
         }
-        if (peek(1).kind == TOK_DOT && peek(2).kind == TOK_IDENT && peek(3).kind == TOK_ASSIGN) {
+        if (peek(1).kind == TOK_DOT && peek(2).kind == TOK_IDENT &&
+            (peek(3).kind == TOK_ASSIGN || peek(3).kind == TOK_PLUS_ASSIGN ||
+             peek(3).kind == TOK_MINUS_ASSIGN || peek(3).kind == TOK_MUL_ASSIGN ||
+             peek(3).kind == TOK_DIV_ASSIGN)) {
             string obj_name = advance().text;
             advance(); // consume '.'
             string field_name = advance().text;
-            advance(); // consume '='
-            parseExpression(); // value
-            match(TOK_SEMI);
-            emitByte(OP_LOAD_VAR); emitString(obj_name);
-            emitByte(OP_SET_FIELD); emitString(field_name);
+            GrassTokenKind op = advance().kind;
+            if (op == TOK_ASSIGN) {
+                parseExpression(); // value
+                match(TOK_SEMI);
+                emitByte(OP_LOAD_VAR); emitString(obj_name);
+                emitByte(OP_SET_FIELD); emitString(field_name);
+            } else {
+                emitByte(OP_LOAD_VAR); emitString(obj_name);
+                emitByte(OP_GET_FIELD); emitString(field_name);
+                parseExpression();
+                if (op == TOK_PLUS_ASSIGN) emitByte(OP_ADD);
+                else if (op == TOK_MINUS_ASSIGN) emitByte(OP_SUB);
+                else if (op == TOK_MUL_ASSIGN) emitByte(OP_MUL);
+                else emitByte(OP_DIV);
+                match(TOK_SEMI);
+                emitByte(OP_LOAD_VAR); emitString(obj_name);
+                emitByte(OP_SET_FIELD); emitString(field_name);
+            }
             return;
         }
         if (peek(1).kind == TOK_ASSIGN) {
             string var_name = advance().text;
             advance();
+            if (peek().kind == TOK_IDENT && g_struct_registry.count(peek().text) && peek(1).kind == TOK_LPAREN) {
+                var_struct_types[var_name] = peek().text;
+            } else if (peek().kind == TOK_IDENT && var_struct_types.count(peek().text)) {
+                var_struct_types[var_name] = var_struct_types[peek().text];
+            }
             parseExpression();
             match(TOK_SEMI);
             emitByte(OP_STORE_VAR);
@@ -2852,6 +3020,25 @@ void BytecodeCompiler::compileProgram() {
                 reportError(1, "Неизвестная функция для thread / async: '" + fix.second + "'!");
             }
         }
+
+        for (const auto& fix : method_call_fixups) {
+            if (user_functions.count(fix.second)) {
+                patchU32(fix.first, user_functions[fix.second].entry_ip);
+            } else {
+                bool found = false;
+                for (const auto& kv : user_functions) {
+                    if (kv.first.size() >= fix.second.size() &&
+                        kv.first.rfind("_" + fix.second) != string::npos) {
+                        patchU32(fix.first, kv.second.entry_ip);
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    reportError(1, "Неизвестный метод структуры: '" + fix.second + "'!");
+                }
+            }
+        }
     }
 
     emitByte(OP_HALT);
@@ -2874,6 +3061,79 @@ void BytecodeCompiler::parseStructDefinition() {
     size_t max_align = 1;
 
     while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
+        if (match(TOK_SEMI)) continue;
+
+        bool is_method = false;
+        if (isTypeOrFuncKeyword(peek().text) && peek(1).kind == TOK_IDENT && peek(2).kind == TOK_LPAREN) {
+            is_method = true;
+        } else if (peek().kind == TOK_IDENT && peek(1).kind == TOK_LPAREN) {
+            is_method = true;
+        }
+
+        if (is_method) {
+            string mname;
+            if (isTypeOrFuncKeyword(peek().text) && peek(1).kind == TOK_IDENT) {
+                advance(); // consume return type / keyword (take / void / int)
+                mname = advance().text;
+            } else {
+                mname = advance().text;
+            }
+
+            match(TOK_LPAREN);
+            vector<string> params;
+            params.push_back("this");
+
+            if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
+                while (true) {
+                    if (isTypeOrFuncKeyword(peek().text) && peek(1).kind == TOK_IDENT) {
+                        advance();
+                    }
+                    params.push_back(advance().text);
+                    if (!match(TOK_COMMA)) break;
+                }
+            }
+            consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')' у метода '" + mname + "'!");
+
+            string fn_name = sname + "_" + mname;
+
+            emitByte(OP_JUMP);
+            size_t skip_patch = code.size();
+            emitU32(0);
+
+            uint32_t entry_ip = (uint32_t)code.size();
+            user_functions[fn_name] = { entry_ip, params };
+            func_table[fn_name] = entry_ip;
+            struct_methods[sname].push_back(mname);
+            method_to_structs[mname].push_back(sname);
+            def.methods.push_back(mname);
+
+            if (!params.empty()) {
+                emitByte(OP_PARAM_PROLOGUE);
+            }
+            for (int i = (int)params.size() - 1; i >= 0; --i) {
+                emitByte(OP_DEF_VAR);
+                emitString(params[i]);
+            }
+            if (!params.empty()) {
+                emitByte(OP_PARAM_EPILOGUE);
+            }
+
+            string prev_struct = current_struct_context;
+            current_struct_context = sname;
+            {
+                FunctionContextGuard func_guard(inside_function, true);
+                parseBlock();
+            }
+            current_struct_context = prev_struct;
+
+            emitByte(OP_CONST_NUM);
+            emitDouble(0.0);
+            emitByte(OP_RET);
+
+            patchU32(skip_patch, (uint32_t)code.size());
+            match(TOK_SEMI);
+            continue;
+        }
         // Поддержка двух вариантов объявления полей:
         // 1. C-style: string name; или int hp;
         // 2. RoadMap-style: hp: u32, или x: u64

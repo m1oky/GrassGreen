@@ -147,4 +147,33 @@ namespace GrassMemory {
         }
         std::cout << "============================================================\n\n";
     }
+
+    std::vector<uint8_t> pack_u16(uint16_t v) {
+        return {
+            static_cast<uint8_t>(v & 0xFF),
+            static_cast<uint8_t>((v >> 8) & 0xFF)
+        };
+    }
+
+    std::vector<uint8_t> pack_u32(uint32_t v) {
+        return {
+            static_cast<uint8_t>(v & 0xFF),
+            static_cast<uint8_t>((v >> 8) & 0xFF),
+            static_cast<uint8_t>((v >> 16) & 0xFF),
+            static_cast<uint8_t>((v >> 24) & 0xFF)
+        };
+    }
+
+    std::vector<uint8_t> pack_u64(uint64_t v) {
+        return {
+            static_cast<uint8_t>(v & 0xFF),
+            static_cast<uint8_t>((v >> 8) & 0xFF),
+            static_cast<uint8_t>((v >> 16) & 0xFF),
+            static_cast<uint8_t>((v >> 24) & 0xFF),
+            static_cast<uint8_t>((v >> 32) & 0xFF),
+            static_cast<uint8_t>((v >> 40) & 0xFF),
+            static_cast<uint8_t>((v >> 48) & 0xFF),
+            static_cast<uint8_t>((v >> 56) & 0xFF)
+        };
+    }
 }

@@ -2,6 +2,7 @@
 #define GRASS_FSYS_H
 
 #include <string>
+#include <vector>
 #include <cstdint>
 
 class GrassFsys {
@@ -13,6 +14,8 @@ public:
     static std::string list(const std::string& path);
     static std::string read(const std::string& path);
     static bool write(const std::string& path, const std::string& content);
+    static std::vector<uint8_t> read_bytes(const std::string& path);
+    static bool write_bytes(const std::string& path, const std::vector<uint8_t>& bytes);
     static bool exists(const std::string& path);
     static bool remove(const std::string& path);
 };

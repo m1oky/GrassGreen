@@ -5953,6 +5953,18 @@ namespace GrassBoot {
                         append_u8(bin_data, 0xF7); append_u8(bin_data, 0xD0); // not eax
                         append_u8(bin_data, 0x50); // push eax
                         break;
+                    case 0x1A: // OP_BIT_SHL
+                        append_u8(bin_data, 0x59); // pop ecx
+                        append_u8(bin_data, 0x58); // pop eax
+                        append_u8(bin_data, 0xD3); append_u8(bin_data, 0xE0); // shl eax, cl
+                        append_u8(bin_data, 0x50); // push eax
+                        break;
+                    case 0x1B: // OP_BIT_SHR
+                        append_u8(bin_data, 0x59); // pop ecx
+                        append_u8(bin_data, 0x58); // pop eax
+                        append_u8(bin_data, 0xD3); append_u8(bin_data, 0xE8); // shr eax, cl
+                        append_u8(bin_data, 0x50); // push eax
+                        break;
                     case 0x20: // OP_CMP_EQ
                         append_u8(bin_data, 0x5B); // pop ebx
                         append_u8(bin_data, 0x58); // pop eax

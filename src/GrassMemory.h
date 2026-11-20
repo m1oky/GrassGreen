@@ -34,4 +34,9 @@ namespace GrassMemory {
     // 9. Отладочный дамп состояния памяти
     void dump(size_t stack_size, const std::vector<std::string>& stack_preview,
               const std::vector<std::pair<std::string, std::string>>& vars_preview);
+
+    // 10. Упаковка чисел в байты (little-endian)
+    std::vector<uint8_t> pack_u16(uint16_t v);
+    std::vector<uint8_t> pack_u32(uint32_t v);
+    std::vector<uint8_t> pack_u64(uint64_t v);
 }

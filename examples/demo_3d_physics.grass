@@ -1,0 +1,76 @@
+!GrassGreen!
+!math3d!
+!gfx3d!
+!physics!
+
+int main() {
+    gout << "=== GrassGreen 3D Graphics and XPBD Physics Demo ===" << endl;
+
+    g3d_window("GrassGreen 3D Physics Simulation", 800, 600);
+
+    // Setup 3D camera
+    take cam_pos = v3_create(0.0, 8.0, 15.0);
+    take cam_target = v3_create(0.0, 2.0, 0.0);
+    g3d_camera(cam_pos, cam_target, 60.0);
+
+    // Setup directional sunlight
+    take light_dir = v3_create(0.5, -1.0, 0.3);
+    g3d_dir_light(light_dir, 0xFFFFFF);
+
+    // Initialize XPBD Physics World with standard gravity
+    take world = phys_world(0.0, -9.81, 0.0);
+
+    // Static floor ground (mass = 0.0)
+    take ground_body = phys_box(world, 0.0, -0.5, 0.0, 20.0, 1.0, 20.0, 0.0);
+    take ground_mesh = g3d_plane(20.0, 20.0);
+    g3d_set_color(ground_mesh, 0x1b3820);
+
+    // Dynamic falling box
+    take box_body = phys_box(world, 0.0, 6.0, 0.0, 1.5, 1.5, 1.5, 2.0);
+    take box_mesh = g3d_cube(1.5);
+    g3d_set_color(box_mesh, 0x22c55e);
+
+    // Dynamic projectile sphere
+    take sphere_body = phys_sphere(world, 0.0, 4.0, -3.0, 1.0, 3.0);
+    take sphere_mesh = g3d_sphere(1.0, 16, 16);
+    g3d_set_color(sphere_mesh, 0x38bdf8);
+
+    take frame_count = 0;
+    while (g3d_is_open()) {
+        take dt = g3d_dt();
+        frame_count += 1;
+
+        // Step physics simulation with 4 sub-steps
+        phys_step(world, dt, 4);
+
+        // Clear screen with deep night color and reset Z-buffer
+        g3d_clear(0x0f172a);
+
+        // Draw ground plane
+        take m_ground = m4_identity();
+        g3d_transform(ground_mesh, m_ground);
+        g3d_draw(ground_mesh);
+
+        // Update and draw box
+        take b_pos = phys_get_pos(box_body);
+        take m_box = m4_translate(b_pos.x, b_pos.y, b_pos.z);
+        g3d_transform(box_mesh, m_box);
+        g3d_draw(box_mesh);
+
+        // Update and draw sphere
+        take s_pos = phys_get_pos(sphere_body);
+        take m_sphere = m4_translate(s_pos.x, s_pos.y, s_pos.z);
+        g3d_transform(sphere_mesh, m_sphere);
+        g3d_draw(sphere_mesh);
+
+        // Present frame
+        g3d_present();
+
+        if (frame_count > 600) {
+            break;
+        }
+    }
+
+    gout << "3D Physics simulation completed successfully (" << frame_count << " frames)." << endl;
+    return 0;
+}
