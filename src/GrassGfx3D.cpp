@@ -429,7 +429,10 @@ uint32_t create_sphere(float radius, int segments) {
     return id;
 }
 
-uint32_t create_plane(float w, float d) {
+uint32_t create_plane(float w, float d, int segments) {
+    if (segments < 1) segments = 1;
+    if (segments > 64) segments = 64;
+
     uint32_t id = g_next_mesh_id++;
     GfxMesh mesh;
     mesh.id = id;
@@ -438,12 +441,40 @@ uint32_t create_plane(float w, float d) {
 
     float hw = w * 0.5f;
     float hd = d * 0.5f;
-    GfxVertex v0{GrassVec3(-hw, 0, -hd), GrassVec3(0, 1, 0), 0, 0, mesh.color};
-    GfxVertex v1{GrassVec3( hw, 0, -hd), GrassVec3(0, 1, 0), 1, 0, mesh.color};
-    GfxVertex v2{GrassVec3( hw, 0,  hd), GrassVec3(0, 1, 0), 1, 1, mesh.color};
-    GfxVertex v3{GrassVec3(-hw, 0,  hd), GrassVec3(0, 1, 0), 0, 1, mesh.color};
-    mesh.vertices = {v0, v1, v2, v3};
-    mesh.indices = {0, 2, 1, 0, 3, 2};
+
+    for (int j = 0; j <= segments; j++) {
+        float fz = (float)j / (float)segments;
+        float z = -hd + fz * d;
+        for (int i = 0; i <= segments; i++) {
+            float fx = (float)i / (float)segments;
+            float x = -hw + fx * w;
+            GfxVertex v;
+            v.pos = GrassVec3(x, 0.0f, z);
+            v.normal = GrassVec3(0.0f, 1.0f, 0.0f);
+            v.u = fx;
+            v.v = fz;
+            v.color = mesh.color;
+            mesh.vertices.push_back(v);
+        }
+    }
+
+    for (int j = 0; j < segments; j++) {
+        for (int i = 0; i < segments; i++) {
+            uint32_t v0 = (uint32_t)(j * (segments + 1) + i);
+            uint32_t v1 = v0 + 1;
+            uint32_t v2 = (uint32_t)((j + 1) * (segments + 1) + i);
+            uint32_t v3 = v2 + 1;
+
+            mesh.indices.push_back(v0);
+            mesh.indices.push_back(v2);
+            mesh.indices.push_back(v1);
+
+            mesh.indices.push_back(v1);
+            mesh.indices.push_back(v2);
+            mesh.indices.push_back(v3);
+        }
+    }
+
     g_meshes[id] = mesh;
     return id;
 }
@@ -567,23 +598,16 @@ void draw(uint32_t mesh_id) {
         GrassVec4 v1 = GrassMath3D::transform_vec4(mvp, GrassVec4(mesh.vertices[mesh.indices[i+1]].pos.x, mesh.vertices[mesh.indices[i+1]].pos.y, mesh.vertices[mesh.indices[i+1]].pos.z, 1.0f));
         GrassVec4 v2 = GrassMath3D::transform_vec4(mvp, GrassVec4(mesh.vertices[mesh.indices[i+2]].pos.x, mesh.vertices[mesh.indices[i+2]].pos.y, mesh.vertices[mesh.indices[i+2]].pos.z, 1.0f));
 
-        if (v0.w <= 0.01f || v1.w <= 0.01f || v2.w <= 0.01f) continue;
+        const float w_near = 0.05f;
 
-        // Screen mapping
-        float sx0 = (v0.x / v0.w) * hw + hw; float sy0 = -(v0.y / v0.w) * hh + hh; float z0 = v0.z / v0.w;
-        float sx1 = (v1.x / v1.w) * hw + hw; float sy1 = -(v1.y / v1.w) * hh + hh; float z1 = v1.z / v1.w;
-        float sx2 = (v2.x / v2.w) * hw + hw; float sy2 = -(v2.y / v2.w) * hh + hh; float z2 = v2.z / v2.w;
+        // 1. Trivial rejection ONLY when ALL THREE vertices are outside the same frustum plane
+        if (v0.w < w_near && v1.w < w_near && v2.w < w_near) continue;
+        if (v0.x < -v0.w && v1.x < -v1.w && v2.x < -v2.w) continue;
+        if (v0.x >  v0.w && v1.x >  v1.w && v2.x >  v2.w) continue;
+        if (v0.y < -v0.w && v1.y < -v1.w && v2.y < -v2.w) continue;
+        if (v0.y >  v0.w && v1.y >  v1.w && v2.y >  v2.w) continue;
 
-        // Simple bounding box rasterization
-        int min_x = max(0, (int)min({sx0, sx1, sx2}));
-        int max_x = min(g_width - 1, (int)max({sx0, sx1, sx2}));
-        int min_y = max(0, (int)min({sy0, sy1, sy2}));
-        int max_y = min(g_height - 1, (int)max({sy0, sy1, sy2}));
-
-        float area = (sx1 - sx0) * (sy2 - sy0) - (sy1 - sy0) * (sx2 - sx0);
-        if (std::fabs(area) < 0.0001f) continue;
-
-        // Shading with face normal calculation and ambient illumination
+        // 2. Shading with face normal calculation and ambient illumination
         GrassVec3 p0 = mesh.vertices[mesh.indices[i]].pos;
         GrassVec3 p1 = mesh.vertices[mesh.indices[i+1]].pos;
         GrassVec3 p2 = mesh.vertices[mesh.indices[i+2]].pos;
@@ -612,17 +636,103 @@ void draw(uint32_t mesh_id) {
         uint8_t cb = (uint8_t)(min(255.0f, (mesh.color & 0xFF) * diff));
         uint32_t final_color = (cr << 16) | (cg << 8) | cb;
 
-        for (int y = min_y; y <= max_y; y++) {
-            for (int x = min_x; x <= max_x; x++) {
-                float w0 = ((sx1 - x) * (sy2 - y) - (sy1 - y) * (sx2 - x)) / area;
-                float w1 = ((sx2 - x) * (sy0 - y) - (sy2 - y) * (sx0 - x)) / area;
-                float w2 = 1.0f - w0 - w1;
-                if (w0 >= 0 && w1 >= 0 && w2 >= 0) {
-                    float z = w0 * z0 + w1 * z1 + w2 * z2;
-                    int idx = y * g_width + x;
-                    if (z < g_zbuffer[idx] && z > 0.0f) {
-                        g_zbuffer[idx] = z;
-                        g_framebuffer[idx] = final_color;
+        // 3. Sutherland-Hodgman clipping against near plane (w >= w_near)
+        bool in0 = (v0.w >= w_near);
+        bool in1 = (v1.w >= w_near);
+        bool in2 = (v2.w >= w_near);
+        int in_count = (in0 ? 1 : 0) + (in1 ? 1 : 0) + (in2 ? 1 : 0);
+
+        if (in_count == 0) continue;
+
+        auto clip_edge = [w_near](const GrassVec4& a, const GrassVec4& b) -> GrassVec4 {
+            float denom = b.w - a.w;
+            float t = (std::fabs(denom) > 1e-6f) ? ((w_near - a.w) / denom) : 0.0f;
+            t = std::clamp(t, 0.0f, 1.0f);
+            return GrassVec4(
+                a.x + t * (b.x - a.x),
+                a.y + t * (b.y - a.y),
+                a.z + t * (b.z - a.z),
+                w_near
+            );
+        };
+
+        struct ClippedTri {
+            GrassVec4 a, b, c;
+        };
+        ClippedTri clipped_tris[2];
+        int num_clipped = 0;
+
+        if (in_count == 3) {
+            clipped_tris[0] = {v0, v1, v2};
+            num_clipped = 1;
+        } else if (in_count == 1) {
+            GrassVec4 vin, vout1, vout2;
+            if (in0)      { vin = v0; vout1 = v1; vout2 = v2; }
+            else if (in1) { vin = v1; vout1 = v2; vout2 = v0; }
+            else          { vin = v2; vout1 = v0; vout2 = v1; }
+
+            GrassVec4 i1 = clip_edge(vin, vout1);
+            GrassVec4 i2 = clip_edge(vout2, vin);
+            clipped_tris[0] = {vin, i1, i2};
+            num_clipped = 1;
+        } else if (in_count == 2) {
+            GrassVec4 vin1, vin2, vout;
+            if (!in0)      { vin1 = v1; vin2 = v2; vout = v0; }
+            else if (!in1) { vin1 = v2; vin2 = v0; vout = v1; }
+            else           { vin1 = v0; vin2 = v1; vout = v2; }
+
+            GrassVec4 i1 = clip_edge(vin2, vout);
+            GrassVec4 i2 = clip_edge(vout, vin1);
+            clipped_tris[0] = {vin1, vin2, i1};
+            clipped_tris[1] = {vin1, i1, i2};
+            num_clipped = 2;
+        }
+
+        // 4. Perspective divide and rasterization of clipped triangles
+        for (int t = 0; t < num_clipped; t++) {
+            const GrassVec4& c0 = clipped_tris[t].a;
+            const GrassVec4& c1 = clipped_tris[t].b;
+            const GrassVec4& c2 = clipped_tris[t].c;
+
+            float inv_w0 = 1.0f / c0.w;
+            float sx0 = (c0.x * inv_w0) * hw + hw;
+            float sy0 = -(c0.y * inv_w0) * hh + hh;
+            float z0 = (c0.z * inv_w0) * 0.5f + 0.5f;
+
+            float inv_w1 = 1.0f / c1.w;
+            float sx1 = (c1.x * inv_w1) * hw + hw;
+            float sy1 = -(c1.y * inv_w1) * hh + hh;
+            float z1 = (c1.z * inv_w1) * 0.5f + 0.5f;
+
+            float inv_w2 = 1.0f / c2.w;
+            float sx2 = (c2.x * inv_w2) * hw + hw;
+            float sy2 = -(c2.y * inv_w2) * hh + hh;
+            float z2 = (c2.z * inv_w2) * 0.5f + 0.5f;
+
+            float area = (sx1 - sx0) * (sy2 - sy0) - (sy1 - sy0) * (sx2 - sx0);
+            if (std::fabs(area) < 0.0001f) continue;
+
+            int min_x = max(0, (int)floor(min({sx0, sx1, sx2})));
+            int max_x = min(g_width - 1, (int)ceil(max({sx0, sx1, sx2})));
+            int min_y = max(0, (int)floor(min({sy0, sy1, sy2})));
+            int max_y = min(g_height - 1, (int)ceil(max({sy0, sy1, sy2})));
+            if (min_x > max_x || min_y > max_y) continue;
+
+            float inv_area = 1.0f / area;
+            for (int y = min_y; y <= max_y; y++) {
+                for (int x = min_x; x <= max_x; x++) {
+                    float px = (float)x + 0.5f;
+                    float py = (float)y + 0.5f;
+                    float b0 = ((sx1 - px) * (sy2 - py) - (sy1 - py) * (sx2 - px)) * inv_area;
+                    float b1 = ((sx2 - px) * (sy0 - py) - (sy2 - py) * (sx0 - px)) * inv_area;
+                    float b2 = 1.0f - b0 - b1;
+                    if (b0 >= 0.0f && b1 >= 0.0f && b2 >= 0.0f) {
+                        float z = b0 * z0 + b1 * z1 + b2 * z2;
+                        int idx = y * g_width + x;
+                        if (z < g_zbuffer[idx] && z >= 0.0f) {
+                            g_zbuffer[idx] = z;
+                            g_framebuffer[idx] = final_color;
+                        }
                     }
                 }
             }

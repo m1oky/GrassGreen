@@ -43,7 +43,7 @@ namespace GrassGfx3D {
 
     uint32_t create_cube(float size);
     uint32_t create_sphere(float radius, int segments);
-    uint32_t create_plane(float w, float d);
+    uint32_t create_plane(float w, float d, int segments = 10);
     uint32_t load_obj(const std::string& path);
     void set_texture(uint32_t mesh_id, const std::string& path);
     void set_color(uint32_t mesh_id, float r, float g, float b);

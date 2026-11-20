@@ -2066,7 +2066,8 @@ public:
                         push(GrassValue::Num((double)GrassGfx3D::create_sphere((float)args[0].toNumber(), segs)));
                     }
                     else if (fn == "g3d_plane" && argc >= 2) {
-                        push(GrassValue::Num((double)GrassGfx3D::create_plane((float)args[0].toNumber(), (float)args[1].toNumber())));
+                        int segs = (argc >= 3) ? (int)args[2].toNumber() : 10;
+                        push(GrassValue::Num((double)GrassGfx3D::create_plane((float)args[0].toNumber(), (float)args[1].toNumber(), segs)));
                     }
                     else if (fn == "g3d_load_obj" && argc >= 1) {
                         push(GrassValue::Num((double)GrassGfx3D::load_obj(args[0].toString())));
