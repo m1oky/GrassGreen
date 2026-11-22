@@ -10,6 +10,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <sstream>
+#include <memory>
 
 #include "GrassArena.h"
 
@@ -367,27 +368,78 @@ enum GrassTokenKind {
     TOK_TILDE
 };
 
+struct SourceLocation {
+    std::string file;
+    int line = 1;
+    int col = 1;
+
+    SourceLocation() = default;
+    SourceLocation(const std::string& f, int l, int c) : file(f), line(l), col(c) {}
+    SourceLocation(int l, int c) : file(""), line(l), col(c) {}
+
+    std::string toString() const {
+        if (file.empty()) return std::to_string(line) + ":" + std::to_string(col);
+        return file + ":" + std::to_string(line) + ":" + std::to_string(col);
+    }
+};
+
+enum class DiagnosticSeverity {
+    Error,
+    Warning,
+    Note
+};
+
+struct SyntaxDiagnostic {
+    DiagnosticSeverity severity = DiagnosticSeverity::Error;
+    SourceLocation loc;
+    std::string message;
+    std::string hint;
+
+    SyntaxDiagnostic() = default;
+    SyntaxDiagnostic(DiagnosticSeverity sev, const SourceLocation& l, const std::string& msg, const std::string& h = "")
+        : severity(sev), loc(l), message(msg), hint(h) {}
+
+    std::string format() const {
+        std::string s = "[";
+        if (severity == DiagnosticSeverity::Error) s += "Error";
+        else if (severity == DiagnosticSeverity::Warning) s += "Warning";
+        else s += "Note";
+        s += "] " + loc.toString() + ": " + message;
+        if (!hint.empty()) {
+            s += " (hint: " + hint + ")";
+        }
+        return s;
+    }
+};
+
 struct GrassToken {
     GrassTokenKind kind;
     std::string text;
     double num_val;
     int line;
+    int col;
 
-    GrassToken(GrassTokenKind k = TOK_EOF, const std::string& t = "", double n = 0.0, int l = 1)
-        : kind(k), text(t), num_val(n), line(l) {}
+    GrassToken(GrassTokenKind k = TOK_EOF, const std::string& t = "", double n = 0.0, int l = 1, int c = 1)
+        : kind(k), text(t), num_val(n), line(l), col(c) {}
+
+    SourceLocation loc(const std::string& fname = "") const {
+        return SourceLocation(fname, line, col);
+    }
 };
 
 class Lexer {
     std::string src;
+    std::string filename;
     size_t pos = 0;
     int line = 1;
+    size_t line_start_pos = 0;
     bool at_line_start = true;
 
     static bool isIdentStart(unsigned char c);
     static bool isIdentCont(unsigned char c);
 
 public:
-    explicit Lexer(const std::string& source);
+    explicit Lexer(const std::string& source, const std::string& fname = "");
     std::vector<GrassToken> tokenize();
 };
 
@@ -433,7 +485,8 @@ class BytecodeCompiler {
     bool matchIdent(const std::string& name);
     bool consume(GrassTokenKind kind, const std::string& error_msg);
 
-    void reportError(int line, const std::string& msg);
+    void reportError(int line, const std::string& msg, int col = 1, const std::string& hint = "");
+    void reportError(const SourceLocation& loc, const std::string& msg, const std::string& hint = "");
     void synchronize();
     bool requireLib(const std::string& lib_key, const std::string& display_name, const std::string& feature_desc, int line);
     void checkBuiltinLibraryRequirement(const std::string& fn, int line);
@@ -475,9 +528,413 @@ public:
     std::vector<uint8_t> code;
     bool has_error = false;
     bool has_filesystem_struct = false;
+    std::vector<SyntaxDiagnostic> diagnostics;
 
     BytecodeCompiler(const std::vector<GrassToken>& toks, const std::string& fname);
     void compileProgram();
+    const std::vector<SyntaxDiagnostic>& getDiagnostics() const { return diagnostics; }
+};
+
+// ============================================================================
+// 5. ABSTRACT SYNTAX TREE (AST) AND PARSER WITH ERROR RECOVERY
+// ============================================================================
+
+enum class NodeKind : uint8_t {
+    LiteralExpr,
+    VariableExpr,
+    BinaryExpr,
+    UnaryExpr,
+    PostfixExpr,
+    CallExpr,
+    MemberAccessExpr,
+    IndexExpr,
+    ArrayLiteralExpr,
+    AllocExpr,
+    FreeExpr,
+
+    ExprStmt,
+    VarDeclStmt,
+    AssignStmt,
+    BlockStmt,
+    IfStmt,
+    WhileStmt,
+    ForStmt,
+    ReturnStmt,
+    BreakStmt,
+    ContinueStmt,
+    StreamIOStmt,
+
+    FunctionDecl,
+    StructDecl,
+    ClassDecl,
+    ModuleDecl,
+    Program
+};
+
+struct ASTNode {
+    NodeKind node_kind;
+    SourceLocation loc;
+    virtual ~ASTNode() = default;
+    explicit ASTNode(NodeKind k, const SourceLocation& l = SourceLocation()) : node_kind(k), loc(l) {}
+};
+
+struct ExprAST : public ASTNode {
+    explicit ExprAST(NodeKind k, const SourceLocation& l = SourceLocation()) : ASTNode(k, l) {}
+};
+
+enum class LiteralKind {
+    Int,
+    Float,
+    String,
+    Bool,
+    Nil
+};
+
+struct LiteralExprAST : public ExprAST {
+    LiteralKind lit_kind;
+    std::string str_val;
+    double num_val = 0.0;
+    bool bool_val = false;
+
+    LiteralExprAST(const SourceLocation& l, int64_t val)
+        : ExprAST(NodeKind::LiteralExpr, l), lit_kind(LiteralKind::Int), str_val(std::to_string(val)), num_val((double)val) {}
+    LiteralExprAST(const SourceLocation& l, double val)
+        : ExprAST(NodeKind::LiteralExpr, l), lit_kind(LiteralKind::Float), str_val(std::to_string(val)), num_val(val) {}
+    LiteralExprAST(const SourceLocation& l, const std::string& val)
+        : ExprAST(NodeKind::LiteralExpr, l), lit_kind(LiteralKind::String), str_val(val) {}
+    LiteralExprAST(const SourceLocation& l, bool val)
+        : ExprAST(NodeKind::LiteralExpr, l), lit_kind(LiteralKind::Bool), bool_val(val), num_val(val ? 1.0 : 0.0) {}
+    explicit LiteralExprAST(const SourceLocation& l)
+        : ExprAST(NodeKind::LiteralExpr, l), lit_kind(LiteralKind::Nil) {}
+};
+
+struct VariableExprAST : public ExprAST {
+    std::string name;
+    VariableExprAST(const SourceLocation& l, const std::string& n) : ExprAST(NodeKind::VariableExpr, l), name(n) {}
+};
+
+struct BinaryExprAST : public ExprAST {
+    GrassTokenKind op;
+    std::string op_str;
+    std::unique_ptr<ExprAST> lhs;
+    std::unique_ptr<ExprAST> rhs;
+
+    BinaryExprAST(const SourceLocation& l, GrassTokenKind o, const std::string& os,
+                  std::unique_ptr<ExprAST> left, std::unique_ptr<ExprAST> right)
+        : ExprAST(NodeKind::BinaryExpr, l), op(o), op_str(os), lhs(std::move(left)), rhs(std::move(right)) {}
+};
+
+struct UnaryExprAST : public ExprAST {
+    GrassTokenKind op;
+    std::string op_str;
+    std::unique_ptr<ExprAST> operand;
+    bool is_prefix = true;
+
+    UnaryExprAST(const SourceLocation& l, GrassTokenKind o, const std::string& os,
+                 std::unique_ptr<ExprAST> opnd, bool prefix = true)
+        : ExprAST(NodeKind::UnaryExpr, l), op(o), op_str(os), operand(std::move(opnd)), is_prefix(prefix) {}
+};
+
+struct PostfixExprAST : public ExprAST {
+    GrassTokenKind op;
+    std::string op_str;
+    std::unique_ptr<ExprAST> operand;
+
+    PostfixExprAST(const SourceLocation& l, GrassTokenKind o, const std::string& os,
+                   std::unique_ptr<ExprAST> opnd)
+        : ExprAST(NodeKind::PostfixExpr, l), op(o), op_str(os), operand(std::move(opnd)) {}
+};
+
+struct CallExprAST : public ExprAST {
+    std::string callee;
+    std::vector<std::unique_ptr<ExprAST>> args;
+
+    CallExprAST(const SourceLocation& l, const std::string& name, std::vector<std::unique_ptr<ExprAST>> a)
+        : ExprAST(NodeKind::CallExpr, l), callee(name), args(std::move(a)) {}
+};
+
+struct MemberAccessExprAST : public ExprAST {
+    std::unique_ptr<ExprAST> object;
+    std::string member;
+    bool is_arrow = false;
+    bool is_method_call = false;
+    std::vector<std::unique_ptr<ExprAST>> method_args;
+
+    MemberAccessExprAST(const SourceLocation& l, std::unique_ptr<ExprAST> obj, const std::string& mem, bool arrow = false)
+        : ExprAST(NodeKind::MemberAccessExpr, l), object(std::move(obj)), member(mem), is_arrow(arrow) {}
+};
+
+struct IndexExprAST : public ExprAST {
+    std::unique_ptr<ExprAST> target;
+    std::unique_ptr<ExprAST> index;
+
+    IndexExprAST(const SourceLocation& l, std::unique_ptr<ExprAST> t, std::unique_ptr<ExprAST> idx)
+        : ExprAST(NodeKind::IndexExpr, l), target(std::move(t)), index(std::move(idx)) {}
+};
+
+struct ArrayLiteralExprAST : public ExprAST {
+    std::vector<std::unique_ptr<ExprAST>> elements;
+
+    ArrayLiteralExprAST(const SourceLocation& l, std::vector<std::unique_ptr<ExprAST>> elems)
+        : ExprAST(NodeKind::ArrayLiteralExpr, l), elements(std::move(elems)) {}
+};
+
+struct AllocExprAST : public ExprAST {
+    std::string type_name;
+    std::unique_ptr<ExprAST> size_expr;
+
+    AllocExprAST(const SourceLocation& l, const std::string& tname, std::unique_ptr<ExprAST> sz = nullptr)
+        : ExprAST(NodeKind::AllocExpr, l), type_name(tname), size_expr(std::move(sz)) {}
+};
+
+struct FreeExprAST : public ExprAST {
+    std::unique_ptr<ExprAST> target;
+
+    FreeExprAST(const SourceLocation& l, std::unique_ptr<ExprAST> tgt)
+        : ExprAST(NodeKind::FreeExpr, l), target(std::move(tgt)) {}
+};
+
+// Statements
+struct StmtAST : public ASTNode {
+    explicit StmtAST(NodeKind k, const SourceLocation& l = SourceLocation()) : ASTNode(k, l) {}
+};
+
+struct ExprStmtAST : public StmtAST {
+    std::unique_ptr<ExprAST> expr;
+
+    ExprStmtAST(const SourceLocation& l, std::unique_ptr<ExprAST> e)
+        : StmtAST(NodeKind::ExprStmt, l), expr(std::move(e)) {}
+};
+
+struct VarDeclStmtAST : public StmtAST {
+    std::string type_name;
+    std::string var_name;
+    int pointer_depth = 0;
+    bool is_const = false;
+    std::unique_ptr<ExprAST> init_expr;
+
+    VarDeclStmtAST(const SourceLocation& l, const std::string& tname, const std::string& vname,
+                   int ptr_depth = 0, bool c = false, std::unique_ptr<ExprAST> init = nullptr)
+        : StmtAST(NodeKind::VarDeclStmt, l), type_name(tname), var_name(vname), pointer_depth(ptr_depth), is_const(c), init_expr(std::move(init)) {}
+};
+
+struct AssignStmtAST : public StmtAST {
+    std::unique_ptr<ExprAST> target;
+    GrassTokenKind op;
+    std::string op_str;
+    std::unique_ptr<ExprAST> value;
+
+    AssignStmtAST(const SourceLocation& l, std::unique_ptr<ExprAST> tgt, GrassTokenKind o, const std::string& os, std::unique_ptr<ExprAST> val)
+        : StmtAST(NodeKind::AssignStmt, l), target(std::move(tgt)), op(o), op_str(os), value(std::move(val)) {}
+};
+
+struct BlockStmtAST : public StmtAST {
+    std::vector<std::unique_ptr<StmtAST>> statements;
+
+    BlockStmtAST(const SourceLocation& l, std::vector<std::unique_ptr<StmtAST>> stmts = {})
+        : StmtAST(NodeKind::BlockStmt, l), statements(std::move(stmts)) {}
+};
+
+struct IfStmtAST : public StmtAST {
+    std::unique_ptr<ExprAST> condition;
+    std::unique_ptr<StmtAST> then_branch;
+    std::unique_ptr<StmtAST> else_branch;
+
+    IfStmtAST(const SourceLocation& l, std::unique_ptr<ExprAST> cond,
+              std::unique_ptr<StmtAST> then_b, std::unique_ptr<StmtAST> else_b = nullptr)
+        : StmtAST(NodeKind::IfStmt, l), condition(std::move(cond)), then_branch(std::move(then_b)), else_branch(std::move(else_b)) {}
+};
+
+struct WhileStmtAST : public StmtAST {
+    std::unique_ptr<ExprAST> condition;
+    std::unique_ptr<StmtAST> body;
+
+    WhileStmtAST(const SourceLocation& l, std::unique_ptr<ExprAST> cond, std::unique_ptr<StmtAST> b)
+        : StmtAST(NodeKind::WhileStmt, l), condition(std::move(cond)), body(std::move(b)) {}
+};
+
+struct ForStmtAST : public StmtAST {
+    std::unique_ptr<StmtAST> init;
+    std::unique_ptr<ExprAST> condition;
+    std::unique_ptr<StmtAST> step;
+    std::unique_ptr<StmtAST> body;
+
+    ForStmtAST(const SourceLocation& l, std::unique_ptr<StmtAST> i, std::unique_ptr<ExprAST> cond,
+               std::unique_ptr<StmtAST> s, std::unique_ptr<StmtAST> b)
+        : StmtAST(NodeKind::ForStmt, l), init(std::move(i)), condition(std::move(cond)), step(std::move(s)), body(std::move(b)) {}
+};
+
+struct ReturnStmtAST : public StmtAST {
+    std::unique_ptr<ExprAST> value;
+
+    ReturnStmtAST(const SourceLocation& l, std::unique_ptr<ExprAST> val = nullptr)
+        : StmtAST(NodeKind::ReturnStmt, l), value(std::move(val)) {}
+};
+
+struct BreakStmtAST : public StmtAST {
+    explicit BreakStmtAST(const SourceLocation& l) : StmtAST(NodeKind::BreakStmt, l) {}
+};
+
+struct ContinueStmtAST : public StmtAST {
+    explicit ContinueStmtAST(const SourceLocation& l) : StmtAST(NodeKind::ContinueStmt, l) {}
+};
+
+struct StreamIOStmtAST : public StmtAST {
+    bool is_output = true;
+    std::vector<std::unique_ptr<ExprAST>> operands;
+
+    StreamIOStmtAST(const SourceLocation& l, bool out, std::vector<std::unique_ptr<ExprAST>> ops)
+        : StmtAST(NodeKind::StreamIOStmt, l), is_output(out), operands(std::move(ops)) {}
+};
+
+// Declarations
+struct ParamDecl {
+    std::string type_name;
+    std::string name;
+    int pointer_depth = 0;
+    SourceLocation loc;
+
+    ParamDecl(const std::string& t, const std::string& n, int ptr, const SourceLocation& l)
+        : type_name(t), name(n), pointer_depth(ptr), loc(l) {}
+};
+
+struct FieldDecl {
+    std::string type_name;
+    std::string name;
+    int pointer_depth = 0;
+    SourceLocation loc;
+
+    FieldDecl(const std::string& t, const std::string& n, int ptr, const SourceLocation& l)
+        : type_name(t), name(n), pointer_depth(ptr), loc(l) {}
+};
+
+struct DeclAST : public ASTNode {
+    explicit DeclAST(NodeKind k, const SourceLocation& l = SourceLocation()) : ASTNode(k, l) {}
+};
+
+struct FunctionDeclAST : public DeclAST {
+    std::string return_type;
+    int return_pointer_depth = 0;
+    std::string name;
+    std::vector<ParamDecl> params;
+    std::unique_ptr<BlockStmtAST> body;
+    bool is_method = false;
+    bool is_virtual = false;
+
+    FunctionDeclAST(const SourceLocation& l, const std::string& ret_type, int ret_ptr,
+                    const std::string& n, std::vector<ParamDecl> p,
+                    std::unique_ptr<BlockStmtAST> b, bool method = false, bool virt = false)
+        : DeclAST(NodeKind::FunctionDecl, l), return_type(ret_type), return_pointer_depth(ret_ptr),
+          name(n), params(std::move(p)), body(std::move(b)),
+          is_method(method), is_virtual(virt) {}
+};
+
+struct StructDeclAST : public DeclAST {
+    std::string name;
+    std::vector<FieldDecl> fields;
+    std::vector<std::unique_ptr<FunctionDeclAST>> methods;
+
+    StructDeclAST(const SourceLocation& l, const std::string& n,
+                  std::vector<FieldDecl> f, std::vector<std::unique_ptr<FunctionDeclAST>> m)
+        : DeclAST(NodeKind::StructDecl, l), name(n), fields(std::move(f)), methods(std::move(m)) {}
+};
+
+struct ClassDeclAST : public DeclAST {
+    std::string name;
+    std::string base_class;
+    std::vector<FieldDecl> fields;
+    std::vector<std::unique_ptr<FunctionDeclAST>> methods;
+
+    ClassDeclAST(const SourceLocation& l, const std::string& n, const std::string& base,
+                 std::vector<FieldDecl> f, std::vector<std::unique_ptr<FunctionDeclAST>> m)
+        : DeclAST(NodeKind::ClassDecl, l), name(n), base_class(base), fields(std::move(f)), methods(std::move(m)) {}
+};
+
+struct ModuleDeclAST : public DeclAST {
+    std::string name;
+    std::vector<std::unique_ptr<FunctionDeclAST>> functions;
+    std::vector<std::unique_ptr<StructDeclAST>> structs;
+    std::vector<std::unique_ptr<ClassDeclAST>> classes;
+
+    ModuleDeclAST(const SourceLocation& l, const std::string& n)
+        : DeclAST(NodeKind::ModuleDecl, l), name(n) {}
+};
+
+struct ProgramAST : public ASTNode {
+    std::vector<std::string> included_libs;
+    std::vector<std::unique_ptr<DeclAST>> declarations;
+    std::vector<std::unique_ptr<StmtAST>> statements;
+    std::vector<SyntaxDiagnostic> diagnostics;
+
+    explicit ProgramAST(const SourceLocation& l = SourceLocation()) : ASTNode(NodeKind::Program, l) {}
+};
+
+// ============================================================================
+// PARSER WITH ERROR RECOVERY
+// ============================================================================
+
+class GrassParser {
+private:
+    std::vector<GrassToken> tokens;
+    size_t cur = 0;
+    std::string filename;
+    std::vector<SyntaxDiagnostic> diagnostics;
+    std::unordered_set<std::string> custom_types;
+    int error_count = 0;
+    static constexpr int MAX_ERRORS = 100;
+
+    const GrassToken& peek(int offset = 0) const;
+    GrassToken advance();
+    bool match(GrassTokenKind kind);
+    bool matchIdent(const std::string& name);
+    bool check(GrassTokenKind kind) const;
+    bool checkIdent(const std::string& name) const;
+    bool isAtEnd() const;
+
+    void reportError(const SourceLocation& loc, const std::string& msg, const std::string& hint = "");
+    void synchronize();
+
+    // Expressions
+    std::unique_ptr<ExprAST> parseExpression();
+    std::unique_ptr<ExprAST> parseAssignment();
+    std::unique_ptr<ExprAST> parseLogicalOr();
+    std::unique_ptr<ExprAST> parseLogicalAnd();
+    std::unique_ptr<ExprAST> parseBitwiseOr();
+    std::unique_ptr<ExprAST> parseBitwiseXor();
+    std::unique_ptr<ExprAST> parseBitwiseAnd();
+    std::unique_ptr<ExprAST> parseEquality();
+    std::unique_ptr<ExprAST> parseRelational();
+    std::unique_ptr<ExprAST> parseShift();
+    std::unique_ptr<ExprAST> parseAdditive();
+    std::unique_ptr<ExprAST> parseMultiplicative();
+    std::unique_ptr<ExprAST> parseUnary();
+    std::unique_ptr<ExprAST> parsePostfix();
+    std::unique_ptr<ExprAST> parsePrimary();
+
+    // Statements & Declarations
+    std::unique_ptr<StmtAST> parseStatement();
+    std::unique_ptr<BlockStmtAST> parseBlock();
+    std::unique_ptr<StmtAST> parseVarDecl(const std::string& type_name, int ptr_depth, bool is_const);
+    std::unique_ptr<StmtAST> parseIf();
+    std::unique_ptr<StmtAST> parseWhile();
+    std::unique_ptr<StmtAST> parseFor();
+    std::unique_ptr<StmtAST> parseReturn();
+    std::unique_ptr<StmtAST> parseStreamIO(bool is_output);
+
+    std::unique_ptr<DeclAST> parseDeclaration();
+    std::unique_ptr<FunctionDeclAST> parseFunction(const std::string& ret_type, int ret_ptr, const std::string& name);
+    std::unique_ptr<StructDeclAST> parseStruct();
+    std::unique_ptr<ClassDeclAST> parseClass();
+    std::unique_ptr<ModuleDeclAST> parseModule();
+
+    bool isTypeName(const std::string& s) const;
+    static bool isVarKeyword(const std::string& s);
+
+public:
+    explicit GrassParser(const std::vector<GrassToken>& toks, const std::string& fname = "");
+    std::unique_ptr<ProgramAST> parseProgram();
+    const std::vector<SyntaxDiagnostic>& getDiagnostics() const { return diagnostics; }
+    bool hasErrors() const { return !diagnostics.empty(); }
 };
 
 #endif // GRASS_SYNTAX_H

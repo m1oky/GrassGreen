@@ -53,6 +53,10 @@
 #include "GrassMMIO.h"
 #include "GrassAudio.h"
 #include "GrassNativeCodegen.h"
+#include "GrassSema.h"
+#include "GrassNativeOOP.h"
+#include "GrassNativeMemory.h"
+#include "GrassNativeStdlib.h"
 
 using namespace std;
 namespace fs = std::filesystem;
@@ -3747,6 +3751,7 @@ struct CompilerOptions {
     string arch_str = "x64";         // --arch x64|x32
     string abi_str = "win64";        // --abi win64|sysv64|cdecl32|baremetal64|baremetal32
     uint64_t base_addr = 0x100000;   // --base-addr
+    bool no_sema = false;            // --no-sema
 };
 
 void PrintVersion(bool lang_ru) {
@@ -3784,7 +3789,8 @@ void PrintHelp(bool lang_ru) {
              << "Диагностика и анализ:\n"
              << "  --dump-ast       Распечатать дерево токенов (AST) и C-ABI структуры\n"
              << "  -S               Распечатать читаемый дизассемблер байт-кода\n"
-             << "  --time           Замерить время каждого этапа компиляции (мс)\n\n"
+             << "  --time           Замерить время каждого этапа компиляции (мс)\n"
+             << "  --no-sema        Отключить статический семантический анализ перед сборкой\n\n"
              << "Нативная кодогенерация и контейнеры (G&G Native Backend):\n"
              << "  --native         Скомпилировать напрямую в нативный исполняемый .exe (без VM)\n"
              << "  --emit-ir        Вывести текстовый дамп SSA GrassIR до и после оптимизаций\n"
@@ -3821,7 +3827,8 @@ void PrintHelp(bool lang_ru) {
              << "Diagnostics & Inspection:\n"
              << "  --dump-ast       Dump syntax tree (AST) and C-ABI struct layouts\n"
              << "  -S               Print disassembled human-readable bytecode\n"
-             << "  --time           Display execution time for each compilation stage (ms)\n\n"
+             << "  --time           Display execution time for each compilation stage (ms)\n"
+             << "  --no-sema        Disable static semantic analysis before compilation\n\n"
              << "Native Backend & Containers (G&G Native Backend):\n"
              << "  --native         Compile directly to native standalone .exe without bytecode VM\n"
              << "  --emit-ir        Dump text SSA GrassIR before and after optimizations\n"
@@ -4116,6 +4123,28 @@ bool ProcessCompilation(CompilerOptions& opt) {
     auto t_lex_end = chrono::high_resolution_clock::now();
     double lex_ms = chrono::duration<double, std::milli>(t_lex_end - t_lex_start).count();
 
+    // 2.1.5. Семантический анализ (GrassSema)
+    if (!opt.no_sema) {
+        GrassParser sema_parser(tokens, input_path);
+        auto program_ast = sema_parser.parseProgram();
+        if (sema_parser.hasErrors()) {
+            if (opt.lang_ru) cerr << "\n[GrassSema]: Ошибки синтаксического анализа:\n";
+            else cerr << "\n[GrassSema]: Syntax analysis errors:\n";
+            for (const auto& diag : sema_parser.getDiagnostics()) {
+                cerr << "  " << diag.format() << "\n";
+            }
+            return false;
+        }
+
+        grass::sema::GrassSema sema;
+        if (!sema.analyze(*program_ast)) {
+            if (opt.lang_ru) cerr << "\n[GrassSema]: Ошибки семантического анализа:\n";
+            else cerr << "\n[GrassSema]: Semantic analysis errors:\n";
+            sema.printDiagnostics();
+            return false;
+        }
+    }
+
     // 2.2. Нативный бэкенд (Native Backend: GrassIR + GrassX86Encoder + GrassObjWriter)
     if (opt.native_mode || opt.emit_ir || opt.emit_obj || opt.emit_bin) {
         auto t_native_start = chrono::high_resolution_clock::now();
@@ -4125,6 +4154,7 @@ bool ProcessCompilation(CompilerOptions& opt) {
         nopt.opt_level = opt.opt_level;
         nopt.base_address = opt.base_addr;
         nopt.emit_ir = opt.emit_ir;
+        nopt.freestanding = opt.freestanding || opt.emit_bin;
         nopt.emit_obj_path = opt.emit_obj_path;
         nopt.emit_bin_path = opt.emit_bin_path;
         nopt.lang_ru = opt.lang_ru;
@@ -4133,6 +4163,14 @@ bool ProcessCompilation(CompilerOptions& opt) {
         string base_name = input_path;
         size_t last_dot = base_name.rfind('.');
         if (last_dot != string::npos) base_name = base_name.substr(0, last_dot);
+
+        if (opt.emit_bin && nopt.emit_bin_path.empty()) {
+            nopt.emit_bin_path = base_name + ".bin";
+        }
+        if (opt.emit_obj && nopt.emit_obj_path.empty()) {
+            nopt.emit_obj_path = (nopt.abi == grass::codegen::TargetABI::Win64 || nopt.abi == grass::codegen::TargetABI::Cdecl32)
+                                 ? (base_name + ".obj") : (base_name + ".o");
+        }
 
         if (opt.native_mode) {
             nopt.output_exe_path = opt.output_file.empty() ? (base_name + ".exe") : opt.output_file;
@@ -4464,6 +4502,8 @@ int main(int argc, char* argv[]) {
             } else if (arg == "--native") {
                 opt.native_mode = true;
                 opt.emit_bytecode_only = false;
+            } else if (arg == "--no-sema") {
+                opt.no_sema = true;
             } else if (arg == "--emit-ir") {
                 opt.emit_ir = true;
             } else if (arg == "--emit-obj") {

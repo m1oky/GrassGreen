@@ -949,7 +949,7 @@ namespace grass::backend {
         return true;
     }
 
-    bool GrassObjWriter::write_coff_obj(const CompiledUnit& unit, BinaryBuffer& out, std::string* out_error) {
+    bool GrassObjWriter::write_coff_obj(const CompiledUnit& unit, BinaryBuffer& out, std::string* out_error, bool include_directives) {
         if (!validate_compiled_unit(unit, out_error)) {
             return false;
         }
@@ -1004,6 +1004,18 @@ namespace grass::backend {
             sec.name = ".bss";
             sec.characteristics = COFF_SCN_CNT_UNINITIALIZED_DATA | COFF_SCN_MEM_READ | COFF_SCN_MEM_WRITE | COFF_SCN_ALIGN_16BYTES;
             sec.raw_bytes.clear();
+            sec.section_number = next_sec_num++;
+            sections.push_back(sec);
+        }
+
+        // Add .drectve section to automatically pull in system libraries when linking
+        if (include_directives) {
+            SectionData sec;
+            sec.kind = SectionKind::RoData;
+            sec.name = ".drectve";
+            sec.characteristics = 0x00100A00; // IMAGE_SCN_LNK_INFO | IMAGE_SCN_LNK_REMOVE | ALIGN_1BYTE
+            std::string drectve_str = " -defaultlib:kernel32.lib -defaultlib:ws2_32.lib -defaultlib:user32.lib ";
+            sec.raw_bytes.assign(drectve_str.begin(), drectve_str.end());
             sec.section_number = next_sec_num++;
             sections.push_back(sec);
         }
@@ -1204,9 +1216,9 @@ namespace grass::backend {
         return true;
     }
 
-    bool GrassObjWriter::write_coff_obj_file(const CompiledUnit& unit, const std::string& filename, std::string* out_error) {
+    bool GrassObjWriter::write_coff_obj_file(const CompiledUnit& unit, const std::string& filename, std::string* out_error, bool include_directives) {
         BinaryBuffer buf;
-        if (!write_coff_obj(unit, buf, out_error)) {
+        if (!write_coff_obj(unit, buf, out_error, include_directives)) {
             return false;
         }
         if (!buf.write_to_file(filename)) {
@@ -2213,6 +2225,126 @@ namespace grass::backend {
 
     std::string GrassObjWriter::generate_link_map(const LinkMap& map) {
         return map.generate_report();
+    }
+
+    std::vector<WinLibraryImport> GrassObjWriter::get_default_windows_imports() {
+        return {
+            {
+                "KERNEL32.dll",
+                {
+                    "ExitProcess", "GetStdHandle", "WriteFile", "ReadFile",
+                    "GetLocalTime", "QueryPerformanceCounter", "QueryPerformanceFrequency",
+                    "Sleep", "VirtualAlloc", "VirtualFree"
+                }
+            },
+            {
+                "WS2_32.dll",
+                {
+                    "WSAStartup", "WSACleanup", "socket", "connect", "send", "recv", "closesocket"
+                }
+            },
+            {
+                "USER32.dll",
+                {
+                    "MessageBoxA"
+                }
+            }
+        };
+    }
+
+    bool GrassObjWriter::generate_import_table(const std::vector<WinLibraryImport>& imports,
+                                              uint32_t idata_rva,
+                                              BinaryBuffer& out_idata,
+                                              std::unordered_map<std::string, uint32_t>& out_iat_offsets,
+                                              std::string* out_error) {
+        (void)out_error;
+        if (imports.empty()) {
+            out_idata.clear();
+            out_iat_offsets.clear();
+            return true;
+        }
+
+        out_idata.clear();
+        out_iat_offsets.clear();
+
+        size_t num_dlls = imports.size();
+        size_t dir_table_size = (num_dlls + 1) * 20;
+        size_t current_offset = dir_table_size;
+
+        std::vector<size_t> ilt_offsets(num_dlls);
+        for (size_t i = 0; i < num_dlls; ++i) {
+            ilt_offsets[i] = current_offset;
+            current_offset += (imports[i].symbols.size() + 1) * 8;
+        }
+
+        std::vector<size_t> iat_offsets(num_dlls);
+        for (size_t i = 0; i < num_dlls; ++i) {
+            iat_offsets[i] = current_offset;
+            current_offset += (imports[i].symbols.size() + 1) * 8;
+        }
+
+        std::vector<size_t> name_offsets(num_dlls);
+        for (size_t i = 0; i < num_dlls; ++i) {
+            name_offsets[i] = current_offset;
+            current_offset += imports[i].dll_name.size() + 1;
+        }
+
+        if (current_offset % 2 != 0) current_offset++;
+
+        std::vector<std::vector<size_t>> hint_name_offsets(num_dlls);
+        for (size_t i = 0; i < num_dlls; ++i) {
+            hint_name_offsets[i].resize(imports[i].symbols.size());
+            for (size_t s = 0; s < imports[i].symbols.size(); ++s) {
+                hint_name_offsets[i][s] = current_offset;
+                current_offset += 2 + imports[i].symbols[s].size() + 1;
+                if (current_offset % 2 != 0) current_offset++;
+            }
+        }
+
+        for (size_t i = 0; i < num_dlls; ++i) {
+            uint32_t ilt_rva = static_cast<uint32_t>(idata_rva + ilt_offsets[i]);
+            uint32_t name_rva = static_cast<uint32_t>(idata_rva + name_offsets[i]);
+            uint32_t iat_rva = static_cast<uint32_t>(idata_rva + iat_offsets[i]);
+
+            out_idata.emit_u32(ilt_rva);
+            out_idata.emit_u32(0);
+            out_idata.emit_u32(0);
+            out_idata.emit_u32(name_rva);
+            out_idata.emit_u32(iat_rva);
+        }
+        out_idata.emit_zeros(20);
+
+        for (size_t i = 0; i < num_dlls; ++i) {
+            for (size_t s = 0; s < imports[i].symbols.size(); ++s) {
+                uint64_t hint_name_rva = idata_rva + hint_name_offsets[i][s];
+                out_idata.emit_u64(hint_name_rva);
+            }
+            out_idata.emit_u64(0);
+        }
+
+        for (size_t i = 0; i < num_dlls; ++i) {
+            for (size_t s = 0; s < imports[i].symbols.size(); ++s) {
+                size_t entry_offset = out_idata.size();
+                out_iat_offsets[imports[i].symbols[s]] = static_cast<uint32_t>(idata_rva + entry_offset);
+                uint64_t hint_name_rva = idata_rva + hint_name_offsets[i][s];
+                out_idata.emit_u64(hint_name_rva);
+            }
+            out_idata.emit_u64(0);
+        }
+
+        for (size_t i = 0; i < num_dlls; ++i) {
+            out_idata.emit_cstring(imports[i].dll_name);
+        }
+
+        for (size_t i = 0; i < num_dlls; ++i) {
+            for (size_t s = 0; s < imports[i].symbols.size(); ++s) {
+                if (out_idata.size() % 2 != 0) out_idata.emit_u8(0);
+                out_idata.emit_u16(static_cast<uint16_t>(s));
+                out_idata.emit_cstring(imports[i].symbols[s]);
+            }
+        }
+
+        return true;
     }
 
 } // namespace grass::backend

@@ -31,6 +31,26 @@ namespace grass::ir {
     class IRModule;
     class IRBuilder;
 
+    struct SourceLocation {
+        std::string file;
+        uint32_t line = 0;
+        uint32_t column = 0;
+
+        SourceLocation() = default;
+        SourceLocation(std::string f, uint32_t l, uint32_t c = 0)
+            : file(std::move(f)), line(l), column(c) {}
+
+        bool is_valid() const { return line > 0 || !file.empty(); }
+        std::string to_string() const {
+            if (file.empty() && line == 0) return "";
+            std::string s;
+            if (!file.empty()) s += file + ":";
+            s += std::to_string(line);
+            if (column > 0) s += ":" + std::to_string(column);
+            return s;
+        }
+    };
+
     using ValueId = uint32_t;
     constexpr ValueId kInvalidValueId = 0;
 
@@ -223,6 +243,7 @@ namespace grass::ir {
         IRType* type = nullptr;
         ValueId result_id = kInvalidValueId;
         BasicBlock* parent = nullptr;
+        SourceLocation loc;
 
         std::vector<ValueId> operands;
 
@@ -314,6 +335,7 @@ namespace grass::ir {
         std::vector<IRValue> arguments;
         std::vector<std::unique_ptr<BasicBlock>> blocks;
         IRModule* parent = nullptr;
+        bool is_declaration = false;
 
         std::unordered_map<ValueId, IRValue> values;
         ValueId next_value_id = 1;
@@ -366,12 +388,16 @@ namespace grass::ir {
         BasicBlock* insert_block_ = nullptr;
         size_t insert_index_ = 0;
         bool at_end_ = true;
+        SourceLocation current_loc_;
 
         IRInst* insert_instruction(std::unique_ptr<IRInst> inst);
 
     public:
         IRBuilder() = default;
         explicit IRBuilder(IRFunction* fn);
+
+        void set_current_loc(const SourceLocation& loc) { current_loc_ = loc; }
+        const SourceLocation& get_current_loc() const { return current_loc_; }
 
         void set_function(IRFunction* fn);
         IRFunction* get_function() const { return function_; }

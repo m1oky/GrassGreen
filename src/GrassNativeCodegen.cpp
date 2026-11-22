@@ -1,5 +1,9 @@
 #include "GrassNativeCodegen.h"
 #include "GrassImport.h"
+#include "GrassSema.h"
+#include "GrassNativeOOP.h"
+#include "GrassNativeMemory.h"
+#include "GrassNativeStdlib.h"
 
 #include <iostream>
 #include <fstream>
@@ -199,7 +203,165 @@ int64_t grass_array_len(void* ptr) {
 )";
 
     // =========================================================================
-    // 2. AST Lowering: Tokens -> GrassIR::IRModule
+    // 2. Default Subsystem Delegates
+    // =========================================================================
+
+    class DefaultNativeMemoryDelegate : public INativeMemoryDelegate {
+    public:
+        explicit DefaultNativeMemoryDelegate(const native::MemoryRuntimeConfig& config = {})
+            : mem_(config) {}
+
+        ir::ValueId emit_alloc(ir::IRBuilder& builder, uint64_t size_bytes, const std::string& name = "dyn_alloc") override {
+            return mem_.emit_alloc_const(builder, size_bytes, name);
+        }
+        ir::ValueId emit_alloc(ir::IRBuilder& builder, ir::ValueId size_bytes, const std::string& name = "dyn_alloc") override {
+            return mem_.emit_alloc(builder, size_bytes, name);
+        }
+        void emit_free(ir::IRBuilder& builder, ir::ValueId ptr) override {
+            mem_.emit_free(builder, ptr);
+        }
+        void enter_scope(const std::string& name = "") override {
+            mem_.enter_scope(name);
+        }
+        void exit_scope(ir::IRBuilder& builder) override {
+            mem_.exit_scope(builder);
+        }
+        void register_raii_object(ir::ValueId obj_ptr, const std::string& dtor_fn, const std::string& debug_name = "") override {
+            mem_.register_raii_object(obj_ptr, dtor_fn, debug_name);
+        }
+        void register_dynamic_buffer(ir::ValueId buf_ptr, const std::string& debug_name = "") override {
+            mem_.register_dynamic_buffer(buf_ptr, debug_name);
+        }
+        void emit_all_cleanups(ir::IRBuilder& builder) override {
+            mem_.emit_all_cleanups(builder);
+        }
+        ir::IRInst* emit_return(ir::IRBuilder& builder, std::optional<ir::ValueId> ret_val = std::nullopt) override {
+            return mem_.emit_return(builder, ret_val);
+        }
+        native::GrassNativeMemory& get_memory() { return mem_; }
+    private:
+        native::GrassNativeMemory mem_;
+    };
+
+    class DefaultNativeOOPDelegate : public INativeOOPDelegate {
+    public:
+        DefaultNativeOOPDelegate(ir::IRModule& module, native::GrassNativeMemory* mem)
+            : oop_(module, mem) {}
+
+        bool has_class_or_struct(const std::string& name) const override {
+            return oop_.has_class(name);
+        }
+        bool handle_struct_or_class_decl(const std::vector<GrassToken>& tokens, size_t& pos,
+                                         ir::IRModule& module, std::string& error) override {
+            (void)tokens; (void)pos; (void)module; (void)error;
+            return true;
+        }
+        bool handle_method_call(ir::IRBuilder& builder, ir::ValueId instance_ptr,
+                                const std::string& class_name, const std::string& method_name,
+                                const std::vector<ir::ValueId>& args, ir::ValueId& out_res,
+                                std::string& error) override {
+            (void)error;
+            out_res = oop_.emit_call_method(builder, instance_ptr, class_name, method_name, args);
+            return out_res != ir::kInvalidValueId;
+        }
+        bool handle_field_access(ir::IRBuilder& builder, ir::ValueId instance_ptr,
+                                 const std::string& class_name, const std::string& field_name,
+                                 ir::ValueId& out_res, std::string& error) override {
+            (void)error;
+            out_res = oop_.emit_load_field(builder, instance_ptr, class_name, field_name);
+            return out_res != ir::kInvalidValueId;
+        }
+        bool handle_field_store(ir::IRBuilder& builder, ir::ValueId instance_ptr,
+                                const std::string& class_name, const std::string& field_name,
+                                ir::ValueId val_to_store, std::string& error) override {
+            (void)error;
+            ir::IRInst* inst = oop_.emit_store_field(builder, instance_ptr, class_name, field_name, val_to_store);
+            return inst != nullptr;
+        }
+        bool handle_new_object(ir::IRBuilder& builder, const std::string& class_name,
+                               const std::vector<ir::ValueId>& ctor_args, ir::ValueId& out_res,
+                               std::string& error) override {
+            (void)error;
+            out_res = oop_.emit_new_object(builder, class_name, ctor_args);
+            return out_res != ir::kInvalidValueId;
+        }
+        bool handle_delete_object(ir::IRBuilder& builder, ir::ValueId instance_ptr,
+                                  const std::string& class_name, std::string& error) override {
+            (void)error;
+            oop_.emit_delete_object(builder, instance_ptr, class_name);
+            return true;
+        }
+        bool handle_array_create(ir::IRBuilder& builder, ir::IRType* elem_type,
+                                 uint64_t initial_cap, ir::ValueId& out_res, std::string& error) override {
+            (void)error;
+            out_res = oop_.emit_array_create_const(builder, elem_type, initial_cap);
+            return out_res != ir::kInvalidValueId;
+        }
+        bool handle_array_get(ir::IRBuilder& builder, ir::ValueId arr_ptr, ir::ValueId index_val,
+                              ir::IRType* elem_type, ir::ValueId& out_res, std::string& error) override {
+            (void)error;
+            out_res = oop_.emit_array_get(builder, arr_ptr, index_val, elem_type);
+            return out_res != ir::kInvalidValueId;
+        }
+        bool handle_array_set(ir::IRBuilder& builder, ir::ValueId arr_ptr, ir::ValueId index_val,
+                              ir::ValueId val_to_store, ir::IRType* elem_type, std::string& error) override {
+            (void)error;
+            oop_.emit_array_set(builder, arr_ptr, index_val, val_to_store, elem_type);
+            return true;
+        }
+        bool handle_string_literal(ir::IRBuilder& builder, const std::string& text,
+                                   ir::ValueId& out_res, std::string& error) override {
+            (void)error;
+            out_res = oop_.emit_string_literal(builder, text);
+            return out_res != ir::kInvalidValueId;
+        }
+        bool handle_string_concat(ir::IRBuilder& builder, ir::ValueId s1, ir::ValueId s2,
+                                  ir::ValueId& out_res, std::string& error) override {
+            (void)error;
+            out_res = oop_.emit_string_concat(builder, s1, s2);
+            return out_res != ir::kInvalidValueId;
+        }
+        native::GrassNativeOOP& get_oop() { return oop_; }
+    private:
+        native::GrassNativeOOP oop_;
+    };
+
+    class DefaultNativeStdlibDelegate : public INativeStdlibDelegate {
+    public:
+        DefaultNativeStdlibDelegate() = default;
+
+        bool is_stdlib_module(const std::string& module_name) const override {
+            auto mods = native::GrassNativeStdlib::instance().get_supported_modules();
+            return std::find(mods.begin(), mods.end(), module_name) != mods.end();
+        }
+
+        bool is_stdlib_function(const std::string& fn_name) const override {
+            return native::GrassNativeStdlib::instance().has_function(fn_name);
+        }
+
+        bool resolve_call(ir::IRBuilder& builder, const std::string& fn_name,
+                          const std::vector<ir::ValueId>& args, ir::ValueId& out_res,
+                          std::string& error) override {
+            const native::NativeFunctionDesc* desc = native::GrassNativeStdlib::instance().find_function(fn_name);
+            if (!desc) {
+                error = "Unknown standard library function: " + fn_name;
+                return false;
+            }
+            out_res = builder.create_call(desc->name, desc->return_type, args);
+            return true;
+        }
+
+        bool register_extern(ir::IRModule& module, const std::string& fn_name,
+                             ir::IRType* ret_type, const std::vector<ir::IRType*>& param_types,
+                             std::string& error) override {
+            (void)error;
+            native::GrassNativeStdlib::instance().register_extern(fn_name, "", ret_type, param_types, module.abi);
+            return true;
+        }
+    };
+
+    // =========================================================================
+    // 3. AST Lowering: Tokens -> GrassIR::IRModule
     // =========================================================================
 
     class ASTLowerer {
@@ -213,10 +375,19 @@ int64_t grass_array_len(void* ptr) {
         std::vector<uint8_t>& rodata_;
         std::unordered_map<std::string, uint64_t>& rodata_symbols_;
         uint32_t string_counter_ = 0;
+        std::string source_path_;
+        bool freestanding_ = false;
+
+        INativeOOPDelegate* oop_delegate_ = nullptr;
+        INativeMemoryDelegate* memory_delegate_ = nullptr;
+        INativeStdlibDelegate* stdlib_delegate_ = nullptr;
+        native::GrassNativeOOP* oop_mgr_ = nullptr;
+        native::GrassNativeMemory* mem_mgr_ = nullptr;
 
         struct VarBinding {
             ir::ValueId alloca_id = 0;
             ir::IRType* type = nullptr;
+            std::string struct_type_name;
         };
         std::vector<std::unordered_map<std::string, VarBinding>> scopes_;
 
@@ -226,6 +397,7 @@ int64_t grass_array_len(void* ptr) {
         };
         std::vector<LoopContext> loop_stack_;
         bool in_stream_io_ = false;
+        std::string last_struct_name_;
 
         const GrassToken& peek(int offset = 0) const {
             size_t idx = pos_ + offset;
@@ -234,7 +406,11 @@ int64_t grass_array_len(void* ptr) {
         }
 
         GrassToken advance() {
-            if (pos_ < tokens_.size()) return tokens_[pos_++];
+            if (pos_ < tokens_.size()) {
+                const auto& tok = tokens_[pos_++];
+                builder_.set_current_loc(ir::SourceLocation(source_path_, tok.line, tok.col));
+                return tok;
+            }
             return tokens_.back();
         }
 
@@ -268,9 +444,9 @@ int64_t grass_array_len(void* ptr) {
             if (!scopes_.empty()) scopes_.pop_back();
         }
 
-        bool declare_var(const std::string& name, ir::ValueId alloca_id, ir::IRType* type) {
+        bool declare_var(const std::string& name, ir::ValueId alloca_id, ir::IRType* type, const std::string& struct_name = "") {
             if (scopes_.empty()) push_scope();
-            scopes_.back()[name] = { alloca_id, type };
+            scopes_.back()[name] = { alloca_id, type, struct_name };
             return true;
         }
 
@@ -345,9 +521,19 @@ int64_t grass_array_len(void* ptr) {
         ASTLowerer(const std::vector<GrassToken>& tokens,
                    ir::IRModule& module,
                    std::vector<uint8_t>& rodata,
-                   std::unordered_map<std::string, uint64_t>& rodata_symbols)
+                   std::unordered_map<std::string, uint64_t>& rodata_symbols,
+                   const std::string& source_path = "",
+                   bool freestanding = false,
+                   INativeOOPDelegate* oop_del = nullptr,
+                   INativeMemoryDelegate* mem_del = nullptr,
+                   INativeStdlibDelegate* stdlib_del = nullptr,
+                   native::GrassNativeOOP* oop_mgr = nullptr,
+                   native::GrassNativeMemory* mem_mgr = nullptr)
             : tokens_(tokens), module_(module), ctx_(module.context),
-              rodata_(rodata), rodata_symbols_(rodata_symbols) {}
+              rodata_(rodata), rodata_symbols_(rodata_symbols),
+              source_path_(source_path), freestanding_(freestanding),
+              oop_delegate_(oop_del), memory_delegate_(mem_del), stdlib_delegate_(stdlib_del),
+              oop_mgr_(oop_mgr), mem_mgr_(mem_mgr) {}
 
         bool lower(std::string& error) {
             while (peek().kind != TOK_EOF) {
@@ -401,6 +587,15 @@ int64_t grass_array_len(void* ptr) {
             return ctx_.get_i64_type();
         }
 
+        struct PendingMethod {
+            std::string name;
+            ir::IRType* ret_type = nullptr;
+            std::vector<ir::IRType*> param_types;
+            std::vector<std::string> param_names;
+            size_t body_start_pos = 0;
+            size_t body_end_pos = 0;
+        };
+
         bool parse_struct_definition(std::string& error) {
             advance(); // consume 'struct'
             if (peek().kind != TOK_IDENT) {
@@ -410,21 +605,75 @@ int64_t grass_array_len(void* ptr) {
             std::string struct_name = advance().text;
             if (!consume(TOK_LBRACE, "Expected '{' after struct name!", error)) return false;
 
+            if (oop_mgr_) {
+                oop_mgr_->begin_struct(struct_name);
+            }
+
             std::vector<ir::IRType*> field_types;
             std::vector<std::string> field_names;
+            std::vector<PendingMethod> pending_methods;
 
             while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
                 if (peek().kind == TOK_IDENT && is_var_keyword(peek().text)) {
                     std::string ftype_str = advance().text;
                     ir::IRType* ftype = parse_type_name(ftype_str);
                     if (peek().kind != TOK_IDENT) {
-                        error = "Line " + std::to_string(peek().line) + ": Expected field name!";
+                        error = "Line " + std::to_string(peek().line) + ": Expected field or method name!";
                         return false;
                     }
-                    std::string fname = advance().text;
-                    match(TOK_SEMI);
-                    field_types.push_back(ftype);
-                    field_names.push_back(fname);
+                    std::string mname = advance().text;
+
+                    if (peek().kind == TOK_LPAREN) {
+                        advance(); // '('
+                        std::vector<ir::IRType*> param_types;
+                        std::vector<std::string> param_names;
+                        if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
+                            while (true) {
+                                ir::IRType* ptype = ctx_.get_i64_type();
+                                if (is_type_or_func_keyword(peek().text)) {
+                                    ptype = parse_type_name(advance().text);
+                                }
+                                if (peek().kind != TOK_IDENT) {
+                                    error = "Line " + std::to_string(peek().line) + ": Expected parameter name!";
+                                    return false;
+                                }
+                                std::string pname = advance().text;
+                                param_types.push_back(ptype);
+                                param_names.push_back(pname);
+                                if (!match(TOK_COMMA)) break;
+                            }
+                        }
+                        if (!consume(TOK_RPAREN, "Expected ')' closing method parameters!", error)) return false;
+                        if (!consume(TOK_LBRACE, "Expected '{' at start of method body!", error)) return false;
+
+                        size_t body_start = pos_;
+                        int brace_depth = 1;
+                        while (brace_depth > 0 && peek().kind != TOK_EOF) {
+                            if (peek().kind == TOK_LBRACE) brace_depth++;
+                            else if (peek().kind == TOK_RBRACE) {
+                                brace_depth--;
+                                if (brace_depth == 0) break;
+                            }
+                            advance();
+                        }
+                        size_t body_end = pos_;
+                        consume(TOK_RBRACE, "Expected '}' closing method body!", error);
+
+                        pending_methods.push_back({ mname, ftype, param_types, param_names, body_start, body_end });
+                        if (oop_mgr_) {
+                            oop_mgr_->add_method(mname, ftype, param_types, param_names);
+                        }
+                    } else {
+                        match(TOK_SEMI);
+                        if (mname == "name" || mname == "title" || mname == "msg" || mname == "text" || mname == "path" || mname == "str") {
+                            ftype = ctx_.get_ptr_type(ctx_.get_i8_type());
+                        }
+                        field_types.push_back(ftype);
+                        field_names.push_back(mname);
+                        if (oop_mgr_) {
+                            oop_mgr_->add_field(mname, ftype);
+                        }
+                    }
                 } else {
                     advance();
                 }
@@ -433,6 +682,67 @@ int64_t grass_array_len(void* ptr) {
             match(TOK_SEMI);
 
             ctx_.get_struct_type(struct_name, field_types, field_names);
+            if (oop_mgr_) {
+                oop_mgr_->finalize_class();
+            }
+
+            for (const auto& pm : pending_methods) {
+                ir::IRFunction* fn = nullptr;
+                if (oop_mgr_) {
+                    fn = oop_mgr_->create_method_function(struct_name, pm.name);
+                }
+                if (!fn) {
+                    fn = module_.create_function(struct_name + "_" + pm.name, pm.ret_type);
+                    ir::IRType* this_t = ctx_.get_ptr_type(ctx_.get_struct_type(struct_name, field_types, field_names));
+                    fn->add_argument("this", this_t);
+                    for (size_t i = 0; i < pm.param_types.size(); ++i) {
+                        fn->add_argument(pm.param_names[i], pm.param_types[i]);
+                    }
+                }
+
+                ir::IRFunction* prev_fn = builder_.get_function();
+                builder_.set_function(fn);
+                scopes_.clear();
+                push_scope();
+
+                ir::BasicBlock* entry_bb = builder_.create_block("entry");
+                builder_.set_insert_point(entry_bb);
+
+                ir::ValueId this_alloca = builder_.create_alloca(fn->arguments[0].type, 1, 0, "this");
+                builder_.create_store(fn->arguments[0].id, this_alloca);
+                declare_var("this", this_alloca, fn->arguments[0].type, struct_name);
+
+                for (size_t i = 1; i < fn->arguments.size(); ++i) {
+                    ir::ValueId p_alloca = builder_.create_alloca(fn->arguments[i].type, 1, 0, fn->arguments[i].name);
+                    builder_.create_store(fn->arguments[i].id, p_alloca);
+                    declare_var(fn->arguments[i].name, p_alloca, fn->arguments[i].type);
+                }
+
+                size_t saved_pos = pos_;
+                pos_ = pm.body_start_pos;
+                while (pos_ < pm.body_end_pos && peek().kind != TOK_EOF) {
+                    if (!parse_statement(error)) {
+                        pos_ = saved_pos;
+                        return false;
+                    }
+                }
+                pos_ = saved_pos;
+
+                ir::BasicBlock* cur_bb = builder_.get_insert_block();
+                if (cur_bb && !cur_bb->has_terminator()) {
+                    if (pm.ret_type->is_void()) {
+                        builder_.create_ret_void();
+                    } else {
+                        ir::ValueId def_ret = builder_.create_const_int(pm.ret_type, 0);
+                        builder_.create_ret(def_ret);
+                    }
+                }
+
+                pop_scope();
+                fn->rebuild_cfg();
+                builder_.set_function(prev_fn);
+            }
+
             return true;
         }
 
@@ -577,23 +887,42 @@ int64_t grass_array_len(void* ptr) {
             }
 
             // Variable Declaration
-            if (is_var_keyword(peek().text) && peek(1).kind == TOK_IDENT) {
+            bool is_struct_decl = (oop_mgr_ && oop_mgr_->has_class(peek().text));
+            if ((is_var_keyword(peek().text) || is_struct_decl) && peek(1).kind == TOK_IDENT) {
                 std::string type_name = advance().text;
-                ir::IRType* vtype = parse_type_name(type_name);
+                ir::IRType* vtype = nullptr;
+                std::string struct_name = "";
+                if (is_struct_decl) {
+                    struct_name = type_name;
+                    const auto* cd = oop_mgr_->get_class(type_name);
+                    vtype = cd ? cd->ir_struct_type : ctx_.get_i64_type();
+                } else {
+                    vtype = parse_type_name(type_name);
+                }
 
                 while (peek().kind == TOK_IDENT) {
                     std::string var_name = advance().text;
-                    ir::ValueId alloca_id = builder_.create_alloca(vtype, 1, 0, var_name);
-                    declare_var(var_name, alloca_id, vtype);
 
                     if (match(TOK_ASSIGN)) {
                         ir::ValueId init_val = parse_expression(error);
                         if (!init_val) return false;
+                        if ((type_name == "take" || type_name == "var" || type_name == "set") && builder_.get_function()->has_value(init_val)) {
+                            ir::IRType* actual_t = builder_.get_function()->get_value(init_val).type;
+                            if (actual_t && !actual_t->is_void()) {
+                                vtype = actual_t;
+                            }
+                        }
+                        ir::ValueId alloca_id = builder_.create_alloca(vtype, 1, 0, var_name);
+                        declare_var(var_name, alloca_id, vtype, struct_name);
                         init_val = coerce_type(init_val, vtype);
                         builder_.create_store(init_val, alloca_id);
                     } else {
-                        ir::ValueId default_val = builder_.create_const_int(vtype, 0);
-                        builder_.create_store(default_val, alloca_id);
+                        ir::ValueId alloca_id = builder_.create_alloca(vtype, 1, 0, var_name);
+                        declare_var(var_name, alloca_id, vtype, struct_name);
+                        if (!is_struct_decl) {
+                            ir::ValueId default_val = builder_.create_const_int(vtype, 0);
+                            builder_.create_store(default_val, alloca_id);
+                        }
                     }
                     if (!match(TOK_COMMA)) break;
                 }
@@ -810,6 +1139,55 @@ int64_t grass_array_len(void* ptr) {
         }
 
         ir::ValueId parse_assignment(std::string& error) {
+            // Check for member assignment: obj.field = expr or obj.field += expr
+            if (peek().kind == TOK_IDENT && peek(1).kind == TOK_DOT && peek(2).kind == TOK_IDENT &&
+                (peek(3).kind == TOK_ASSIGN || peek(3).kind == TOK_PLUS_ASSIGN ||
+                 peek(3).kind == TOK_MINUS_ASSIGN || peek(3).kind == TOK_MUL_ASSIGN ||
+                 peek(3).kind == TOK_DIV_ASSIGN)) {
+                std::string obj_name = advance().text;
+                advance(); // consume '.'
+                std::string field_name = advance().text;
+                GrassTokenKind op = advance().kind;
+
+                const VarBinding* obj_var = lookup_var(obj_name);
+                if (!obj_var) {
+                    error = "Undeclared object: " + obj_name;
+                    return 0;
+                }
+
+                ir::ValueId inst_ptr = obj_var->alloca_id;
+                if (obj_var->type && obj_var->type->is_pointer()) {
+                    inst_ptr = builder_.create_load(obj_var->alloca_id, obj_name + "_ptr");
+                }
+
+                std::string sname = obj_var->struct_type_name;
+                ir::ValueId rhs = parse_assignment(error);
+                if (!rhs) return 0;
+
+                if (op == TOK_ASSIGN) {
+                    if (oop_mgr_) {
+                        oop_mgr_->emit_store_field(builder_, inst_ptr, sname, field_name, rhs);
+                    }
+                    return rhs;
+                } else {
+                    ir::ValueId cur = 0;
+                    if (oop_mgr_) {
+                        cur = oop_mgr_->emit_load_field(builder_, inst_ptr, sname, field_name, field_name + "_val");
+                    }
+                    match_types(cur, rhs);
+                    ir::ValueId computed = 0;
+                    if (op == TOK_PLUS_ASSIGN) computed = builder_.create_add(cur, rhs);
+                    else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_sub(cur, rhs);
+                    else if (op == TOK_MUL_ASSIGN) computed = builder_.create_mul(cur, rhs);
+                    else if (op == TOK_DIV_ASSIGN) computed = builder_.create_sdiv(cur, rhs);
+
+                    if (oop_mgr_) {
+                        oop_mgr_->emit_store_field(builder_, inst_ptr, sname, field_name, computed);
+                    }
+                    return computed;
+                }
+            }
+
             // Check for assignment: identifier = expr
             if (peek().kind == TOK_IDENT &&
                 (peek(1).kind == TOK_ASSIGN || peek(1).kind == TOK_PLUS_ASSIGN ||
@@ -1047,8 +1425,8 @@ int64_t grass_array_len(void* ptr) {
                     }
                     std::string member_name = advance().text;
                     if (match(TOK_LPAREN)) {
-                        // Method call e.g. arr.push(10)
-                        std::vector<ir::ValueId> args = { base };
+                        // Method call e.g. arr.push(10) or hero.status() or hero.take_damage(35)
+                        std::vector<ir::ValueId> args;
                         if (peek().kind != TOK_RPAREN) {
                             while (true) {
                                 ir::ValueId arg = parse_expression(error);
@@ -1059,7 +1437,18 @@ int64_t grass_array_len(void* ptr) {
                         }
                         consume(TOK_RPAREN, "Expected ')' closing method call!", error);
                         if (member_name == "push") {
-                            builder_.create_call("grass_array_push", ctx_.get_void_type(), args);
+                            std::vector<ir::ValueId> push_args = { base };
+                            push_args.insert(push_args.end(), args.begin(), args.end());
+                            builder_.create_call("grass_array_push", ctx_.get_void_type(), push_args);
+                            return base;
+                        } else if (oop_mgr_ && !last_struct_name_.empty()) {
+                            base = oop_mgr_->emit_call_method(builder_, base, last_struct_name_, member_name, args);
+                            return base;
+                        }
+                    } else {
+                        // Field access e.g. this.name, hero.hp
+                        if (oop_mgr_ && !last_struct_name_.empty()) {
+                            base = oop_mgr_->emit_load_field(builder_, base, last_struct_name_, member_name);
                             return base;
                         }
                     }
@@ -1108,8 +1497,6 @@ int64_t grass_array_len(void* ptr) {
             if (peek().kind == TOK_STRING) {
                 std::string s = advance().text;
                 std::string sym = add_rodata_string(s);
-                // In SSA IR, load pointer to string symbol
-                // Callee grass_get_str_addr or direct symbol
                 return builder_.create_call(sym, ctx_.get_ptr_type(ctx_.get_i8_type()), {});
             }
 
@@ -1127,6 +1514,21 @@ int64_t grass_array_len(void* ptr) {
             if (peek().kind == TOK_IDENT) {
                 std::string ident = advance().text;
 
+                // Member access ahead? (e.g. hero.name or this.hp)
+                if (peek().kind == TOK_DOT) {
+                    const VarBinding* var = lookup_var(ident);
+                    if (!var) {
+                        error = "Undeclared identifier: " + ident;
+                        return 0;
+                    }
+                    last_struct_name_ = var->struct_type_name;
+                    ir::ValueId inst_ptr = var->alloca_id;
+                    if (var->type && var->type->is_pointer()) {
+                        inst_ptr = builder_.create_load(var->alloca_id, ident + "_ptr");
+                    }
+                    return inst_ptr;
+                }
+
                 // Function call: ident(args)
                 if (match(TOK_LPAREN)) {
                     std::vector<ir::ValueId> args;
@@ -1141,12 +1543,17 @@ int64_t grass_array_len(void* ptr) {
                     consume(TOK_RPAREN, "Expected ')' closing function arguments!", error);
 
                     ir::IRType* call_ret_type = ctx_.get_i64_type();
-                    if (ident == "start_time") call_ret_type = ctx_.get_void_type();
-                    else if (ident == "stop_time") call_ret_type = ctx_.get_f64_type();
-                    else if (ident == "conclus_time" || ident == "get_date" || ident == "get_time_str") {
-                        call_ret_type = ctx_.get_ptr_type(ctx_.get_i8_type());
-                    } else if (ident == "discor" || ident == "lerp" || ident == "sin" || ident == "cos") {
+                    const native::NativeFunctionDesc* std_fn = native::GrassNativeStdlib::instance().find_function(ident);
+                    if (std_fn && std_fn->return_type) {
+                        call_ret_type = std_fn->return_type;
+                    } else if (ident == "start_time") call_ret_type = ctx_.get_void_type();
+                    else if (ident == "stop_time" || ident == "discor" || ident == "lerp" ||
+                             ident == "sin" || ident == "cos" || ident == "memory_usit") {
                         call_ret_type = ctx_.get_f64_type();
+                    } else if (ident == "conclus_time" || ident == "get_date" || ident == "get_time_str" ||
+                               ident == "memory_free" || ident == "sha256" || ident == "fs_list" ||
+                               ident == "fs_read") {
+                        call_ret_type = ctx_.get_ptr_type(ctx_.get_i8_type());
                     } else if (ident == "len") {
                         ident = "grass_array_len";
                         call_ret_type = ctx_.get_i64_type();
@@ -1156,6 +1563,10 @@ int64_t grass_array_len(void* ptr) {
                     if (target_fn) {
                         for (size_t i = 0; i < args.size() && i < target_fn->arguments.size(); ++i) {
                             args[i] = coerce_type(args[i], target_fn->arguments[i].type);
+                        }
+                    } else if (std_fn) {
+                        for (size_t i = 0; i < args.size() && i < std_fn->param_types.size(); ++i) {
+                            args[i] = coerce_type(args[i], std_fn->param_types[i]);
                         }
                     }
 
@@ -1267,8 +1678,31 @@ int64_t grass_array_len(void* ptr) {
                                          ir::IRModule& module,
                                          std::vector<uint8_t>& rodata,
                                          std::unordered_map<std::string, uint64_t>& rodata_symbols,
-                                         std::string& error) {
-        ASTLowerer lowerer(tokens, module, rodata, rodata_symbols);
+                                         std::string& error,
+                                         const std::string& source_path) {
+        auto profile = options_.freestanding ? grass::native::RuntimeProfile::Freestanding : grass::native::RuntimeProfile::FullOS;
+        auto& stdlib = grass::native::GrassNativeStdlib::instance();
+        if (!stdlib.is_initialized()) {
+            stdlib.initialize(module.context);
+        }
+        ir::IRType* i64_t = module.context.get_i64_type();
+        ir::IRType* ptr_t = module.context.get_ptr_type(module.context.get_i8_type());
+        if (!stdlib.has_function("pow_mod")) {
+            stdlib.register_function({ "pow_mod", "CoreMath", i64_t, { i64_t, i64_t, i64_t }, { "base", "exp", "mod" }, false, true, false, "", backend::TargetABI::Win64 });
+        }
+        if (!stdlib.has_function("sha256")) {
+            stdlib.register_function({ "sha256", "CoreMath", ptr_t, { ptr_t }, { "input" }, false, true, false, "", backend::TargetABI::Win64 });
+        }
+        stdlib.register_all_into_module(module, profile);
+
+        native::MemoryRuntimeConfig mem_cfg;
+        mem_cfg.baremetal_mode = options_.freestanding;
+        native::GrassNativeMemory mem_mgr(mem_cfg);
+        native::GrassNativeOOP oop_mgr(module, &mem_mgr);
+
+        ASTLowerer lowerer(tokens, module, rodata, rodata_symbols, source_path, options_.freestanding,
+                           oop_delegate_.get(), memory_delegate_.get(), stdlib_delegate_.get(),
+                           &oop_mgr, &mem_mgr);
         return lowerer.lower(error);
     }
 
@@ -1322,6 +1756,18 @@ int64_t grass_array_len(void* ptr) {
         backend::GrassX86Encoder encoder(options_.arch);
 
         for (auto& fn : module.functions) {
+            if (fn->is_declaration || fn->blocks.empty()) {
+                backend::SymbolDef ext_sym;
+                ext_sym.name = fn->name;
+                ext_sym.section = backend::SectionKind::Text;
+                ext_sym.offset = 0;
+                ext_sym.size = 0;
+                ext_sym.is_global = true;
+                ext_sym.is_external = true;
+                unit.symbols.push_back(ext_sym);
+                continue;
+            }
+
             ir::AllocationResult alloc_res = allocator.allocate(*fn);
 
             // Function symbol in text section
@@ -1332,9 +1778,30 @@ int64_t grass_array_len(void* ptr) {
             fn_sym.is_global = true;
             fn_sym.is_external = false;
 
+            int32_t callee_saved_size = static_cast<int32_t>(alloc_res.used_callee_saved.size() * 8);
+            int32_t spill_base_offset = callee_saved_size + 16;
+            int32_t alloca_stack_cursor = spill_base_offset + alloc_res.stack_frame_size + 32;
+            std::unordered_map<ir::ValueId, int32_t> alloca_offsets;
+            for (const auto& bb : fn->blocks) {
+                for (const auto& inst : bb->instructions) {
+                    if (inst->op == ir::IROp::Alloca) {
+                        uint32_t bytes = 8;
+                        if (inst->type && inst->type->element_type) {
+                            if (inst->type->element_type->is_struct()) {
+                                bytes = static_cast<uint32_t>(inst->type->element_type->struct_fields.size() * 8);
+                                if (bytes == 0) bytes = 8;
+                            }
+                        }
+                        alloca_stack_cursor = (alloca_stack_cursor + 15) & ~15;
+                        alloca_offsets[inst->result_id] = alloca_stack_cursor;
+                        alloca_stack_cursor += bytes;
+                    }
+                }
+            }
+
             // Compute stack frame
             backend::StackFrameRequest req;
-            req.local_vars_size = alloc_res.stack_frame_size + 256;
+            req.local_vars_size = alloca_stack_cursor + 256;
             req.has_calls = true;
             req.max_outgoing_args_size = (options_.abi == TargetABI::Win64) ? 32 : 0;
             req.use_frame_pointer = true;
@@ -1379,9 +1846,9 @@ int64_t grass_array_len(void* ptr) {
             auto get_spill_offset = [&](ir::ValueId val) -> int32_t {
                 auto it = alloc_res.intervals.find(val);
                 if (it != alloc_res.intervals.end() && it->second.is_spilled) {
-                    return it->second.stack_slot_offset;
+                    return spill_base_offset + it->second.stack_slot_offset;
                 }
-                return 16 + static_cast<int32_t>(val * 8);
+                return spill_base_offset + static_cast<int32_t>(val * 8);
             };
 
             auto load_val = [&](ir::ValueId val, backend::Reg temp_reg) -> backend::Reg {
@@ -1504,15 +1971,14 @@ int64_t grass_array_len(void* ptr) {
                             break;
                         }
                         case ir::IROp::ConstFloat: {
-                            // Bitcast float to integer and move
                             uint64_t raw_bits;
                             std::memcpy(&raw_bits, &inst->float_imm, 8);
+                            int32_t off = get_spill_offset(inst->result_id);
+                            encoder.mov_ri64(backend::Reg::R11, (int64_t)raw_bits);
+                            encoder.mov_mr(backend::mem(backend::Reg::RBP, -off, 8), backend::Reg::R11);
                             backend::Reg dst = get_loc_reg(inst->result_id);
-                            if (dst != backend::Reg::None && backend::reg_is_gpr(dst)) {
-                                encoder.mov_ri64(dst, (int64_t)raw_bits);
-                            } else {
-                                encoder.mov_ri64(backend::Reg::R11, (int64_t)raw_bits);
-                                store_val(inst->result_id, backend::Reg::R11);
+                            if (dst != backend::Reg::None && backend::reg_is_xmm(dst)) {
+                                encoder.movsd_xm(dst, backend::mem(backend::Reg::RBP, -off, 8));
                             }
                             break;
                         }
@@ -1656,7 +2122,7 @@ int64_t grass_array_len(void* ptr) {
                         case ir::IROp::Alloca: {
                             backend::Reg dst = get_loc_reg(inst->result_id);
                             backend::Reg out = (dst != backend::Reg::None && backend::reg_is_gpr(dst)) ? dst : backend::Reg::R11;
-                            int32_t off = get_spill_offset(inst->result_id);
+                            int32_t off = alloca_offsets.count(inst->result_id) ? alloca_offsets[inst->result_id] : get_spill_offset(inst->result_id);
                             encoder.lea_rm(out, backend::mem(backend::Reg::RBP, -off, 8));
                             store_val(inst->result_id, out);
                             break;
@@ -1670,19 +2136,27 @@ int64_t grass_array_len(void* ptr) {
                             break;
                         }
                         case ir::IROp::Store: {
-                            backend::Reg val = load_val(inst->operands[0], backend::Reg::RAX);
                             backend::Reg ptr = load_val(inst->operands[1], backend::Reg::R10);
+                            backend::Reg val = load_val(inst->operands[0], backend::Reg::R11);
                             encoder.mov_mr(backend::mem(ptr, 0, 8), val);
                             break;
                         }
                         case ir::IROp::GetElementPtr: {
+                            backend::Reg dst = get_loc_reg(inst->result_id);
+                            backend::Reg out = (dst != backend::Reg::None && backend::reg_is_gpr(dst)) ? dst : backend::Reg::R11;
                             backend::Reg base = load_val(inst->operands[0], backend::Reg::RAX);
-                            if (inst->operands.size() > 1) {
+                            encoder.mov_rr(out, base);
+                            if (inst->gep_field_index >= 0) {
+                                int64_t byte_off = static_cast<int64_t>(inst->gep_field_index) * 8;
+                                if (byte_off != 0) {
+                                    encoder.add_ri(out, static_cast<int32_t>(byte_off));
+                                }
+                            } else if (inst->operands.size() > 1) {
                                 backend::Reg idx = load_val(inst->operands[1], backend::Reg::R10);
                                 encoder.imul_rri(backend::Reg::R10, idx, 8);
-                                encoder.add_rr(base, backend::Reg::R10);
+                                encoder.add_rr(out, backend::Reg::R10);
                             }
-                            store_val(inst->result_id, base);
+                            store_val(inst->result_id, out);
                             break;
                         }
                         case ir::IROp::Call: {
@@ -1694,38 +2168,45 @@ int64_t grass_array_len(void* ptr) {
                             }
 
                             // Pass arguments according to ABI
+                            // Phase 1: spill all operands to argument scratch slots at [RSP + i*8] to avoid register clobbering
                             for (size_t i = 0; i < inst->operands.size(); ++i) {
                                 ir::IRType* arg_t = fn->get_value(inst->operands[i]).type;
                                 bool is_fp = arg_t && arg_t->is_floating_point();
+                                int32_t temp_off = static_cast<int32_t>(i * 8);
+                                if (is_fp) {
+                                    backend::Reg src = load_val(inst->operands[i], backend::Reg::XMM0);
+                                    encoder.movsd_mx(backend::mem(backend::Reg::RSP, temp_off, 8), src);
+                                } else {
+                                    backend::Reg src = load_val(inst->operands[i], backend::Reg::R10);
+                                    encoder.mov_mr(backend::mem(backend::Reg::RSP, temp_off, 8), src);
+                                }
+                            }
+
+                            // Phase 2: load from scratch slots into ABI target registers and stack parameter slots
+                            for (size_t i = 0; i < inst->operands.size(); ++i) {
+                                ir::IRType* arg_t = fn->get_value(inst->operands[i]).type;
+                                bool is_fp = arg_t && arg_t->is_floating_point();
+                                int32_t temp_off = static_cast<int32_t>(i * 8);
                                 if (i < arg_regs.size()) {
                                     if (is_fp) {
                                         backend::Reg xmm_reg = static_cast<backend::Reg>(0x0050 + i);
-                                        backend::Reg src = load_val(inst->operands[i], xmm_reg);
-                                        if (src != xmm_reg) {
-                                            if (backend::reg_is_xmm(src)) encoder.movsd_xx(xmm_reg, src);
-                                            else encoder.cvtsi2sd_xr(xmm_reg, src);
-                                        }
+                                        encoder.movsd_xm(xmm_reg, backend::mem(backend::Reg::RSP, temp_off, 8));
                                     } else {
                                         backend::Reg gpr_reg = arg_regs[i];
-                                        backend::Reg src = load_val(inst->operands[i], gpr_reg);
-                                        if (src != gpr_reg) {
-                                            if (backend::reg_is_gpr(src)) encoder.mov_rr(gpr_reg, src);
-                                            else encoder.cvttsd2si_rx(gpr_reg, src);
-                                        }
+                                        encoder.mov_rm(gpr_reg, backend::mem(backend::Reg::RSP, temp_off, 8));
                                     }
                                 } else {
-                                    if (is_fp) {
-                                        backend::Reg src = load_val(inst->operands[i], backend::Reg::XMM0);
-                                        int32_t stack_off = (options_.abi == TargetABI::Win64)
-                                            ? (32 + (i - 4) * 8)
-                                            : ((i - arg_regs.size()) * 8);
-                                        encoder.movsd_mx(backend::mem(backend::Reg::RSP, stack_off, 8), src);
-                                    } else {
-                                        backend::Reg src = load_val(inst->operands[i], backend::Reg::R10);
-                                        int32_t stack_off = (options_.abi == TargetABI::Win64)
-                                            ? (32 + (i - 4) * 8)
-                                            : ((i - arg_regs.size()) * 8);
-                                        encoder.mov_mr(backend::mem(backend::Reg::RSP, stack_off, 8), src);
+                                    int32_t stack_off = (options_.abi == TargetABI::Win64)
+                                        ? (32 + (i - 4) * 8)
+                                        : ((i - arg_regs.size()) * 8);
+                                    if (stack_off != temp_off) {
+                                        if (is_fp) {
+                                            encoder.movsd_xm(backend::Reg::XMM0, backend::mem(backend::Reg::RSP, temp_off, 8));
+                                            encoder.movsd_mx(backend::mem(backend::Reg::RSP, stack_off, 8), backend::Reg::XMM0);
+                                        } else {
+                                            encoder.mov_rm(backend::Reg::R10, backend::mem(backend::Reg::RSP, temp_off, 8));
+                                            encoder.mov_mr(backend::mem(backend::Reg::RSP, stack_off, 8), backend::Reg::R10);
+                                        }
                                     }
                                 }
                             }
@@ -1890,8 +2371,9 @@ int64_t grass_array_len(void* ptr) {
                                          NativeCodegenResult& res,
                                          std::string& error) {
         // Flat Binary emission
-        if (!options_.emit_bin_path.empty()) {
-            res.bin_file_created = options_.emit_bin_path;
+        if (!options_.emit_bin_path.empty() || options_.freestanding) {
+            std::string bin_target = options_.emit_bin_path.empty() ? (base_name + ".bin") : options_.emit_bin_path;
+            res.bin_file_created = bin_target;
             std::string map_file = base_name + ".map";
             if (!backend::GrassObjWriter::write_flat_binary_file(unit, options_.base_address, res.bin_file_created, map_file, &error)) {
                 return false;
@@ -1921,11 +2403,20 @@ int64_t grass_array_len(void* ptr) {
     bool NativeCompiler::link_executable(const std::string& obj_path,
                                          const std::string& exe_path,
                                          std::string& error) {
+        if (options_.freestanding) {
+            return true;
+        }
+
         std::string runtime_c;
         if (!ensure_runtime_c_file(runtime_c, error)) return false;
 
         std::ostringstream cmd;
         cmd << "gcc -O2 \"" << obj_path << "\" \"" << runtime_c << "\" -o \"" << exe_path << "\"";
+        if (options_.abi == TargetABI::Win64 || options_.abi == TargetABI::Cdecl32) {
+            cmd << " -lkernel32 -lws2_32 -luser32 -lm";
+        } else {
+            cmd << " -lm";
+        }
 
         int code = std::system(cmd.str().c_str());
         if (code != 0) {
@@ -1952,7 +2443,7 @@ int64_t grass_array_len(void* ptr) {
         std::vector<uint8_t> rodata;
         std::unordered_map<std::string, uint64_t> rodata_symbols;
 
-        if (!lower_ast_to_ir(tokens, module, rodata, rodata_symbols, error)) {
+        if (!lower_ast_to_ir(tokens, module, rodata, rodata_symbols, error, source_path)) {
             res.success = false;
             res.error_message = "Lowering Error: " + error;
             return res;
@@ -1984,7 +2475,7 @@ int64_t grass_array_len(void* ptr) {
         }
 
         // Stage 5: Linking Executable (if output_exe_path is set or default native target)
-        if (!options_.output_exe_path.empty()) {
+        if (!options_.output_exe_path.empty() && !options_.freestanding) {
             if (!link_executable(res.obj_file_created, options_.output_exe_path, error)) {
                 res.success = false;
                 res.error_message = "Link Error: " + error;

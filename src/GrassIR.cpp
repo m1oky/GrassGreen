@@ -863,9 +863,8 @@ namespace grass::ir {
     }
 
     bool IRFunction::verify(std::string& error_out) const {
-        if (blocks.empty()) {
-            error_out = "Function '" + name + "' has no basic blocks.";
-            return false;
+        if (is_declaration || blocks.empty()) {
+            return true;
         }
 
         for (size_t b_idx = 0; b_idx < blocks.size(); ++b_idx) {
@@ -1104,6 +1103,9 @@ namespace grass::ir {
         assert(insert_block_ && "No insert block set for IRBuilder");
         IRInst* raw = inst.get();
         raw->parent = insert_block_;
+        if (!raw->loc.is_valid() && current_loc_.is_valid()) {
+            raw->loc = current_loc_;
+        }
 
         if (at_end_ || insert_index_ >= insert_block_->instructions.size()) {
             insert_block_->instructions.push_back(std::move(inst));
@@ -1850,6 +1852,7 @@ namespace grass::ir {
     // =========================================================================
 
     bool Mem2RegPass::run_on_function(IRFunction& fn) {
+        if (fn.is_declaration || fn.blocks.empty()) return false;
         fn.rebuild_cfg();
 
         // Remove unreachable blocks before dominator tree & SSA construction
@@ -2789,6 +2792,7 @@ namespace grass::ir {
     }
 
     bool PassManager::run(IRFunction& fn) {
+        if (fn.is_declaration || fn.blocks.empty()) return false;
         bool changed = false;
         bool iter_changed = true;
         int iters = 0;

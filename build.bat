@@ -42,6 +42,10 @@ g++ -std=c++20 -O3 -s -static -static-libgcc -static-libstdc++ ^
   src/GrassX86Encoder.cpp ^
   src/GrassObjWriter.cpp ^
   src/GrassNativeCodegen.cpp ^
+  src/GrassSema.cpp ^
+  src/GrassNativeOOP.cpp ^
+  src/GrassNativeMemory.cpp ^
+  src/GrassNativeStdlib.cpp ^
   -o bin/grassc.exe ^
   -lgdiplus -lgdi32 -lcomctl32 -lwinmm -lws2_32 -lwininet -lurlmon -lpsapi -liphlpapi -ldxgi -lpdh
 

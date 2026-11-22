@@ -470,12 +470,17 @@ namespace grass::backend {
     // 5. GrassObjWriter - Container Emission Engine
     // =========================================================================
 
+    struct WinLibraryImport {
+        std::string dll_name; // e.g. "KERNEL32.dll", "WS2_32.dll", "USER32.dll"
+        std::vector<std::string> symbols;
+    };
+
     class GrassObjWriter {
     public:
         static bool validate_compiled_unit(const CompiledUnit& unit, std::string* out_error = nullptr);
 
-        static bool write_coff_obj(const CompiledUnit& unit, BinaryBuffer& out, std::string* out_error = nullptr);
-        static bool write_coff_obj_file(const CompiledUnit& unit, const std::string& filename, std::string* out_error = nullptr);
+        static bool write_coff_obj(const CompiledUnit& unit, BinaryBuffer& out, std::string* out_error = nullptr, bool include_directives = false);
+        static bool write_coff_obj_file(const CompiledUnit& unit, const std::string& filename, std::string* out_error = nullptr, bool include_directives = false);
 
         static bool write_elf_obj(const CompiledUnit& unit, BinaryBuffer& out, std::string* out_error = nullptr);
         static bool write_elf_obj_file(const CompiledUnit& unit, const std::string& filename, std::string* out_error = nullptr);
@@ -483,6 +488,13 @@ namespace grass::backend {
         static bool write_flat_binary(const CompiledUnit& unit, uint64_t base_address, BinaryBuffer& out, LinkMap* out_map = nullptr, std::string* out_error = nullptr);
         static bool write_flat_binary_file(const CompiledUnit& unit, uint64_t base_address, const std::string& filename, const std::string& map_filename = "", std::string* out_error = nullptr);
         static std::string generate_link_map(const LinkMap& map);
+
+        static bool generate_import_table(const std::vector<WinLibraryImport>& imports,
+                                          uint32_t idata_rva,
+                                          BinaryBuffer& out_idata,
+                                          std::unordered_map<std::string, uint32_t>& out_iat_offsets,
+                                          std::string* out_error = nullptr);
+        static std::vector<WinLibraryImport> get_default_windows_imports();
 
         static uint16_t coff_machine_for_arch(TargetArch arch);
         static uint16_t coff_reloc_type(TargetArch arch, RelocType type);

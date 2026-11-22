@@ -17,29 +17,48 @@ bool Lexer::isIdentCont(unsigned char c) {
     return isalnum(c) || c == '_' || c >= 128;
 }
 
-Lexer::Lexer(const string& source) : src(source) {}
+Lexer::Lexer(const string& source, const string& fname) : src(source), filename(fname) {}
 
 vector<GrassToken> Lexer::tokenize() {
     vector<GrassToken> tokens;
+    pos = 0;
+    line = 1;
+    line_start_pos = 0;
+    at_line_start = true;
+
     if (src.size() >= 3 &&
         (unsigned char)src[0] == 0xEF &&
         (unsigned char)src[1] == 0xBB &&
         (unsigned char)src[2] == 0xBF) {
         pos = 3;
+        line_start_pos = 3;
     }
+
+    auto get_col = [&](size_t p) -> int {
+        return (int)(p >= line_start_pos ? (p - line_start_pos + 1) : 1);
+    };
 
     while (pos < src.size()) {
         char c = src[pos];
 
         if (c == '\r') { pos++; continue; }
-        if (c == '\n') { pos++; line++; at_line_start = true; continue; }
+        if (c == '\n') {
+            pos++;
+            line++;
+            line_start_pos = pos;
+            at_line_start = true;
+            continue;
+        }
         if (c == ' ' || c == '\t') { pos++; continue; }
+
+        int tok_line = line;
+        int tok_col = get_col(pos);
 
         // Многострочный комментарий ** ... ** или /* ... */
         if (c == '*' && pos + 1 < src.size() && src[pos + 1] == '*') {
             pos += 2;
             while (pos + 1 < src.size() && !(src[pos] == '*' && src[pos + 1] == '*')) {
-                if (src[pos] == '\n') line++;
+                if (src[pos] == '\n') { line++; line_start_pos = pos + 1; }
                 pos++;
             }
             if (pos + 1 < src.size()) pos += 2;
@@ -48,7 +67,7 @@ vector<GrassToken> Lexer::tokenize() {
         if (c == '/' && pos + 1 < src.size() && src[pos + 1] == '*') {
             pos += 2;
             while (pos + 1 < src.size() && !(src[pos] == '*' && src[pos + 1] == '/')) {
-                if (src[pos] == '\n') line++;
+                if (src[pos] == '\n') { line++; line_start_pos = pos + 1; }
                 pos++;
             }
             if (pos + 1 < src.size()) pos += 2;
@@ -65,7 +84,7 @@ vector<GrassToken> Lexer::tokenize() {
         // Директивы #include
         if (c == '#' && pos + 7 < src.size() && src.substr(pos, 8) == "#include") {
             pos += 8;
-            tokens.push_back(GrassToken(TOK_IDENT, "include", 0.0, line));
+            tokens.push_back(GrassToken(TOK_IDENT, "include", 0.0, tok_line, tok_col));
             continue;
         }
         if (c == '@') {
@@ -77,7 +96,7 @@ vector<GrassToken> Lexer::tokenize() {
         if (c == '#' && pos + 1 < src.size() && isalnum((unsigned char)src[pos + 1])) {
             size_t start = pos++;
             while (pos < src.size() && isalnum((unsigned char)src[pos])) pos++;
-            tokens.push_back(GrassToken(TOK_STRING, src.substr(start, pos - start), 0.0, line));
+            tokens.push_back(GrassToken(TOK_STRING, src.substr(start, pos - start), 0.0, tok_line, tok_col));
             at_line_start = false;
             continue;
         }
@@ -88,11 +107,11 @@ vector<GrassToken> Lexer::tokenize() {
                 pos += 2;
                 string s;
                 while (pos + 1 < src.size() && !(src[pos] == '!' && src[pos + 1] == '!')) {
-                    if (src[pos] == '\n') line++;
+                    if (src[pos] == '\n') { line++; line_start_pos = pos + 1; }
                     s += src[pos++];
                 }
                 if (pos + 1 < src.size()) pos += 2;
-                tokens.push_back(GrassToken(TOK_STRING, s, 0.0, line));
+                tokens.push_back(GrassToken(TOK_STRING, s, 0.0, tok_line, tok_col));
                 at_line_start = false;
                 continue;
             }
@@ -102,7 +121,7 @@ vector<GrassToken> Lexer::tokenize() {
                 if (end_excl != string::npos && (end_line == string::npos || end_excl < end_line)) {
                     string lib = src.substr(pos, end_excl - pos + 1);
                     if (lib.find(' ') == string::npos && lib.find('(') == string::npos) {
-                        tokens.push_back(GrassToken(TOK_LIB, lib, 0.0, line));
+                        tokens.push_back(GrassToken(TOK_LIB, lib, 0.0, tok_line, tok_col));
                         pos = end_excl + 1;
                         at_line_start = false;
                         continue;
@@ -129,13 +148,13 @@ vector<GrassToken> Lexer::tokenize() {
                     s += '\n';
                     pos++;
                 } else {
-                    if (src[pos] == '\n') line++;
+                    if (src[pos] == '\n') { line++; line_start_pos = pos + 1; }
                     s += src[pos];
                 }
                 pos++;
             }
             if (pos < src.size()) pos++;
-            tokens.push_back(GrassToken(TOK_STRING, s, 0.0, line));
+            tokens.push_back(GrassToken(TOK_STRING, s, 0.0, tok_line, tok_col));
             continue;
         }
 
@@ -147,7 +166,7 @@ vector<GrassToken> Lexer::tokenize() {
             string hex_str = src.substr(start, pos - start);
             double val = 0.0;
             try { val = (double)std::stoull(hex_str, nullptr, 16); } catch (...) {}
-            tokens.push_back(GrassToken(TOK_NUMBER, hex_str, val, line));
+            tokens.push_back(GrassToken(TOK_NUMBER, hex_str, val, tok_line, tok_col));
             continue;
         }
         // 0b... (двоичные числа)
@@ -158,7 +177,7 @@ vector<GrassToken> Lexer::tokenize() {
             string bin_str = src.substr(start, pos - start);
             double val = 0.0;
             try { val = (double)std::stoull(bin_str.substr(2), nullptr, 2); } catch (...) {}
-            tokens.push_back(GrassToken(TOK_NUMBER, bin_str, val, line));
+            tokens.push_back(GrassToken(TOK_NUMBER, bin_str, val, tok_line, tok_col));
             continue;
         }
 
@@ -172,11 +191,11 @@ vector<GrassToken> Lexer::tokenize() {
             }
             string num_str = src.substr(start, pos - start);
             if (dot_count > 1) {
-                tokens.push_back(GrassToken(TOK_STRING, num_str, 0.0, line));
+                tokens.push_back(GrassToken(TOK_STRING, num_str, 0.0, tok_line, tok_col));
             } else {
                 double val = 0.0;
                 try { val = stod(num_str); } catch (...) {}
-                tokens.push_back(GrassToken(TOK_NUMBER, num_str, val, line));
+                tokens.push_back(GrassToken(TOK_NUMBER, num_str, val, tok_line, tok_col));
             }
             continue;
         }
@@ -199,7 +218,7 @@ vector<GrassToken> Lexer::tokenize() {
             size_t klen = strlen(kw);
             if (pos + klen <= src.size() && src.compare(pos, klen, kw) == 0) {
                 if (pos + klen == src.size() || (!isalnum((unsigned char)src[pos + klen]) && src[pos + klen] != '_' && src[pos + klen] != '-')) {
-                    tokens.push_back(GrassToken(TOK_IDENT, kw, 0.0, line));
+                    tokens.push_back(GrassToken(TOK_IDENT, kw, 0.0, tok_line, tok_col));
                     pos += klen;
                     matched_hk = true;
                     break;
@@ -215,59 +234,59 @@ vector<GrassToken> Lexer::tokenize() {
                 pos++;
             }
             string ident = src.substr(start, pos - start);
-            tokens.push_back(GrassToken(TOK_IDENT, ident, 0.0, line));
+            tokens.push_back(GrassToken(TOK_IDENT, ident, 0.0, tok_line, tok_col));
             continue;
         }
 
         // Двухсимвольные операторы C++
         if (pos + 1 < src.size()) {
             string two = src.substr(pos, 2);
-            if (two == "==") { tokens.push_back(GrassToken(TOK_EQ, two, 0.0, line)); pos += 2; continue; }
-            if (two == "!=") { tokens.push_back(GrassToken(TOK_NEQ, two, 0.0, line)); pos += 2; continue; }
-            if (two == "<=") { tokens.push_back(GrassToken(TOK_LTE, two, 0.0, line)); pos += 2; continue; }
-            if (two == ">=") { tokens.push_back(GrassToken(TOK_GTE, two, 0.0, line)); pos += 2; continue; }
-            if (two == "&&") { tokens.push_back(GrassToken(TOK_AND, two, 0.0, line)); pos += 2; continue; }
-            if (two == "||") { tokens.push_back(GrassToken(TOK_OR, two, 0.0, line)); pos += 2; continue; }
-            if (two == "++") { tokens.push_back(GrassToken(TOK_INC, two, 0.0, line)); pos += 2; continue; }
-            if (two == "--") { tokens.push_back(GrassToken(TOK_DEC, two, 0.0, line)); pos += 2; continue; }
-            if (two == "+=") { tokens.push_back(GrassToken(TOK_PLUS_ASSIGN, two, 0.0, line)); pos += 2; continue; }
-            if (two == "-=") { tokens.push_back(GrassToken(TOK_MINUS_ASSIGN, two, 0.0, line)); pos += 2; continue; }
-            if (two == "*=") { tokens.push_back(GrassToken(TOK_MUL_ASSIGN, two, 0.0, line)); pos += 2; continue; }
-            if (two == "/=") { tokens.push_back(GrassToken(TOK_DIV_ASSIGN, two, 0.0, line)); pos += 2; continue; }
-            if (two == "<<") { tokens.push_back(GrassToken(TOK_SHL, two, 0.0, line)); pos += 2; continue; }
-            if (two == ">>") { tokens.push_back(GrassToken(TOK_SHR, two, 0.0, line)); pos += 2; continue; }
+            if (two == "==") { tokens.push_back(GrassToken(TOK_EQ, two, 0.0, tok_line, tok_col)); pos += 2; continue; }
+            if (two == "!=") { tokens.push_back(GrassToken(TOK_NEQ, two, 0.0, tok_line, tok_col)); pos += 2; continue; }
+            if (two == "<=") { tokens.push_back(GrassToken(TOK_LTE, two, 0.0, tok_line, tok_col)); pos += 2; continue; }
+            if (two == ">=") { tokens.push_back(GrassToken(TOK_GTE, two, 0.0, tok_line, tok_col)); pos += 2; continue; }
+            if (two == "&&") { tokens.push_back(GrassToken(TOK_AND, two, 0.0, tok_line, tok_col)); pos += 2; continue; }
+            if (two == "||") { tokens.push_back(GrassToken(TOK_OR, two, 0.0, tok_line, tok_col)); pos += 2; continue; }
+            if (two == "++") { tokens.push_back(GrassToken(TOK_INC, two, 0.0, tok_line, tok_col)); pos += 2; continue; }
+            if (two == "--") { tokens.push_back(GrassToken(TOK_DEC, two, 0.0, tok_line, tok_col)); pos += 2; continue; }
+            if (two == "+=") { tokens.push_back(GrassToken(TOK_PLUS_ASSIGN, two, 0.0, tok_line, tok_col)); pos += 2; continue; }
+            if (two == "-=") { tokens.push_back(GrassToken(TOK_MINUS_ASSIGN, two, 0.0, tok_line, tok_col)); pos += 2; continue; }
+            if (two == "*=") { tokens.push_back(GrassToken(TOK_MUL_ASSIGN, two, 0.0, tok_line, tok_col)); pos += 2; continue; }
+            if (two == "/=") { tokens.push_back(GrassToken(TOK_DIV_ASSIGN, two, 0.0, tok_line, tok_col)); pos += 2; continue; }
+            if (two == "<<") { tokens.push_back(GrassToken(TOK_SHL, two, 0.0, tok_line, tok_col)); pos += 2; continue; }
+            if (two == ">>") { tokens.push_back(GrassToken(TOK_SHR, two, 0.0, tok_line, tok_col)); pos += 2; continue; }
         }
 
         // Односимвольные операторы и скобки
         pos++;
         switch (c) {
-            case '{': tokens.push_back(GrassToken(TOK_LBRACE, "{", 0.0, line)); at_line_start = true; break;
-            case '}': tokens.push_back(GrassToken(TOK_RBRACE, "}", 0.0, line)); at_line_start = true; break;
-            case '(': tokens.push_back(GrassToken(TOK_LPAREN, "(", 0.0, line)); break;
-            case ')': tokens.push_back(GrassToken(TOK_RPAREN, ")", 0.0, line)); break;
-            case '[': tokens.push_back(GrassToken(TOK_LBRACKET, "[", 0.0, line)); break;
-            case ']': tokens.push_back(GrassToken(TOK_RBRACKET, "]", 0.0, line)); break;
-            case ',': tokens.push_back(GrassToken(TOK_COMMA, ",", 0.0, line)); break;
-            case ';': tokens.push_back(GrassToken(TOK_SEMI, ";", 0.0, line)); break;
-            case ':': tokens.push_back(GrassToken(TOK_COLON, ":", 0.0, line)); break;
-            case '=': tokens.push_back(GrassToken(TOK_ASSIGN, "=", 0.0, line)); break;
-            case '+': tokens.push_back(GrassToken(TOK_PLUS, "+", 0.0, line)); break;
-            case '-': tokens.push_back(GrassToken(TOK_MINUS, "-", 0.0, line)); break;
-            case '*': tokens.push_back(GrassToken(TOK_STAR, "*", 0.0, line)); break;
-            case '/': tokens.push_back(GrassToken(TOK_SLASH, "/", 0.0, line)); break;
-            case '%': tokens.push_back(GrassToken(TOK_MOD, "%", 0.0, line)); break;
-            case '!': tokens.push_back(GrassToken(TOK_NOT, "!", 0.0, line)); break;
-            case '<': tokens.push_back(GrassToken(TOK_LT, "<", 0.0, line)); break;
-            case '>': tokens.push_back(GrassToken(TOK_GT, ">", 0.0, line)); break;
-            case '.': tokens.push_back(GrassToken(TOK_DOT, ".", 0.0, line)); break;
-            case '&': tokens.push_back(GrassToken(TOK_AMP, "&", 0.0, line)); break;
-            case '|': tokens.push_back(GrassToken(TOK_PIPE, "|", 0.0, line)); break;
-            case '^': tokens.push_back(GrassToken(TOK_CARET, "^", 0.0, line)); break;
-            case '~': tokens.push_back(GrassToken(TOK_TILDE, "~", 0.0, line)); break;
+            case '{': tokens.push_back(GrassToken(TOK_LBRACE, "{", 0.0, tok_line, tok_col)); at_line_start = true; break;
+            case '}': tokens.push_back(GrassToken(TOK_RBRACE, "}", 0.0, tok_line, tok_col)); at_line_start = true; break;
+            case '(': tokens.push_back(GrassToken(TOK_LPAREN, "(", 0.0, tok_line, tok_col)); break;
+            case ')': tokens.push_back(GrassToken(TOK_RPAREN, ")", 0.0, tok_line, tok_col)); break;
+            case '[': tokens.push_back(GrassToken(TOK_LBRACKET, "[", 0.0, tok_line, tok_col)); break;
+            case ']': tokens.push_back(GrassToken(TOK_RBRACKET, "]", 0.0, tok_line, tok_col)); break;
+            case ',': tokens.push_back(GrassToken(TOK_COMMA, ",", 0.0, tok_line, tok_col)); break;
+            case ';': tokens.push_back(GrassToken(TOK_SEMI, ";", 0.0, tok_line, tok_col)); break;
+            case ':': tokens.push_back(GrassToken(TOK_COLON, ":", 0.0, tok_line, tok_col)); break;
+            case '=': tokens.push_back(GrassToken(TOK_ASSIGN, "=", 0.0, tok_line, tok_col)); break;
+            case '+': tokens.push_back(GrassToken(TOK_PLUS, "+", 0.0, tok_line, tok_col)); break;
+            case '-': tokens.push_back(GrassToken(TOK_MINUS, "-", 0.0, tok_line, tok_col)); break;
+            case '*': tokens.push_back(GrassToken(TOK_STAR, "*", 0.0, tok_line, tok_col)); break;
+            case '/': tokens.push_back(GrassToken(TOK_SLASH, "/", 0.0, tok_line, tok_col)); break;
+            case '%': tokens.push_back(GrassToken(TOK_MOD, "%", 0.0, tok_line, tok_col)); break;
+            case '!': tokens.push_back(GrassToken(TOK_NOT, "!", 0.0, tok_line, tok_col)); break;
+            case '<': tokens.push_back(GrassToken(TOK_LT, "<", 0.0, tok_line, tok_col)); break;
+            case '>': tokens.push_back(GrassToken(TOK_GT, ">", 0.0, tok_line, tok_col)); break;
+            case '.': tokens.push_back(GrassToken(TOK_DOT, ".", 0.0, tok_line, tok_col)); break;
+            case '&': tokens.push_back(GrassToken(TOK_AMP, "&", 0.0, tok_line, tok_col)); break;
+            case '|': tokens.push_back(GrassToken(TOK_PIPE, "|", 0.0, tok_line, tok_col)); break;
+            case '^': tokens.push_back(GrassToken(TOK_CARET, "^", 0.0, tok_line, tok_col)); break;
+            case '~': tokens.push_back(GrassToken(TOK_TILDE, "~", 0.0, tok_line, tok_col)); break;
             default: break;
         }
     }
-    tokens.push_back(GrassToken(TOK_EOF, "", 0.0, line));
+    tokens.push_back(GrassToken(TOK_EOF, "", 0.0, line, get_col(pos)));
     return tokens;
 }
 
@@ -303,13 +322,23 @@ bool BytecodeCompiler::consume(GrassTokenKind kind, const string& error_msg) {
         advance();
         return true;
     }
-    reportError(peek().line, error_msg);
+    reportError(peek().line, error_msg, peek().col);
     return false;
 }
 
-void BytecodeCompiler::reportError(int line, const string& msg) {
-    cerr << "[GrassSyntax Error] (строка " << line << "): " << msg << endl;
+void BytecodeCompiler::reportError(int line, const string& msg, int col, const string& hint) {
+    diagnostics.push_back(SyntaxDiagnostic(DiagnosticSeverity::Error,
+        SourceLocation(source_filename, line, col), msg, hint));
+    cerr << "[GrassSyntax Error] (" << source_filename;
+    if (!source_filename.empty()) cerr << ":";
+    cerr << line << ":" << col << "): " << msg;
+    if (!hint.empty()) cerr << " (подсказка: " << hint << ")";
+    cerr << endl;
     has_error = true;
+}
+
+void BytecodeCompiler::reportError(const SourceLocation& loc, const string& msg, const string& hint) {
+    reportError(loc.line, msg, loc.col, hint);
 }
 
 void BytecodeCompiler::synchronize() {
@@ -3269,4 +3298,870 @@ void BytecodeCompiler::parseVirtualStruct() {
         parseVFSBody();
         consume(TOK_RBRACE, "Ожидалась закрывающая фигурная скобка '}' блока virtual_struct!");
     }
+}
+
+// ============================================================================
+// IMPLEMENTATION OF GrassParser WITH ERROR RECOVERY
+// ============================================================================
+
+GrassParser::GrassParser(const std::vector<GrassToken>& toks, const std::string& fname)
+    : tokens(toks), filename(fname) {}
+
+const GrassToken& GrassParser::peek(int offset) const {
+    size_t idx = cur + offset;
+    if (idx >= tokens.size()) return tokens.back();
+    return tokens[idx];
+}
+
+GrassToken GrassParser::advance() {
+    GrassToken t = peek();
+    if (cur < tokens.size() - 1) cur++;
+    return t;
+}
+
+bool GrassParser::match(GrassTokenKind kind) {
+    if (peek().kind == kind) {
+        advance();
+        return true;
+    }
+    return false;
+}
+
+bool GrassParser::matchIdent(const std::string& name) {
+    if (peek().kind == TOK_IDENT && peek().text == name) {
+        advance();
+        return true;
+    }
+    return false;
+}
+
+bool GrassParser::check(GrassTokenKind kind) const {
+    return peek().kind == kind;
+}
+
+bool GrassParser::checkIdent(const std::string& name) const {
+    return peek().kind == TOK_IDENT && peek().text == name;
+}
+
+bool GrassParser::isAtEnd() const {
+    return peek().kind == TOK_EOF;
+}
+
+void GrassParser::reportError(const SourceLocation& loc, const std::string& msg, const std::string& hint) {
+    diagnostics.push_back(SyntaxDiagnostic(DiagnosticSeverity::Error, loc, msg, hint));
+    error_count++;
+}
+
+void GrassParser::synchronize() {
+    if (isAtEnd()) return;
+    advance();
+
+    while (!isAtEnd()) {
+        if (peek(-1).kind == TOK_SEMI) return;
+
+        switch (peek().kind) {
+            case TOK_SEMI:
+            case TOK_RBRACE:
+            case TOK_LIB:
+                return;
+            case TOK_IDENT: {
+                const std::string& txt = peek().text;
+                if (isTypeName(txt) || isVarKeyword(txt) ||
+                    txt == "struct" || txt == "class" || txt == "module" || txt == "fn" ||
+                    txt == "if" || txt == "check" || txt == "while" || txt == "loop" ||
+                    txt == "for" || txt == "again" || txt == "return" ||
+                    txt == "break" || txt == "continue" ||
+                    txt == "gout" || txt == "cout" || txt == "gin" || txt == "cin") {
+                    return;
+                }
+                break;
+            }
+            default:
+                break;
+        }
+        advance();
+    }
+}
+
+bool GrassParser::isTypeName(const std::string& s) const {
+    if (custom_types.count(s)) return true;
+    return s == "int" || s == "float" || s == "double" || s == "string" ||
+           s == "bool" || s == "void" || s == "char" || s == "take" ||
+           s == "uint8_t" || s == "uint16_t" || s == "uint32_t" || s == "uint64_t" ||
+           s == "int8_t" || s == "int16_t" || s == "int32_t" || s == "int64_t" ||
+           s == "u8" || s == "u16" || s == "u32" || s == "u64" ||
+           s == "i8" || s == "i16" || s == "i32" || s == "i64" ||
+           s == "f32" || s == "f64" || s == "byte" || s == "size_t";
+}
+
+bool GrassParser::isVarKeyword(const std::string& s) {
+    return s == "var" || s == "auto" || s == "const" || s == "take";
+}
+
+// Expressions
+std::unique_ptr<ExprAST> GrassParser::parseExpression() {
+    return parseLogicalOr();
+}
+
+std::unique_ptr<ExprAST> GrassParser::parseLogicalOr() {
+    auto expr = parseLogicalAnd();
+    while (match(TOK_OR)) {
+        auto loc = peek(-1).loc(filename);
+        auto rhs = parseLogicalAnd();
+        expr = std::make_unique<BinaryExprAST>(loc, TOK_OR, "||", std::move(expr), std::move(rhs));
+    }
+    return expr;
+}
+
+std::unique_ptr<ExprAST> GrassParser::parseLogicalAnd() {
+    auto expr = parseBitwiseOr();
+    while (match(TOK_AND)) {
+        auto loc = peek(-1).loc(filename);
+        auto rhs = parseBitwiseOr();
+        expr = std::make_unique<BinaryExprAST>(loc, TOK_AND, "&&", std::move(expr), std::move(rhs));
+    }
+    return expr;
+}
+
+std::unique_ptr<ExprAST> GrassParser::parseBitwiseOr() {
+    auto expr = parseBitwiseXor();
+    while (match(TOK_PIPE)) {
+        auto loc = peek(-1).loc(filename);
+        auto rhs = parseBitwiseXor();
+        expr = std::make_unique<BinaryExprAST>(loc, TOK_PIPE, "|", std::move(expr), std::move(rhs));
+    }
+    return expr;
+}
+
+std::unique_ptr<ExprAST> GrassParser::parseBitwiseXor() {
+    auto expr = parseBitwiseAnd();
+    while (match(TOK_CARET)) {
+        auto loc = peek(-1).loc(filename);
+        auto rhs = parseBitwiseAnd();
+        expr = std::make_unique<BinaryExprAST>(loc, TOK_CARET, "^", std::move(expr), std::move(rhs));
+    }
+    return expr;
+}
+
+std::unique_ptr<ExprAST> GrassParser::parseBitwiseAnd() {
+    auto expr = parseEquality();
+    while (match(TOK_AMP)) {
+        auto loc = peek(-1).loc(filename);
+        auto rhs = parseEquality();
+        expr = std::make_unique<BinaryExprAST>(loc, TOK_AMP, "&", std::move(expr), std::move(rhs));
+    }
+    return expr;
+}
+
+std::unique_ptr<ExprAST> GrassParser::parseEquality() {
+    auto expr = parseRelational();
+    while (peek().kind == TOK_EQ || peek().kind == TOK_NEQ) {
+        auto op_tok = advance();
+        auto rhs = parseRelational();
+        expr = std::make_unique<BinaryExprAST>(op_tok.loc(filename), op_tok.kind, op_tok.text, std::move(expr), std::move(rhs));
+    }
+    return expr;
+}
+
+std::unique_ptr<ExprAST> GrassParser::parseRelational() {
+    auto expr = parseShift();
+    while (peek().kind == TOK_LT || peek().kind == TOK_GT ||
+           peek().kind == TOK_LTE || peek().kind == TOK_GTE) {
+        auto op_tok = advance();
+        auto rhs = parseShift();
+        expr = std::make_unique<BinaryExprAST>(op_tok.loc(filename), op_tok.kind, op_tok.text, std::move(expr), std::move(rhs));
+    }
+    return expr;
+}
+
+std::unique_ptr<ExprAST> GrassParser::parseShift() {
+    auto expr = parseAdditive();
+    while (peek().kind == TOK_SHL || peek().kind == TOK_SHR) {
+        auto op_tok = advance();
+        auto rhs = parseAdditive();
+        expr = std::make_unique<BinaryExprAST>(op_tok.loc(filename), op_tok.kind, op_tok.text, std::move(expr), std::move(rhs));
+    }
+    return expr;
+}
+
+std::unique_ptr<ExprAST> GrassParser::parseAdditive() {
+    auto expr = parseMultiplicative();
+    while (peek().kind == TOK_PLUS || peek().kind == TOK_MINUS) {
+        auto op_tok = advance();
+        auto rhs = parseMultiplicative();
+        expr = std::make_unique<BinaryExprAST>(op_tok.loc(filename), op_tok.kind, op_tok.text, std::move(expr), std::move(rhs));
+    }
+    return expr;
+}
+
+std::unique_ptr<ExprAST> GrassParser::parseMultiplicative() {
+    auto expr = parseUnary();
+    while (peek().kind == TOK_STAR || peek().kind == TOK_SLASH || peek().kind == TOK_MOD) {
+        auto op_tok = advance();
+        auto rhs = parseUnary();
+        expr = std::make_unique<BinaryExprAST>(op_tok.loc(filename), op_tok.kind, op_tok.text, std::move(expr), std::move(rhs));
+    }
+    return expr;
+}
+
+std::unique_ptr<ExprAST> GrassParser::parseUnary() {
+    if (peek().kind == TOK_MINUS || peek().kind == TOK_NOT ||
+        peek().kind == TOK_TILDE || peek().kind == TOK_STAR ||
+        peek().kind == TOK_AMP || peek().kind == TOK_INC || peek().kind == TOK_DEC) {
+        auto op_tok = advance();
+        auto operand = parseUnary();
+        return std::make_unique<UnaryExprAST>(op_tok.loc(filename), op_tok.kind, op_tok.text, std::move(operand), true);
+    }
+    return parsePostfix();
+}
+
+std::unique_ptr<ExprAST> GrassParser::parsePostfix() {
+    auto expr = parsePrimary();
+    if (!expr) return nullptr;
+
+    while (true) {
+        if (match(TOK_INC)) {
+            expr = std::make_unique<PostfixExprAST>(peek(-1).loc(filename), TOK_INC, "++", std::move(expr));
+        } else if (match(TOK_DEC)) {
+            expr = std::make_unique<PostfixExprAST>(peek(-1).loc(filename), TOK_DEC, "--", std::move(expr));
+        } else if (match(TOK_LBRACKET)) {
+            auto loc = peek(-1).loc(filename);
+            auto idx = parseExpression();
+            if (!match(TOK_RBRACKET)) {
+                reportError(peek().loc(filename), "Expected ']' after index expression", "Close array subscript with ']'");
+            }
+            expr = std::make_unique<IndexExprAST>(loc, std::move(expr), std::move(idx));
+        } else if (match(TOK_DOT)) {
+            auto loc = peek(-1).loc(filename);
+            if (peek().kind == TOK_IDENT) {
+                std::string member = advance().text;
+                if (match(TOK_LPAREN)) {
+                    std::vector<std::unique_ptr<ExprAST>> args;
+                    if (!check(TOK_RPAREN) && !isAtEnd()) {
+                        do {
+                            args.push_back(parseExpression());
+                        } while (match(TOK_COMMA));
+                    }
+                    if (!match(TOK_RPAREN)) {
+                        reportError(peek().loc(filename), "Expected ')' after method arguments", "Close argument list with ')'");
+                    }
+                    auto mem_node = std::make_unique<MemberAccessExprAST>(loc, std::move(expr), member, false);
+                    mem_node->is_method_call = true;
+                    mem_node->method_args = std::move(args);
+                    expr = std::move(mem_node);
+                } else {
+                    expr = std::make_unique<MemberAccessExprAST>(loc, std::move(expr), member, false);
+                }
+            } else {
+                reportError(peek().loc(filename), "Expected identifier after '.'", "Provide member name");
+            }
+        } else {
+            break;
+        }
+    }
+    return expr;
+}
+
+std::unique_ptr<ExprAST> GrassParser::parsePrimary() {
+    if (peek().kind == TOK_NUMBER) {
+        auto tok = advance();
+        if (tok.text.find('.') == std::string::npos &&
+            tok.text.find('e') == std::string::npos &&
+            tok.text.find('E') == std::string::npos) {
+            return std::make_unique<LiteralExprAST>(tok.loc(filename), (int64_t)tok.num_val);
+        } else {
+            return std::make_unique<LiteralExprAST>(tok.loc(filename), tok.num_val);
+        }
+    }
+    if (peek().kind == TOK_STRING) {
+        auto tok = advance();
+        return std::make_unique<LiteralExprAST>(tok.loc(filename), tok.text);
+    }
+    if (checkIdent("true")) {
+        auto tok = advance();
+        return std::make_unique<LiteralExprAST>(tok.loc(filename), true);
+    }
+    if (checkIdent("false")) {
+        auto tok = advance();
+        return std::make_unique<LiteralExprAST>(tok.loc(filename), false);
+    }
+    if (checkIdent("nil")) {
+        auto tok = advance();
+        return std::make_unique<LiteralExprAST>(tok.loc(filename));
+    }
+    if (checkIdent("alloc")) {
+        auto loc = advance().loc(filename);
+        std::unique_ptr<ExprAST> sz = nullptr;
+        if (match(TOK_LPAREN)) {
+            sz = parseExpression();
+            if (!match(TOK_RPAREN)) {
+                reportError(peek().loc(filename), "Expected ')' after alloc argument", "Close alloc call with ')'");
+            }
+        }
+        return std::make_unique<AllocExprAST>(loc, "void", std::move(sz));
+    }
+    if (checkIdent("free")) {
+        auto loc = advance().loc(filename);
+        std::unique_ptr<ExprAST> tgt = nullptr;
+        if (match(TOK_LPAREN)) {
+            tgt = parseExpression();
+            if (!match(TOK_RPAREN)) {
+                reportError(peek().loc(filename), "Expected ')' after free argument", "Close free call with ')'");
+            }
+        }
+        return std::make_unique<FreeExprAST>(loc, std::move(tgt));
+    }
+    if (peek().kind == TOK_IDENT) {
+        auto tok = advance();
+        if (match(TOK_LPAREN)) {
+            std::vector<std::unique_ptr<ExprAST>> args;
+            if (!check(TOK_RPAREN) && !isAtEnd()) {
+                do {
+                    args.push_back(parseExpression());
+                } while (match(TOK_COMMA));
+            }
+            if (!match(TOK_RPAREN)) {
+                reportError(peek().loc(filename), "Expected ')' after function arguments in call to '" + tok.text + "'", "Close call with ')'");
+            }
+            return std::make_unique<CallExprAST>(tok.loc(filename), tok.text, std::move(args));
+        }
+        return std::make_unique<VariableExprAST>(tok.loc(filename), tok.text);
+    }
+    if (match(TOK_LBRACKET)) {
+        auto loc = peek(-1).loc(filename);
+        std::vector<std::unique_ptr<ExprAST>> elements;
+        if (!check(TOK_RBRACKET) && !isAtEnd()) {
+            do {
+                elements.push_back(parseExpression());
+            } while (match(TOK_COMMA));
+        }
+        if (!match(TOK_RBRACKET)) {
+            reportError(peek().loc(filename), "Expected ']' at end of array literal", "Close array with ']'");
+        }
+        return std::make_unique<ArrayLiteralExprAST>(loc, std::move(elements));
+    }
+    if (match(TOK_LPAREN)) {
+        auto expr = parseExpression();
+        if (!match(TOK_RPAREN)) {
+            reportError(peek().loc(filename), "Expected ')' after expression", "Close parentheses with ')'");
+        }
+        return expr;
+    }
+
+    reportError(peek().loc(filename), "Unexpected token '" + peek().text + "' in expression", "Expected expression");
+    advance();
+    return nullptr;
+}
+
+// Statements & Declarations
+std::unique_ptr<StmtAST> GrassParser::parseStatement() {
+    if (match(TOK_SEMI)) return nullptr;
+    if (check(TOK_LBRACE)) return parseBlock();
+
+    if (checkIdent("if") || checkIdent("check")) return parseIf();
+    if (checkIdent("while") || checkIdent("loop")) return parseWhile();
+    if (checkIdent("for") || checkIdent("again")) return parseFor();
+    if (checkIdent("return")) return parseReturn();
+
+    if (checkIdent("break")) {
+        auto loc = advance().loc(filename);
+        if (!match(TOK_SEMI)) {
+            reportError(peek().loc(filename), "Expected ';' after break", "Insert ';'");
+            synchronize();
+        }
+        return std::make_unique<BreakStmtAST>(loc);
+    }
+    if (checkIdent("continue")) {
+        auto loc = advance().loc(filename);
+        if (!match(TOK_SEMI)) {
+            reportError(peek().loc(filename), "Expected ';' after continue", "Insert ';'");
+            synchronize();
+        }
+        return std::make_unique<ContinueStmtAST>(loc);
+    }
+    if (checkIdent("gout") || checkIdent("cout")) return parseStreamIO(true);
+    if (checkIdent("gin") || checkIdent("cin")) return parseStreamIO(false);
+
+    bool is_type = isTypeName(peek().text);
+    if (!is_type && peek().kind == TOK_IDENT) {
+        if (peek(1).kind == TOK_IDENT) {
+            is_type = true;
+        } else if (peek(1).kind == TOK_STAR) {
+            size_t off = 2;
+            while (peek(off).kind == TOK_STAR) off++;
+            if (peek(off).kind == TOK_IDENT) is_type = true;
+        }
+    }
+
+    if (is_type) {
+        std::string tname = advance().text;
+        int ptr_depth = 0;
+        while (match(TOK_STAR)) ptr_depth++;
+        if (peek().kind == TOK_IDENT) {
+            return parseVarDecl(tname, ptr_depth, false);
+        }
+        reportError(peek().loc(filename), "Expected identifier after type '" + tname + "'", "Provide variable name");
+        synchronize();
+        return nullptr;
+    }
+
+    if (isVarKeyword(peek().text)) {
+        std::string kw = advance().text;
+        bool is_const = (kw == "const");
+        std::string tname = "var";
+        int ptr_depth = 0;
+        if (isTypeName(peek().text)) {
+            tname = advance().text;
+            while (match(TOK_STAR)) ptr_depth++;
+        }
+        return parseVarDecl(tname, ptr_depth, is_const);
+    }
+
+    // Assignment or expression statement
+    SourceLocation loc = peek().loc(filename);
+    auto expr = parseExpression();
+    if (!expr) {
+        synchronize();
+        return nullptr;
+    }
+
+    if (peek().kind == TOK_ASSIGN ||
+        peek().kind == TOK_PLUS_ASSIGN ||
+        peek().kind == TOK_MINUS_ASSIGN ||
+        peek().kind == TOK_MUL_ASSIGN ||
+        peek().kind == TOK_DIV_ASSIGN) {
+        auto op_tok = advance();
+        auto val = parseExpression();
+        if (!match(TOK_SEMI)) {
+            reportError(peek().loc(filename), "Expected ';' after assignment, found '" + peek().text + "'", "Insert ';' at end of assignment");
+            synchronize();
+        }
+        return std::make_unique<AssignStmtAST>(loc, std::move(expr), op_tok.kind, op_tok.text, std::move(val));
+    }
+
+    if (!match(TOK_SEMI)) {
+        reportError(peek().loc(filename), "Expected ';' after expression statement, found '" + peek().text + "'", "Insert ';' at end of statement");
+        synchronize();
+    }
+    return std::make_unique<ExprStmtAST>(loc, std::move(expr));
+}
+
+std::unique_ptr<BlockStmtAST> GrassParser::parseBlock() {
+    auto loc = advance().loc(filename); // consume {
+    std::vector<std::unique_ptr<StmtAST>> stmts;
+
+    while (!check(TOK_RBRACE) && !isAtEnd()) {
+        try {
+            auto s = parseStatement();
+            if (s) stmts.push_back(std::move(s));
+        } catch (...) {
+            synchronize();
+        }
+    }
+
+    if (!match(TOK_RBRACE)) {
+        reportError(peek().loc(filename), "Expected '}' to close block", "Insert '}' at the end of block");
+    }
+    return std::make_unique<BlockStmtAST>(loc, std::move(stmts));
+}
+
+std::unique_ptr<StmtAST> GrassParser::parseVarDecl(const std::string& type_name, int ptr_depth, bool is_const) {
+    if (peek().kind != TOK_IDENT) {
+        reportError(peek().loc(filename), "Expected variable name in declaration", "Provide variable identifier");
+        synchronize();
+        return nullptr;
+    }
+    auto tok = advance();
+    std::string vname = tok.text;
+    std::unique_ptr<ExprAST> init = nullptr;
+
+    if (match(TOK_ASSIGN)) {
+        init = parseExpression();
+    }
+
+    if (!match(TOK_SEMI)) {
+        reportError(peek().loc(filename), "Expected ';' after variable declaration of '" + vname + "', found '" + peek().text + "'", "Insert ';' to end declaration");
+        synchronize();
+    }
+
+    return std::make_unique<VarDeclStmtAST>(tok.loc(filename), type_name, vname, ptr_depth, is_const, std::move(init));
+}
+
+std::unique_ptr<StmtAST> GrassParser::parseIf() {
+    auto loc = advance().loc(filename);
+    if (!match(TOK_LPAREN)) {
+        reportError(peek().loc(filename), "Expected '(' after 'if'", "Enclose condition in '(' and ')'");
+    }
+    auto cond = parseExpression();
+    if (!match(TOK_RPAREN)) {
+        reportError(peek().loc(filename), "Expected ')' after condition", "Close condition with ')'");
+    }
+    auto then_b = parseStatement();
+    std::unique_ptr<StmtAST> else_b = nullptr;
+    if (checkIdent("else")) {
+        advance();
+        else_b = parseStatement();
+    }
+    return std::make_unique<IfStmtAST>(loc, std::move(cond), std::move(then_b), std::move(else_b));
+}
+
+std::unique_ptr<StmtAST> GrassParser::parseWhile() {
+    auto loc = advance().loc(filename);
+    if (!match(TOK_LPAREN)) {
+        reportError(peek().loc(filename), "Expected '(' after 'while'", "Enclose condition in '(' and ')'");
+    }
+    auto cond = parseExpression();
+    if (!match(TOK_RPAREN)) {
+        reportError(peek().loc(filename), "Expected ')' after condition", "Close condition with ')'");
+    }
+    auto body = parseStatement();
+    return std::make_unique<WhileStmtAST>(loc, std::move(cond), std::move(body));
+}
+
+std::unique_ptr<StmtAST> GrassParser::parseFor() {
+    auto loc = advance().loc(filename);
+    if (!match(TOK_LPAREN)) {
+        reportError(peek().loc(filename), "Expected '(' after 'for'", "Enclose loop control in '(' and ')'");
+    }
+    std::unique_ptr<StmtAST> init = nullptr;
+    if (!check(TOK_SEMI)) {
+        if (isTypeName(peek().text)) {
+            std::string tname = advance().text;
+            int ptr = 0; while (match(TOK_STAR)) ptr++;
+            init = parseVarDecl(tname, ptr, false);
+        } else {
+            auto e = parseExpression();
+            if (e) {
+                init = std::make_unique<ExprStmtAST>(loc, std::move(e));
+                match(TOK_SEMI);
+            }
+        }
+    } else {
+        advance();
+    }
+
+    std::unique_ptr<ExprAST> cond = nullptr;
+    if (!check(TOK_SEMI)) {
+        cond = parseExpression();
+    }
+    match(TOK_SEMI);
+
+    std::unique_ptr<StmtAST> step = nullptr;
+    if (!check(TOK_RPAREN)) {
+        auto e = parseExpression();
+        if (e) step = std::make_unique<ExprStmtAST>(loc, std::move(e));
+    }
+    if (!match(TOK_RPAREN)) {
+        reportError(peek().loc(filename), "Expected ')' after for-loop clauses", "Close for-loop clauses with ')'");
+    }
+    auto body = parseStatement();
+    return std::make_unique<ForStmtAST>(loc, std::move(init), std::move(cond), std::move(step), std::move(body));
+}
+
+std::unique_ptr<StmtAST> GrassParser::parseReturn() {
+    auto loc = advance().loc(filename);
+    std::unique_ptr<ExprAST> val = nullptr;
+    if (!check(TOK_SEMI) && !check(TOK_RBRACE) && !isAtEnd()) {
+        val = parseExpression();
+    }
+    if (!match(TOK_SEMI)) {
+        reportError(peek().loc(filename), "Expected ';' after return statement, found '" + peek().text + "'", "Insert ';' after return value");
+        synchronize();
+    }
+    return std::make_unique<ReturnStmtAST>(loc, std::move(val));
+}
+
+std::unique_ptr<StmtAST> GrassParser::parseStreamIO(bool is_output) {
+    auto loc = advance().loc(filename);
+    std::vector<std::unique_ptr<ExprAST>> operands;
+    GrassTokenKind op = is_output ? TOK_SHL : TOK_SHR;
+
+    while (match(op)) {
+        operands.push_back(parseAdditive());
+    }
+    if (!match(TOK_SEMI)) {
+        reportError(peek().loc(filename), "Expected ';' after stream IO statement", "Insert ';' at end of stream expression");
+        synchronize();
+    }
+    return std::make_unique<StreamIOStmtAST>(loc, is_output, std::move(operands));
+}
+
+std::unique_ptr<FunctionDeclAST> GrassParser::parseFunction(const std::string& ret_type, int ret_ptr, const std::string& name) {
+    SourceLocation loc = peek(-1).loc(filename);
+    if (!match(TOK_LPAREN)) {
+        reportError(peek().loc(filename), "Expected '(' after function name '" + name + "'", "Enclose parameters in '(' and ')'");
+    }
+
+    std::vector<ParamDecl> params;
+    if (!check(TOK_RPAREN) && !isAtEnd()) {
+        do {
+            std::string ptype = "var";
+            int pptr = 0;
+            if (isTypeName(peek().text) || isVarKeyword(peek().text)) {
+                ptype = advance().text;
+                while (match(TOK_STAR)) pptr++;
+            }
+            if (peek().kind == TOK_IDENT) {
+                auto ptok = advance();
+                params.emplace_back(ptype, ptok.text, pptr, ptok.loc(filename));
+            } else {
+                reportError(peek().loc(filename), "Expected parameter name", "Provide identifier for parameter");
+            }
+        } while (match(TOK_COMMA));
+    }
+
+    if (!match(TOK_RPAREN)) {
+        reportError(peek().loc(filename), "Expected ')' after parameter list in function '" + name + "'", "Close parameter list with ')'");
+    }
+
+    std::unique_ptr<BlockStmtAST> body = nullptr;
+    if (check(TOK_LBRACE)) {
+        body = parseBlock();
+    } else if (match(TOK_SEMI)) {
+        // Prototype
+    } else {
+        reportError(peek().loc(filename), "Expected '{' for function body or ';' for declaration", "Provide function body block");
+        synchronize();
+    }
+
+    return std::make_unique<FunctionDeclAST>(loc, ret_type, ret_ptr, name, std::move(params), std::move(body));
+}
+
+std::unique_ptr<StructDeclAST> GrassParser::parseStruct() {
+    auto loc = advance().loc(filename);
+    if (peek().kind != TOK_IDENT) {
+        reportError(peek().loc(filename), "Expected struct name after 'struct'", "Provide struct identifier");
+        synchronize();
+        return nullptr;
+    }
+    std::string sname = advance().text;
+    custom_types.insert(sname);
+    if (!match(TOK_LBRACE)) {
+        reportError(peek().loc(filename), "Expected '{' after struct name", "Open struct body with '{'");
+        synchronize();
+        return nullptr;
+    }
+
+    std::vector<FieldDecl> fields;
+    std::vector<std::unique_ptr<FunctionDeclAST>> methods;
+
+    while (!check(TOK_RBRACE) && !isAtEnd()) {
+        if (match(TOK_SEMI)) continue;
+        if (checkIdent("fn")) {
+            advance();
+            std::string fname = advance().text;
+            methods.push_back(parseFunction("auto", 0, fname));
+            continue;
+        }
+        if (isTypeName(peek().text)) {
+            std::string tname = advance().text;
+            int ptr = 0; while (match(TOK_STAR)) ptr++;
+            if (peek().kind == TOK_IDENT) {
+                std::string fname = advance().text;
+                if (check(TOK_LPAREN)) {
+                    methods.push_back(parseFunction(tname, ptr, fname));
+                } else {
+                    fields.emplace_back(tname, fname, ptr, peek(-1).loc(filename));
+                    match(TOK_SEMI);
+                }
+            } else {
+                reportError(peek().loc(filename), "Expected field or method name in struct", "Provide valid identifier");
+                synchronize();
+            }
+        } else {
+            reportError(peek().loc(filename), "Unexpected token '" + peek().text + "' in struct body", "Declare field or method");
+            synchronize();
+        }
+    }
+
+    if (!match(TOK_RBRACE)) {
+        reportError(peek().loc(filename), "Expected '}' at end of struct definition", "Close struct definition with '}'");
+    }
+    match(TOK_SEMI);
+
+    return std::make_unique<StructDeclAST>(loc, sname, std::move(fields), std::move(methods));
+}
+
+std::unique_ptr<ClassDeclAST> GrassParser::parseClass() {
+    auto loc = advance().loc(filename);
+    if (peek().kind != TOK_IDENT) {
+        reportError(peek().loc(filename), "Expected class name after 'class'", "Provide class name");
+        synchronize();
+        return nullptr;
+    }
+    std::string cname = advance().text;
+    custom_types.insert(cname);
+    std::string base_class;
+    if (match(TOK_COLON)) {
+        if (peek().kind == TOK_IDENT) {
+            base_class = advance().text;
+        } else {
+            reportError(peek().loc(filename), "Expected base class name after ':'", "Provide inherited class name");
+        }
+    }
+
+    if (!match(TOK_LBRACE)) {
+        reportError(peek().loc(filename), "Expected '{' after class name", "Open class body with '{'");
+        synchronize();
+        return nullptr;
+    }
+
+    std::vector<FieldDecl> fields;
+    std::vector<std::unique_ptr<FunctionDeclAST>> methods;
+
+    while (!check(TOK_RBRACE) && !isAtEnd()) {
+        if (match(TOK_SEMI)) continue;
+        if (checkIdent("fn")) {
+            advance();
+            std::string fname = advance().text;
+            methods.push_back(parseFunction("auto", 0, fname));
+            continue;
+        }
+        if (isTypeName(peek().text)) {
+            std::string tname = advance().text;
+            int ptr = 0; while (match(TOK_STAR)) ptr++;
+            if (peek().kind == TOK_IDENT) {
+                std::string fname = advance().text;
+                if (check(TOK_LPAREN)) {
+                    methods.push_back(parseFunction(tname, ptr, fname));
+                } else {
+                    fields.emplace_back(tname, fname, ptr, peek(-1).loc(filename));
+                    match(TOK_SEMI);
+                }
+            } else {
+                reportError(peek().loc(filename), "Expected field or method name in class", "Provide valid identifier");
+                synchronize();
+            }
+        } else {
+            reportError(peek().loc(filename), "Unexpected token '" + peek().text + "' in class body", "Declare field or method");
+            synchronize();
+        }
+    }
+
+    if (!match(TOK_RBRACE)) {
+        reportError(peek().loc(filename), "Expected '}' at end of class definition", "Close class definition with '}'");
+    }
+    match(TOK_SEMI);
+
+    return std::make_unique<ClassDeclAST>(loc, cname, base_class, std::move(fields), std::move(methods));
+}
+
+std::unique_ptr<ModuleDeclAST> GrassParser::parseModule() {
+    auto loc = advance().loc(filename);
+    if (peek().kind != TOK_IDENT) {
+        reportError(peek().loc(filename), "Expected module name after 'module'", "Provide module name");
+        synchronize();
+        return nullptr;
+    }
+    std::string mname = advance().text;
+    if (!match(TOK_LBRACE)) {
+        reportError(peek().loc(filename), "Expected '{' after module name", "Open module body with '{'");
+        synchronize();
+        return nullptr;
+    }
+
+    auto mod = std::make_unique<ModuleDeclAST>(loc, mname);
+
+    while (!check(TOK_RBRACE) && !isAtEnd()) {
+        if (match(TOK_SEMI)) continue;
+        if (checkIdent("struct")) {
+            auto st = parseStruct();
+            if (st) mod->structs.push_back(std::move(st));
+        } else if (checkIdent("class")) {
+            auto cls = parseClass();
+            if (cls) mod->classes.push_back(std::move(cls));
+        } else if (isTypeName(peek().text)) {
+            std::string tname = advance().text;
+            int ptr = 0; while (match(TOK_STAR)) ptr++;
+            if (peek().kind == TOK_IDENT && peek(1).kind == TOK_LPAREN) {
+                std::string fname = advance().text;
+                mod->functions.push_back(parseFunction(tname, ptr, fname));
+            } else {
+                reportError(peek().loc(filename), "Expected function declaration in module", "Only functions, structs, and classes are allowed inside modules");
+                synchronize();
+            }
+        } else {
+            reportError(peek().loc(filename), "Unexpected token in module", "Only declarations allowed inside module");
+            synchronize();
+        }
+    }
+
+    if (!match(TOK_RBRACE)) {
+        reportError(peek().loc(filename), "Expected '}' to close module", "Close module definition with '}'");
+    }
+    return mod;
+}
+
+std::unique_ptr<ProgramAST> GrassParser::parseProgram() {
+    auto program = std::make_unique<ProgramAST>(SourceLocation(filename, 1, 1));
+
+    while (!isAtEnd()) {
+        if (peek().kind == TOK_SEMI) {
+            advance();
+            continue;
+        }
+        if (peek().kind == TOK_RBRACE) {
+            reportError(peek().loc(filename), "Unexpected closing brace '}'", "Check matching braces");
+            advance();
+            continue;
+        }
+        if (peek().kind == TOK_LIB) {
+            program->included_libs.push_back(advance().text);
+            continue;
+        }
+
+        try {
+            if (checkIdent("struct")) {
+                auto st = parseStruct();
+                if (st) program->declarations.push_back(std::move(st));
+            } else if (checkIdent("class")) {
+                auto cls = parseClass();
+                if (cls) program->declarations.push_back(std::move(cls));
+            } else if (checkIdent("module")) {
+                auto mod = parseModule();
+                if (mod) program->declarations.push_back(std::move(mod));
+            } else if (checkIdent("fn")) {
+                advance();
+                std::string fname = advance().text;
+                auto fn = parseFunction("auto", 0, fname);
+                if (fn) program->declarations.push_back(std::move(fn));
+            } else {
+                bool is_type = isTypeName(peek().text);
+                if (!is_type && peek().kind == TOK_IDENT) {
+                    if (peek(1).kind == TOK_IDENT) {
+                        is_type = true;
+                    } else if (peek(1).kind == TOK_STAR) {
+                        size_t off = 2;
+                        while (peek(off).kind == TOK_STAR) off++;
+                        if (peek(off).kind == TOK_IDENT) is_type = true;
+                    }
+                }
+                if (is_type) {
+                    std::string type_name = advance().text;
+                    int ptr_depth = 0;
+                    while (match(TOK_STAR)) ptr_depth++;
+
+                    if (peek().kind == TOK_IDENT && peek(1).kind == TOK_LPAREN) {
+                        std::string fname = advance().text;
+                        auto fn = parseFunction(type_name, ptr_depth, fname);
+                        if (fn) program->declarations.push_back(std::move(fn));
+                    } else if (peek().kind == TOK_IDENT) {
+                        auto stmt = parseVarDecl(type_name, ptr_depth, false);
+                        if (stmt) program->statements.push_back(std::move(stmt));
+                    } else {
+                        reportError(peek().loc(filename), "Expected identifier after type '" + type_name + "'", "Provide variable or function name");
+                        synchronize();
+                    }
+                } else {
+                    auto stmt = parseStatement();
+                    if (stmt) program->statements.push_back(std::move(stmt));
+                }
+            }
+        } catch (...) {
+            synchronize();
+        }
+    }
+
+    program->diagnostics = diagnostics;
+    return program;
 }
