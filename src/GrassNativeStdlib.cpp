@@ -170,6 +170,7 @@ namespace grass::native {
         register_function({ "grass_print_str", "io", v_t, { ptr_t }, { "s" }, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "grass_print_newline", "io", v_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "grass_print_bool", "io", v_t, { i64_t }, { "b" }, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "grass_print_ptr", "io", v_t, { i64_t }, { "p" }, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "grass_read_int", "io", i64_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "grass_read_str", "io", ptr_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
     }
@@ -484,6 +485,7 @@ namespace grass::native {
         register_extern("GetStdHandle", "kernel32.dll", ptr_t, { i32_t }, backend::TargetABI::Win64);
         register_extern("WriteFile", "kernel32.dll", i32_t, { ptr_t, ptr_t, i32_t, ptr_t, ptr_t }, backend::TargetABI::Win64);
         register_extern("ReadFile", "kernel32.dll", i32_t, { ptr_t, ptr_t, i32_t, ptr_t, ptr_t }, backend::TargetABI::Win64);
+        register_extern("lstrlenA", "kernel32.dll", i64_t, { ptr_t }, backend::TargetABI::Win64);
         register_extern("Sleep", "kernel32.dll", v_t, { i32_t }, backend::TargetABI::Win64);
         register_extern("GetTickCount64", "kernel32.dll", i64_t, {}, backend::TargetABI::Win64);
         register_extern("LoadLibraryA", "kernel32.dll", ptr_t, { ptr_t }, backend::TargetABI::Win64);

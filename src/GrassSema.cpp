@@ -25,6 +25,13 @@ void GrassSema::registerBuiltins() {
     // Standard I/O and utility
     add_builtin("print", SemaType::Void(), {SemaType::Any()}, true);
     add_builtin("println", SemaType::Void(), {SemaType::Any()}, true);
+    add_builtin("io_print", SemaType::Int(), {SemaType::Any()});
+    add_builtin("io_print_str", SemaType::Int(), {SemaType::Any()});
+    add_builtin("io_print_int", SemaType::Int(), {SemaType::Int()});
+    add_builtin("io_print_bool", SemaType::Int(), {SemaType::Any()});
+    add_builtin("io_print_ptr", SemaType::Int(), {SemaType::Any()});
+    add_builtin("io_print_double", SemaType::Int(), {SemaType::Float()});
+    add_builtin("io_print_newline", SemaType::Int(), {});
     add_builtin("len", SemaType::Int(), {SemaType::Any()});
     add_builtin("discor", SemaType::Float(), {SemaType::Float()});
 
@@ -284,7 +291,8 @@ const StructSymbol* GrassSema::findStruct(const std::string& name) const {
 
 SemaType GrassSema::resolveType(const std::string& type_name, int ptr_depth, const SourceLocation& loc) {
     SemaType base;
-    if (type_name == "int" || type_name == "i32" || type_name == "i64" ||
+    if (type_name == "int" || type_name == "int32" || type_name == "int64" ||
+        type_name == "i32" || type_name == "i64" ||
         type_name == "int32_t" || type_name == "int64_t" ||
         type_name == "uint32_t" || type_name == "uint64_t" ||
         type_name == "u32" || type_name == "u64" ||
@@ -520,9 +528,10 @@ void GrassSema::checkModuleDecl(const ModuleDeclAST* mod) {
 }
 
 void GrassSema::checkFunctionDecl(const FunctionDeclAST* func) {
-    auto it = functions_.find(func->name);
-    if (it == functions_.end()) it = functions_.find(qualifyName(func->name));
-    if (it == functions_.end()) it = functions_.find(mangleName(qualifyName(func->name)));
+    std::string qname = qualifyName(func->name);
+    auto it = functions_.find(qname);
+    if (it == functions_.end()) it = functions_.find(mangleName(qname));
+    if (it == functions_.end()) it = functions_.find(func->name);
     if (it == functions_.end()) return;
     const FunctionSymbol& sym = it->second;
 
@@ -960,7 +969,7 @@ SemaType GrassSema::checkLiteralExpr(const LiteralExprAST* lit) {
 }
 
 SemaType GrassSema::checkVariableExpr(const VariableExprAST* var) {
-    if (var->name == "endl") return SemaType::String();
+    if (var->name == "endl" || var->name == "std::endl") return SemaType::String();
     VariableSymbol* sym = current_scope_->lookupVariable(var->name);
     if (!sym) {
         // Check if it's a field of 'this' when inside a method

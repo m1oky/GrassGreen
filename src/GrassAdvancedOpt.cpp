@@ -150,7 +150,50 @@ namespace grass::opt {
 
         // Map formal arguments to actual arguments
         for (size_t a = 0; a < callee.arguments.size() && a < call_owner->operands.size(); ++a) {
-            val_map[callee.arguments[a].id] = call_owner->operands[a];
+            ir::ValueId actual = call_owner->operands[a];
+            ir::IRType* formal_t = callee.arguments[a].type;
+            ir::IRType* actual_t = caller.has_value(actual) ? caller.get_value(actual).type : nullptr;
+            if (formal_t && actual_t && !formal_t->equals(actual_t)) {
+                if (actual_t->is_pointer() && formal_t->is_integer()) {
+                    auto cast_inst = std::make_unique<ir::IRInst>();
+                    cast_inst->op = ir::IROp::PtrToInt;
+                    cast_inst->type = formal_t;
+                    cast_inst->operands.push_back(actual);
+                    ir::ValueId cast_vid = caller.create_value(formal_t, "inl_cast", cast_inst.get());
+                    cast_inst->result_id = cast_vid;
+                    cast_inst->loc = call_loc;
+                    call_bb->push_back(std::move(cast_inst));
+                    val_map[callee.arguments[a].id] = cast_vid;
+                    continue;
+                } else if (actual_t->is_integer() && formal_t->is_pointer()) {
+                    auto cast_inst = std::make_unique<ir::IRInst>();
+                    cast_inst->op = ir::IROp::IntToPtr;
+                    cast_inst->type = formal_t;
+                    cast_inst->operands.push_back(actual);
+                    ir::ValueId cast_vid = caller.create_value(formal_t, "inl_cast", cast_inst.get());
+                    cast_inst->result_id = cast_vid;
+                    cast_inst->loc = call_loc;
+                    call_bb->push_back(std::move(cast_inst));
+                    val_map[callee.arguments[a].id] = cast_vid;
+                    continue;
+                } else if (actual_t->is_integer() && formal_t->is_integer()) {
+                    auto cast_inst = std::make_unique<ir::IRInst>();
+                    if (actual_t->bit_width() < formal_t->bit_width()) {
+                        cast_inst->op = ir::IROp::SExt;
+                    } else {
+                        cast_inst->op = ir::IROp::Trunc;
+                    }
+                    cast_inst->type = formal_t;
+                    cast_inst->operands.push_back(actual);
+                    ir::ValueId cast_vid = caller.create_value(formal_t, "inl_cast", cast_inst.get());
+                    cast_inst->result_id = cast_vid;
+                    cast_inst->loc = call_loc;
+                    call_bb->push_back(std::move(cast_inst));
+                    val_map[callee.arguments[a].id] = cast_vid;
+                    continue;
+                }
+            }
+            val_map[callee.arguments[a].id] = actual;
         }
 
         // Clone basic blocks

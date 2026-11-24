@@ -152,6 +152,10 @@ void grass_print_bool(int64_t b) {
     fputs(b ? "true" : "false", stdout);
 }
 
+void grass_print_ptr(uint64_t p) {
+    printf("0x%llx", (unsigned long long)p);
+}
+
 /* FastMath implementations */
 double discor(double x) {
     return (x >= 0.0) ? sqrt(x) : 0.0;
@@ -1034,13 +1038,37 @@ int64_t grass_array_len(void* ptr) {
                 return true;
             }
 
-            // Stream Output: gout << expr << endl;
+            // Stream Output: gout << expr << endl; or std::gout << expr << std::endl;
+            bool is_stream_out = false;
             if (match_ident("gout") || match_ident("cout")) {
+                is_stream_out = true;
+            } else if (peek().kind == TOK_IDENT && peek().text == "std" &&
+                       peek(1).kind == TOK_COLON_COLON &&
+                       (peek(2).text == "gout" || peek(2).text == "cout")) {
+                advance(); // std
+                advance(); // ::
+                advance(); // gout / cout
+                is_stream_out = true;
+            }
+
+            if (is_stream_out) {
                 bool prev_io = in_stream_io_;
                 in_stream_io_ = true;
                 while (match(TOK_SHL)) {
+                    bool is_endl = false;
                     if (match_ident("endl")) {
-                        builder_.create_call("grass_print_newline", ctx_.get_void_type(), {});
+                        is_endl = true;
+                    } else if (peek().kind == TOK_IDENT && peek().text == "std" &&
+                               peek(1).kind == TOK_COLON_COLON && peek(2).text == "endl") {
+                        advance(); // std
+                        advance(); // ::
+                        advance(); // endl
+                        is_endl = true;
+                    }
+
+                    if (is_endl) {
+                        std::string fn_nl = (module_.get_function("io_print_newline") != nullptr) ? "io_print_newline" : "grass_print_newline";
+                        builder_.create_call(fn_nl, ctx_.get_void_type(), {});
                     } else {
                         ir::ValueId val = parse_expression(error);
                         if (!error.empty()) {
@@ -1050,14 +1078,58 @@ int64_t grass_array_len(void* ptr) {
                         if (val != 0) {
                             ir::IRType* vtype = builder_.get_function()->get_value(val).type;
                             if (vtype->is_pointer()) {
-                                builder_.create_call("grass_print_str", ctx_.get_void_type(), { val });
+                                if (vtype->element_type && vtype->element_type->is_i8()) {
+                                    // string / const char* / uint8*
+                                    std::string fn_s = (module_.get_function("io_print") != nullptr) ? "io_print" : ((module_.get_function("io_print_str") != nullptr) ? "io_print_str" : "grass_print_str");
+                                    ir::ValueId arg_val = val;
+                                    auto* callee_fn = module_.get_function(fn_s);
+                                    if (callee_fn && !callee_fn->arguments.empty()) {
+                                        arg_val = coerce_type(val, callee_fn->arguments[0].type);
+                                    } else {
+                                        arg_val = coerce_type(val, ctx_.get_i64_type());
+                                    }
+                                    builder_.create_call(fn_s, ctx_.get_void_type(), { arg_val });
+                                } else {
+                                    // Pointer (T*) in hex format: 0x...
+                                    std::string fn_p = (module_.get_function("io_print_ptr") != nullptr) ? "io_print_ptr" : "grass_print_ptr";
+                                    ir::ValueId arg_val = val;
+                                    auto* callee_fn = module_.get_function(fn_p);
+                                    if (callee_fn && !callee_fn->arguments.empty()) {
+                                        arg_val = coerce_type(val, callee_fn->arguments[0].type);
+                                    } else {
+                                        arg_val = coerce_type(val, ctx_.get_i64_type());
+                                    }
+                                    builder_.create_call(fn_p, ctx_.get_void_type(), { arg_val });
+                                }
                             } else if (vtype->is_floating_point()) {
-                                builder_.create_call("grass_print_double", ctx_.get_void_type(), { val });
+                                std::string fn_d = (module_.get_function("io_print_double") != nullptr) ? "io_print_double" : "grass_print_double";
+                                ir::ValueId arg_val = val;
+                                auto* callee_fn = module_.get_function(fn_d);
+                                if (callee_fn && !callee_fn->arguments.empty()) {
+                                    arg_val = coerce_type(val, callee_fn->arguments[0].type);
+                                }
+                                builder_.create_call(fn_d, ctx_.get_void_type(), { arg_val });
                             } else if (vtype->is_bool()) {
-                                ir::ValueId val_i64 = builder_.create_zext(val, ctx_.get_i64_type());
-                                builder_.create_call("grass_print_int", ctx_.get_void_type(), { val_i64 });
+                                std::string fn_b = (module_.get_function("io_print_bool") != nullptr) ? "io_print_bool" : "grass_print_bool";
+                                ir::ValueId arg_val = val;
+                                auto* callee_fn = module_.get_function(fn_b);
+                                if (callee_fn && !callee_fn->arguments.empty()) {
+                                    arg_val = coerce_type(val, callee_fn->arguments[0].type);
+                                } else {
+                                    arg_val = builder_.create_zext(val, ctx_.get_i64_type());
+                                }
+                                builder_.create_call(fn_b, ctx_.get_void_type(), { arg_val });
                             } else {
-                                builder_.create_call("grass_print_int", ctx_.get_void_type(), { val });
+                                // Integer (int, int64, int32, etc.)
+                                std::string fn_i = (module_.get_function("io_print_int") != nullptr) ? "io_print_int" : "grass_print_int";
+                                ir::ValueId arg_val = val;
+                                auto* callee_fn = module_.get_function(fn_i);
+                                if (callee_fn && !callee_fn->arguments.empty()) {
+                                    arg_val = coerce_type(val, callee_fn->arguments[0].type);
+                                } else {
+                                    arg_val = coerce_type(val, ctx_.get_i64_type());
+                                }
+                                builder_.create_call(fn_i, ctx_.get_void_type(), { arg_val });
                             }
                         }
                     }
@@ -1067,8 +1139,20 @@ int64_t grass_array_len(void* ptr) {
                 return true;
             }
 
-            // Stream Input: gin >> var;
+            // Stream Input: gin >> var; or std::gin >> var;
+            bool is_stream_in = false;
             if (match_ident("gin") || match_ident("cin")) {
+                is_stream_in = true;
+            } else if (peek().kind == TOK_IDENT && peek().text == "std" &&
+                       peek(1).kind == TOK_COLON_COLON &&
+                       (peek(2).text == "gin" || peek(2).text == "cin")) {
+                advance(); // std
+                advance(); // ::
+                advance(); // gin / cin
+                is_stream_in = true;
+            }
+
+            if (is_stream_in) {
                 bool prev_io = in_stream_io_;
                 in_stream_io_ = true;
                 while (match(TOK_SHR)) {
@@ -2758,14 +2842,26 @@ int64_t grass_array_len(void* ptr) {
             // Incoming function arguments placement
             const auto& arg_regs = abi_spec.get_integer_arg_regs();
             for (size_t i = 0; i < fn->arguments.size(); ++i) {
+                ir::IRType* arg_t = fn->arguments[i].type;
+                bool is_fp = arg_t && arg_t->is_floating_point();
                 if (i < arg_regs.size()) {
-                    store_val(fn->arguments[i].id, arg_regs[i]);
+                    if (is_fp) {
+                        backend::Reg xmm_reg = static_cast<backend::Reg>(0x0050 + i);
+                        store_val(fn->arguments[i].id, xmm_reg);
+                    } else {
+                        store_val(fn->arguments[i].id, arg_regs[i]);
+                    }
                 } else {
                     int32_t shadow_disp = (options_.abi == TargetABI::Win64) ? 32 : 0;
                     int32_t stack_off = 16 + shadow_disp + static_cast<int32_t>(i - arg_regs.size()) * 8;
-                    backend::Reg tmp = backend::Reg::R10;
-                    encoder.mov_rm(tmp, backend::mem(backend::Reg::RBP, stack_off, 8));
-                    store_val(fn->arguments[i].id, tmp);
+                    if (is_fp) {
+                        encoder.movsd_xm(backend::Reg::XMM0, backend::mem(backend::Reg::RBP, stack_off, 8));
+                        store_val(fn->arguments[i].id, backend::Reg::XMM0);
+                    } else {
+                        backend::Reg tmp = backend::Reg::R10;
+                        encoder.mov_rm(tmp, backend::mem(backend::Reg::RBP, stack_off, 8));
+                        store_val(fn->arguments[i].id, tmp);
+                    }
                 }
             }
 
@@ -3435,15 +3531,19 @@ int64_t grass_array_len(void* ptr) {
                             break;
                         }
                         case ir::IROp::SIToFP: {
-                            backend::Reg src = load_val(inst->operands[0], backend::Reg::RAX);
-                            encoder.cvtsi2sd_xr(backend::Reg::XMM0, src);
-                            store_val(inst->result_id, backend::Reg::XMM0);
+                            backend::Reg dst = get_loc_reg(inst->result_id);
+                            backend::Reg out = (dst != backend::Reg::None && backend::reg_is_xmm(dst)) ? dst : backend::Reg::XMM2;
+                            backend::Reg src = load_val(inst->operands[0], backend::Reg::R10);
+                            encoder.cvtsi2sd_xr(out, src);
+                            store_val(inst->result_id, out);
                             break;
                         }
                         case ir::IROp::FPToSI: {
-                            backend::Reg src = load_val(inst->operands[0], backend::Reg::XMM0);
-                            encoder.cvttsd2si_rx(backend::Reg::RAX, src);
-                            store_val(inst->result_id, backend::Reg::RAX);
+                            backend::Reg dst = get_loc_reg(inst->result_id);
+                            backend::Reg out = (dst != backend::Reg::None && backend::reg_is_gpr(dst)) ? dst : backend::Reg::R10;
+                            backend::Reg src = load_val(inst->operands[0], backend::Reg::XMM2);
+                            encoder.cvttsd2si_rx(out, src);
+                            store_val(inst->result_id, out);
                             break;
                         }
                         case ir::IROp::Trunc:
@@ -3452,7 +3552,7 @@ int64_t grass_array_len(void* ptr) {
                         case ir::IROp::PtrToInt:
                         case ir::IROp::IntToPtr:
                         case ir::IROp::Bitcast: {
-                            backend::Reg src = load_val(inst->operands[0], backend::Reg::RAX);
+                            backend::Reg src = load_val(inst->operands[0], backend::Reg::R10);
                             store_val(inst->result_id, src);
                             break;
                         }
@@ -3682,7 +3782,7 @@ __attribute__((constructor)) static void grass_auto_init_sig(void) {
         // Stage 2: Optimize IR
         if (!optimize_ir(module, options_.opt_level, error)) {
             res.success = false;
-            res.error_message = "Optimization Error: " + error;
+            res.error_message = "Optimization Error: " + error + "\n=== IR DUMP ===\n" + module.dump();
             return res;
         }
 

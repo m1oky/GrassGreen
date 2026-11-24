@@ -136,6 +136,94 @@ take io_print_int(take val) {
     return total_written;
 }
 
+// Print boolean value (true / false)
+take io_print_bool(take b) {
+    if (b != 0) {
+        take s_true = "true";
+        return io_print(s_true);
+    }
+    take s_false = "false";
+    return io_print(s_false);
+}
+
+// Print pointer address in hexadecimal format (0x...)
+take io_print_ptr(take p) {
+    take hOut = io_stdout();
+    take prefix = "0x";
+    take written = io_write_raw(hOut, prefix, 2);
+    if (p == 0) {
+        take zero = "0";
+        return written + io_write_raw(hOut, zero, 1);
+    }
+    take hex_digits = [];
+    take cur = p;
+    while (cur != 0) {
+        take rem = cur & 15;
+        hex_digits.push(rem);
+        cur = (cur >> 4) & 1152921504606846975;
+    }
+    take count = len(hex_digits);
+    take idx = count - 1;
+    while (idx >= 0) {
+        take d = hex_digits[idx];
+        take char_str = "0";
+        if (d == 1) { char_str = "1"; }
+        if (d == 2) { char_str = "2"; }
+        if (d == 3) { char_str = "3"; }
+        if (d == 4) { char_str = "4"; }
+        if (d == 5) { char_str = "5"; }
+        if (d == 6) { char_str = "6"; }
+        if (d == 7) { char_str = "7"; }
+        if (d == 8) { char_str = "8"; }
+        if (d == 9) { char_str = "9"; }
+        if (d == 10) { char_str = "a"; }
+        if (d == 11) { char_str = "b"; }
+        if (d == 12) { char_str = "c"; }
+        if (d == 13) { char_str = "d"; }
+        if (d == 14) { char_str = "e"; }
+        if (d == 15) { char_str = "f"; }
+        written = written + io_write_raw(hOut, char_str, 1);
+        idx = idx - 1;
+    }
+    return written;
+}
+
+// Print floating point value with decimal fraction
+take io_print_double(float v) {
+    take hOut = io_stdout();
+    take total = 0;
+    if (v < 0.0) {
+        take minus = "-";
+        total = total + io_write_raw(hOut, minus, 1);
+        v = 0.0 - v;
+    }
+    take int_part = (int64)v;
+    total = total + io_print_int(int_part);
+    take dot = ".";
+    total = total + io_write_raw(hOut, dot, 1);
+    float frac = v - (float)int_part;
+    for (take i = 0; i < 4; i++) {
+        frac = frac * 10.0;
+        take d = (int64)frac;
+        total = total + io_print_int(d);
+        frac = frac - (float)d;
+    }
+    return total;
+}
+
+take io_print_str(take s) {
+    return io_print(s);
+}
+
+namespace std {
+    take print(take s) { return io_print(s); }
+    take print_int(take v) { return io_print_int(v); }
+    take print_bool(take b) { return io_print_bool(b); }
+    take print_ptr(take p) { return io_print_ptr(p); }
+    take print_double(float v) { return io_print_double(v); }
+    take print_newline() { return io_print_newline(); }
+}
+
 // Read line from standard input into preallocated buffer
 take io_read_line(take buf, take max_len) {
     take hIn = io_stdin();

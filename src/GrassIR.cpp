@@ -1913,6 +1913,23 @@ namespace grass::ir {
             fn.erase_block(dead_bb);
         }
 
+        // Hoist all allocas to entry block so they dominate all uses
+        if (entry) {
+            for (auto& bb : fn.blocks) {
+                if (bb.get() == entry) continue;
+                for (size_t i = 0; i < bb->instructions.size();) {
+                    if (bb->instructions[i]->op == IROp::Alloca) {
+                        auto alloca_inst = std::move(bb->instructions[i]);
+                        bb->instructions.erase(bb->instructions.begin() + i);
+                        alloca_inst->parent = entry;
+                        entry->push_front(std::move(alloca_inst));
+                    } else {
+                        ++i;
+                    }
+                }
+            }
+        }
+
         fn.rebuild_cfg();
         fn.rebuild_def_use();
 

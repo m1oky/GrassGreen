@@ -2586,6 +2586,24 @@ namespace grass::backend {
             append_function("grass_print_bool", code, rels);
         }
 
+        // 6b. grass_print_ptr: printf("0x%llx", ptr)
+        if (needed_symbols.count("grass_print_ptr") > 0 && defined_symbols.count("grass_print_ptr") == 0) {
+            add_rodata_str("__grass_fmt_ptr", "0x%llx");
+            std::vector<uint8_t> code = {
+                0x48, 0x83, 0xEC, 0x28,             // 0: sub rsp, 40
+                0x48, 0x89, 0xCA,                   // 4: mov rdx, rcx
+                0x48, 0x8D, 0x0D, 0x00, 0x00, 0x00, 0x00, // 7: lea rcx, [rip + __grass_fmt_ptr]
+                0xE8, 0x00, 0x00, 0x00, 0x00,       // 14: call printf
+                0x48, 0x83, 0xC4, 0x28,             // 19: add rsp, 40
+                0xC3                                // 23: ret
+            };
+            std::vector<RelocEntry> rels = {
+                { SectionKind::Text, 10, "__grass_fmt_ptr", RelocType::Rel32, -4 },
+                { SectionKind::Text, 15, "printf", RelocType::Rel32, -4 }
+            };
+            append_function("grass_print_ptr", code, rels);
+        }
+
         // 7. grass_array_create
         if (needed_symbols.count("grass_array_create") > 0 && defined_symbols.count("grass_array_create") == 0) {
             std::vector<uint8_t> code = {

@@ -4242,6 +4242,7 @@ bool ProcessCompilation(CompilerOptions& opt) {
         if (opt.run_after_build && !nres.exe_file_created.empty()) {
             if (opt.lang_ru) cout << "[GrassNative]: Запуск нативного исполняемого файла...\n\n";
             else cout << "[GrassNative]: Executing native binary...\n\n";
+            cout.flush();
             std::string run_cmd = nres.exe_file_created;
             for (char& c : run_cmd) {
                 if (c == '/') c = '\\';

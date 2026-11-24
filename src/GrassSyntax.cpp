@@ -2530,10 +2530,14 @@ void BytecodeCompiler::parseStatement() {
     }
 
     // 3. ПОТОКОВЫЙ ВЫВОД GRASSGREEN / C++: gout / cout << ... << endl;
+    bool is_std_stream = (peek().kind == TOK_IDENT && peek().text == "std" && peek(1).kind == TOK_COLON_COLON && (peek(2).text == "gout" || peek(2).text == "cout"));
+    if (is_std_stream) { advance(); advance(); }
     if (matchIdent("gout") || matchIdent("cout")) {
         bool prev_stream = in_stream_io;
         in_stream_io = true;
         while (match(TOK_SHL)) {
+            bool is_std_endl = (peek().kind == TOK_IDENT && peek().text == "std" && peek(1).kind == TOK_COLON_COLON && peek(2).text == "endl");
+            if (is_std_endl) { advance(); advance(); }
             if (matchIdent("endl")) {
                 emitByte(OP_LOG_EMPTY);
             } else if (matchIdent("not_clear")) {
@@ -3960,6 +3964,16 @@ std::unique_ptr<StmtAST> GrassParser::parseStatement() {
     }
     if (checkIdent("gout") || checkIdent("cout")) return parseStreamIO(true);
     if (checkIdent("gin") || checkIdent("cin")) return parseStreamIO(false);
+    if (peek().kind == TOK_IDENT && peek().text == "std" && peek(1).kind == TOK_COLON_COLON) {
+        if (peek(2).text == "gout" || peek(2).text == "cout") {
+            advance(); advance();
+            return parseStreamIO(true);
+        }
+        if (peek(2).text == "gin" || peek(2).text == "cin") {
+            advance(); advance();
+            return parseStreamIO(false);
+        }
+    }
 
     bool is_type = isTypeName(peek().text);
     if (!is_type && peek().kind == TOK_IDENT) {
