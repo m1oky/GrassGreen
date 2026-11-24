@@ -190,6 +190,15 @@ namespace grass::native {
         register_function({ "fs_remove", "fsys", i64_t, { ptr_t }, { "path" }, false, false, false, "", backend::TargetABI::Win64 });
         register_function({ "fs_read_bytes", "fsys", ptr_t, { ptr_t }, { "path" }, false, false, false, "", backend::TargetABI::Win64 });
         register_function({ "fs_write_bytes", "fsys", i64_t, { ptr_t, ptr_t, i64_t }, { "path", "bytes", "len" }, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "fs_open_read", "fsys", i64_t, { ptr_t }, { "path" }, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "fs_open_write", "fsys", i64_t, { ptr_t }, { "path" }, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "fs_open_append", "fsys", i64_t, { ptr_t }, { "path" }, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "fs_close", "fsys", i64_t, { i64_t }, { "handle" }, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "fs_get_size", "fsys", i64_t, { i64_t }, { "handle" }, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "fs_delete", "fsys", i64_t, { ptr_t }, { "path" }, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "fs_create", "fsys", i64_t, { ptr_t }, { "path" }, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "fs_write_all", "fsys", i64_t, { ptr_t, ptr_t, i64_t }, { "path", "buf", "len" }, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "fs_read_all", "fsys", i64_t, { ptr_t, ptr_t, i64_t }, { "path", "buf", "len" }, false, false, false, "", backend::TargetABI::Win64 });
 
         // Aliases
         register_function({ "creat", "fsys", i64_t, { ptr_t }, { "path" }, false, false, false, "", backend::TargetABI::Win64 });
@@ -214,9 +223,6 @@ namespace grass::native {
         register_function({ "floor", "math", f64_t, { f64_t }, { "x" }, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "ceil", "math", f64_t, { f64_t }, { "x" }, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "pow", "math", f64_t, { f64_t, f64_t }, { "b", "e" }, false, true, false, "", backend::TargetABI::Win64 });
-        register_function({ "clamp", "math", f64_t, { f64_t, f64_t, f64_t }, { "v", "min", "max" }, false, true, false, "", backend::TargetABI::Win64 });
-        register_function({ "min", "math", f64_t, { f64_t, f64_t }, { "a", "b" }, false, true, false, "", backend::TargetABI::Win64 });
-        register_function({ "max", "math", f64_t, { f64_t, f64_t }, { "a", "b" }, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "rand", "math", i64_t, { i64_t, i64_t }, { "min", "max" }, false, true, false, "", backend::TargetABI::Win64 });
 
         // CoreMath & Quantum & Crypto
@@ -259,15 +265,22 @@ namespace grass::native {
         ir::IRType* i64_t = ctx.get_i64_type();
         ir::IRType* f64_t = ctx.get_f64_type();
         ir::IRType* ptr_t = ctx.get_ptr_type();
+        ir::IRType* str_t = ctx.get_ptr_type(ctx.get_i8_type());
 
         register_function({ "start_time", "time", v_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "stop_time", "time", f64_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
-        register_function({ "conclus_time", "time", ptr_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
-        register_function({ "get_date", "time", ptr_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
-        register_function({ "get_time_str", "time", ptr_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
-        register_function({ "now_ms", "time", f64_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
-        register_function({ "timestamp", "time", f64_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "conclus_time", "time", str_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "get_date", "time", str_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "get_time_str", "time", str_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "now_ms", "time", i64_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "sleep_ms", "time", v_t, { i64_t }, { "ms" }, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "time_now_ms", "time", i64_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "time_now_us", "time", i64_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "time_frequency", "time", i64_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "time_counter", "time", i64_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "time_sleep", "time", i64_t, { i64_t }, { "ms" }, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "time_delay_ms", "time", i64_t, { i64_t }, { "ms" }, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "timestamp", "time", f64_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "grass_sleep", "time", v_t, { i64_t }, { "ms" }, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "time", "time", i64_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "clock_ms", "time", f64_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
@@ -278,19 +291,13 @@ namespace grass::native {
         ir::IRType* f64_t = ctx.get_f64_type();
         ir::IRType* ptr_t = ctx.get_ptr_type();
 
-        register_function({ "pc_name", "sys", ptr_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
-        register_function({ "user_name", "sys", ptr_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
-        register_function({ "screen_w", "sys", i64_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
-        register_function({ "screen_h", "sys", i64_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "cpu_cores", "sys", i64_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "ram_total_mb", "sys", f64_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "ram_free_mb", "sys", f64_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "ram_used_mb", "sys", f64_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "uptime_sec", "sys", f64_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
-        register_function({ "get_env", "sys", ptr_t, { ptr_t }, { "key" }, false, false, false, "", backend::TargetABI::Win64 });
         register_function({ "clip_set", "sys", i64_t, { ptr_t }, { "text" }, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "clip_get", "sys", ptr_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
-        register_function({ "msgbox", "sys", i64_t, { ptr_t, ptr_t }, { "title", "msg" }, false, false, false, "", backend::TargetABI::Win64 });
         register_function({ "system", "sys", i64_t, { ptr_t }, { "cmd" }, false, false, false, "", backend::TargetABI::Win64 });
 
         // Bare-metal I/O and CPU intrinsics (available in Freestanding profile)
@@ -325,16 +332,12 @@ namespace grass::native {
 
         register_function({ "local_ip", "net", ptr_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "resolve_ip", "net", ptr_t, { ptr_t }, { "host" }, false, false, false, "", backend::TargetABI::Win64 });
-        register_function({ "connect", "net", i64_t, { ptr_t, i64_t }, { "host", "port" }, false, false, false, "", backend::TargetABI::Win64 });
         register_function({ "ping", "net", f64_t, { ptr_t, i64_t }, { "host", "port" }, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "net_set_agent", "net", i64_t, { ptr_t, ptr_t }, { "browser", "device" }, false, false, false, "", backend::TargetABI::Win64 });
         register_function({ "API", "net", ptr_t, { ptr_t }, { "key" }, false, false, false, "", backend::TargetABI::Win64 });
         register_function({ "create_serv", "net", i64_t, { ptr_t, i64_t, ptr_t, ptr_t }, { "ip", "port", "pass", "certain" }, false, false, false, "", backend::TargetABI::Win64 });
-        register_function({ "accept", "net", ptr_t, {}, {}, false, false, false, "", backend::TargetABI::Win64 });
-        register_function({ "send", "net", ptr_t, { ptr_t, ptr_t, ptr_t }, { "url", "method", "body" }, false, false, false, "", backend::TargetABI::Win64 });
         register_function({ "download", "net", i64_t, { ptr_t, ptr_t }, { "url", "path" }, false, false, false, "", backend::TargetABI::Win64 });
         register_function({ "net_status", "net", i64_t, {}, {}, false, false, false, "", backend::TargetABI::Win64 });
-        register_function({ "net_close", "net", i64_t, {}, {}, false, false, false, "", backend::TargetABI::Win64 });
     }
 
     void GrassNativeStdlib::populate_json(ir::IRContext& ctx) {
@@ -429,6 +432,17 @@ namespace grass::native {
         register_function({ "grass_alloc", "memory", ptr_t, { i64_t }, { "size" }, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "grass_free", "memory", v_t, { ptr_t }, { "ptr" }, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "grass_realloc", "memory", ptr_t, { ptr_t, i64_t }, { "ptr", "new_size" }, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "alloc", "memory", ptr_t, { i64_t }, { "size" }, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "free", "memory", v_t, { ptr_t }, { "ptr" }, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "realloc", "memory", ptr_t, { ptr_t, i64_t }, { "ptr", "new_size" }, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "memcpy", "memory", ptr_t, { ptr_t, ptr_t, i64_t }, { "dst", "src", "count" }, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "memset", "memory", ptr_t, { ptr_t, i64_t, i64_t }, { "dst", "val", "count" }, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "mem_alloc", "memory", ptr_t, { i64_t }, { "size" }, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "mem_free", "memory", v_t, { ptr_t }, { "ptr" }, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "heap_alloc", "memory", ptr_t, { i64_t }, { "size" }, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "heap_free", "memory", i64_t, { ptr_t }, { "ptr" }, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "heap_realloc", "memory", ptr_t, { ptr_t, i64_t }, { "ptr", "new_size" }, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "heap_get_process_heap", "memory", ptr_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "grass_mem_barrier", "memory", v_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
 
         register_function({ "memory_alloc", "memory", i64_t, { i64_t }, { "size" }, false, true, false, "", backend::TargetABI::Win64 });
@@ -485,18 +499,44 @@ namespace grass::native {
         register_extern("GetStdHandle", "kernel32.dll", ptr_t, { i32_t }, backend::TargetABI::Win64);
         register_extern("WriteFile", "kernel32.dll", i32_t, { ptr_t, ptr_t, i32_t, ptr_t, ptr_t }, backend::TargetABI::Win64);
         register_extern("ReadFile", "kernel32.dll", i32_t, { ptr_t, ptr_t, i32_t, ptr_t, ptr_t }, backend::TargetABI::Win64);
+        register_extern("CreateFileA", "kernel32.dll", ptr_t, { ptr_t, i32_t, i32_t, ptr_t, i32_t, i32_t, ptr_t }, backend::TargetABI::Win64);
+        register_extern("CloseHandle", "kernel32.dll", i32_t, { ptr_t }, backend::TargetABI::Win64);
+        register_extern("GetFileSizeEx", "kernel32.dll", i32_t, { ptr_t, ptr_t }, backend::TargetABI::Win64);
+        register_extern("DeleteFileA", "kernel32.dll", i32_t, { ptr_t }, backend::TargetABI::Win64);
+        register_extern("CreateDirectoryA", "kernel32.dll", i32_t, { ptr_t, ptr_t }, backend::TargetABI::Win64);
+        register_extern("GetFileAttributesA", "kernel32.dll", i32_t, { ptr_t }, backend::TargetABI::Win64);
+        register_extern("CopyFileA", "kernel32.dll", i32_t, { ptr_t, ptr_t, i32_t }, backend::TargetABI::Win64);
         register_extern("lstrlenA", "kernel32.dll", i64_t, { ptr_t }, backend::TargetABI::Win64);
+        register_extern("lstrlenW", "kernel32.dll", i64_t, { ptr_t }, backend::TargetABI::Win64);
         register_extern("Sleep", "kernel32.dll", v_t, { i32_t }, backend::TargetABI::Win64);
         register_extern("GetTickCount64", "kernel32.dll", i64_t, {}, backend::TargetABI::Win64);
+        register_extern("QueryPerformanceFrequency", "kernel32.dll", i32_t, { ptr_t }, backend::TargetABI::Win64);
+        register_extern("QueryPerformanceCounter", "kernel32.dll", i32_t, { ptr_t }, backend::TargetABI::Win64);
+        register_extern("GetProcessHeap", "kernel32.dll", ptr_t, {}, backend::TargetABI::Win64);
+        register_extern("HeapAlloc", "kernel32.dll", ptr_t, { ptr_t, i32_t, i64_t }, backend::TargetABI::Win64);
+        register_extern("HeapFree", "kernel32.dll", i32_t, { ptr_t, i32_t, ptr_t }, backend::TargetABI::Win64);
+        register_extern("HeapReAlloc", "kernel32.dll", ptr_t, { ptr_t, i32_t, ptr_t, i64_t }, backend::TargetABI::Win64);
         register_extern("LoadLibraryA", "kernel32.dll", ptr_t, { ptr_t }, backend::TargetABI::Win64);
         register_extern("GetProcAddress", "kernel32.dll", ptr_t, { ptr_t, ptr_t }, backend::TargetABI::Win64);
         register_extern("FreeLibrary", "kernel32.dll", i32_t, { ptr_t }, backend::TargetABI::Win64);
-        register_extern("CloseHandle", "kernel32.dll", i32_t, { ptr_t }, backend::TargetABI::Win64);
         register_extern("VirtualAlloc", "kernel32.dll", ptr_t, { ptr_t, i64_t, i32_t, i32_t }, backend::TargetABI::Win64);
         register_extern("VirtualFree", "kernel32.dll", i32_t, { ptr_t, i64_t, i32_t }, backend::TargetABI::Win64);
+        register_extern("GetCommandLineA", "kernel32.dll", ptr_t, {}, backend::TargetABI::Win64);
+        register_extern("GetEnvironmentVariableA", "kernel32.dll", i32_t, { ptr_t, ptr_t, i32_t }, backend::TargetABI::Win64);
+        register_extern("SetEnvironmentVariableA", "kernel32.dll", i32_t, { ptr_t, ptr_t }, backend::TargetABI::Win64);
+        register_extern("GetComputerNameA", "kernel32.dll", i32_t, { ptr_t, ptr_t }, backend::TargetABI::Win64);
+        register_extern("CreateProcessA", "kernel32.dll", i32_t, { ptr_t, ptr_t, ptr_t, ptr_t, i32_t, i32_t, ptr_t, ptr_t, ptr_t, ptr_t }, backend::TargetABI::Win64);
+        register_extern("WinExec", "kernel32.dll", i32_t, { ptr_t, i32_t }, backend::TargetABI::Win64);
+        register_extern("CreateThread", "kernel32.dll", ptr_t, { ptr_t, i64_t, ptr_t, ptr_t, i32_t, ptr_t }, backend::TargetABI::Win64);
+        register_extern("WaitForSingleObject", "kernel32.dll", i32_t, { ptr_t, i32_t }, backend::TargetABI::Win64);
+        register_extern("CreateMutexA", "kernel32.dll", ptr_t, { ptr_t, i32_t, ptr_t }, backend::TargetABI::Win64);
+        register_extern("ReleaseMutex", "kernel32.dll", i32_t, { ptr_t }, backend::TargetABI::Win64);
+        register_extern("GetLastError", "kernel32.dll", i32_t, {}, backend::TargetABI::Win64);
+        register_extern("SetLastError", "kernel32.dll", v_t, { i32_t }, backend::TargetABI::Win64);
 
         // 2. user32.dll (Win64)
         register_extern("MessageBoxA", "user32.dll", i32_t, { ptr_t, ptr_t, ptr_t, i32_t }, backend::TargetABI::Win64);
+        register_extern("MessageBoxW", "user32.dll", i32_t, { ptr_t, ptr_t, ptr_t, i32_t }, backend::TargetABI::Win64);
         register_extern("GetSystemMetrics", "user32.dll", i32_t, { i32_t }, backend::TargetABI::Win64);
         register_extern("OpenClipboard", "user32.dll", i32_t, { ptr_t }, backend::TargetABI::Win64);
         register_extern("CloseClipboard", "user32.dll", i32_t, {}, backend::TargetABI::Win64);
@@ -515,8 +555,15 @@ namespace grass::native {
         register_extern("closesocket", "ws2_32.dll", i32_t, { i64_t }, backend::TargetABI::Win64);
         register_extern("bind", "ws2_32.dll", i32_t, { i64_t, ptr_t, i32_t }, backend::TargetABI::Win64);
         register_extern("listen", "ws2_32.dll", i32_t, { i64_t, i32_t }, backend::TargetABI::Win64);
+        register_extern("accept", "ws2_32.dll", i64_t, { i64_t, ptr_t, ptr_t }, backend::TargetABI::Win64);
         register_extern("htons", "ws2_32.dll", i16_t, { i16_t }, backend::TargetABI::Win64);
         register_extern("ntohs", "ws2_32.dll", i16_t, { i16_t }, backend::TargetABI::Win64);
+        register_extern("inet_addr", "ws2_32.dll", i32_t, { ptr_t }, backend::TargetABI::Win64);
+        register_extern("gethostbyname", "ws2_32.dll", ptr_t, { ptr_t }, backend::TargetABI::Win64);
+        register_extern("WSAGetLastError", "ws2_32.dll", i32_t, {}, backend::TargetABI::Win64);
+
+        // 4. advapi32.dll (Win64)
+        register_extern("GetUserNameA", "advapi32.dll", i32_t, { ptr_t, ptr_t }, backend::TargetABI::Win64);
 
         // 4. libc (SysV64)
         register_extern("printf", "libc.so.6", i32_t, { ptr_t }, backend::TargetABI::SysV64);

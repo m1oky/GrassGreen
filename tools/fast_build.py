@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
@@ -140,6 +141,63 @@ def main():
         return link_res.returncode
 
     print(f"[GrassCompiler] Build SUCCESSFUL: bin/grassc.exe (total {time.time() - start_time:.2f}s)")
+
+    # 1. Update bin/grg.exe
+    grg_exe = os.path.join(BIN_DIR, "grg.exe")
+    shutil.copy2(os.path.join(BIN_DIR, "grassc.exe"), grg_exe)
+    print("[GrassCompiler] Updated bin/grg.exe")
+
+    # 2. Build gpm.exe if needed or out of date
+    gpm_src = "src/gpm.cpp"
+    gpm_exe = os.path.join(BIN_DIR, "gpm.exe")
+    if os.path.exists(gpm_src) and (not os.path.exists(gpm_exe) or os.path.getmtime(gpm_src) > os.path.getmtime(gpm_exe)):
+        print("[GrassCompiler] Building gpm package manager...")
+        subprocess.run(["g++", "-std=c++17", "-O3", gpm_src, "-o", gpm_exe], check=False)
+
+    # 3. Build grassvm.dll if needed or out of date
+    vm_src = "src/grassvm_capi.cpp"
+    vm_dll = os.path.join(BIN_DIR, "grassvm.dll")
+    vm_lib = os.path.join(BIN_DIR, "grassvm.lib")
+    if os.path.exists(vm_src) and (not os.path.exists(vm_dll) or os.path.getmtime(vm_src) > os.path.getmtime(vm_dll)):
+        print("[GrassCompiler] Building libgrassvm embedded library...")
+        subprocess.run(["g++", "-std=c++17", "-O3", "-shared", vm_src, "-Iinclude", "-o", vm_dll, f"-Wl,--out-implib,{vm_lib}"], check=False)
+
+    # 4. Synchronize and deploy to C:\GrassGreen if directory exists
+    install_root = r"C:\GrassGreen"
+    if os.path.exists(install_root):
+        install_bin = os.path.join(install_root, "bin")
+        install_stdlib = os.path.join(install_root, "stdlib")
+        os.makedirs(install_bin, exist_ok=True)
+        os.makedirs(install_stdlib, exist_ok=True)
+
+        # Copy all binaries (*.exe, *.dll, *.lib) to C:\GrassGreen\bin\
+        for fname in os.listdir(BIN_DIR):
+            if fname.lower().endswith((".exe", ".dll", ".lib")):
+                src_path = os.path.join(BIN_DIR, fname)
+                dst_path = os.path.join(install_bin, fname)
+                try:
+                    shutil.copy2(src_path, dst_path)
+                except Exception as ex:
+                    print(f"[GrassCompiler Warning] Could not copy {fname} to {install_bin}: {ex}")
+        print(f"[GrassCompiler] Deployed binaries to {install_bin}")
+
+        # Synchronize stdlib/ to C:\GrassGreen\stdlib\
+        stdlib_src_dir = "stdlib"
+        if os.path.exists(stdlib_src_dir):
+            src_files = set(os.listdir(stdlib_src_dir))
+            for fname in src_files:
+                src_f = os.path.join(stdlib_src_dir, fname)
+                dst_f = os.path.join(install_stdlib, fname)
+                shutil.copy2(src_f, dst_f)
+            # Remove deleted files from target stdlib
+            for dst_fname in os.listdir(install_stdlib):
+                if dst_fname not in src_files:
+                    try:
+                        os.remove(os.path.join(install_stdlib, dst_fname))
+                    except Exception:
+                        pass
+            print(f"[GrassCompiler] Synchronized standard library to {install_stdlib}")
+
     return 0
 
 if __name__ == "__main__":

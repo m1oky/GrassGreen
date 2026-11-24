@@ -77,9 +77,13 @@ struct SemaType {
         if (strict) {
             if (target.is_pointer() && !is_pointer()) {
                 if (kind == SemaTypeKind::Pointer && (name == "void" || name == "nullptr")) return true;
+                if (kind == SemaTypeKind::Int || kind == SemaTypeKind::Any) return true;
                 return false;
             }
-            if (!target.is_pointer() && is_pointer()) return false;
+            if (!target.is_pointer() && is_pointer()) {
+                if (target.kind == SemaTypeKind::Int || target.kind == SemaTypeKind::Any) return true;
+                return false;
+            }
             if (target.is_pointer() && is_pointer()) {
                 if (target.name == "void" || name == "void" || name == "nullptr" || equals(target)) return true;
                 return false;
@@ -97,8 +101,14 @@ struct SemaType {
             if (target.name == "void" || name == "void" || name == "nullptr" || equals(target)) return true;
             return false;
         }
-        if (!target.is_pointer() && is_pointer()) return false;
-        if (target.is_pointer() && !is_pointer()) return false;
+        if (!target.is_pointer() && is_pointer()) {
+            if (target.kind == SemaTypeKind::Int || target.kind == SemaTypeKind::Any) return true;
+            return false;
+        }
+        if (target.is_pointer() && !is_pointer()) {
+            if (kind == SemaTypeKind::Int || kind == SemaTypeKind::Any) return true;
+            return false;
+        }
         if (target.kind == SemaTypeKind::Float && kind == SemaTypeKind::Int) return true;
         return equals(target);
     }

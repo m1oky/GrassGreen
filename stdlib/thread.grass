@@ -1,0 +1,107 @@
+!GrassGreen!
+
+// =============================================================================
+// GrassGreen Standard Library: Threading & Concurrency (Pure GrassGreen Native Runtime)
+// Direct OS Thread and Synchronization API Calls via kernel32.dll externs:
+// CreateThread, WaitForSingleObject, CreateMutexA, ReleaseMutex, CloseHandle, Sleep
+// Zero C runtime (msvcrt) dependencies.
+// =============================================================================
+
+// Infinite timeout constant for WaitForSingleObject
+take thread_infinite() {
+    return 4294967295; // 0xFFFFFFFF
+}
+
+// Create a new operating system thread
+take thread_create(take routine_ptr, take param_ptr) {
+    if (routine_ptr == 0) {
+        return 0;
+    }
+    return CreateThread(0, 0, routine_ptr, param_ptr, 0, 0);
+}
+
+// Wait for thread termination with timeout in milliseconds
+take thread_join(take hThread, take timeout_ms) {
+    if (hThread == 0 || hThread == -1) {
+        return -1;
+    }
+    if (timeout_ms <= 0) {
+        timeout_ms = thread_infinite();
+    }
+    take res = WaitForSingleObject(hThread, timeout_ms);
+    return res;
+}
+
+// Close thread handle
+take thread_close(take hThread) {
+    if (hThread == 0 || hThread == -1) {
+        return 0;
+    }
+    return CloseHandle(hThread);
+}
+
+// Sleep current thread for specified milliseconds
+take thread_sleep(take ms) {
+    if (ms > 0) {
+        Sleep(ms);
+    }
+    return 0;
+}
+
+// Create an operating system mutual exclusion lock (Mutex)
+take mutex_create() {
+    return CreateMutexA(0, 0, 0);
+}
+
+// Acquire mutex lock with timeout in milliseconds
+take mutex_lock(take hMutex, take timeout_ms) {
+    if (hMutex == 0 || hMutex == -1) {
+        return -1;
+    }
+    if (timeout_ms <= 0) {
+        timeout_ms = thread_infinite();
+    }
+    return WaitForSingleObject(hMutex, timeout_ms);
+}
+
+// Release mutex lock
+take mutex_unlock(take hMutex) {
+    if (hMutex == 0 || hMutex == -1) {
+        return 0;
+    }
+    return ReleaseMutex(hMutex);
+}
+
+// Destroy mutex handle
+take mutex_destroy(take hMutex) {
+    if (hMutex == 0 || hMutex == -1) {
+        return 0;
+    }
+    return CloseHandle(hMutex);
+}
+
+// Object-Oriented Mutex Class
+class Mutex {
+    take handle;
+
+    take init() {
+        this.handle = mutex_create();
+        return this.handle != 0 && this.handle != -1;
+    }
+
+    take lock() {
+        return mutex_lock(this.handle, 0);
+    }
+
+    take unlock() {
+        return mutex_unlock(this.handle);
+    }
+
+    take destroy() {
+        if (this.handle != 0 && this.handle != -1) {
+            mutex_destroy(this.handle);
+            this.handle = 0;
+        }
+        return 1;
+    }
+}

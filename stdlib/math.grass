@@ -1,0 +1,125 @@
+!GrassGreen!
+
+// =============================================================================
+// GrassGreen Standard Library: Math (Pure GrassGreen Native Runtime)
+// Hardware SSE2 / x87 acceleration & freestanding math functions.
+// Zero C runtime (msvcrt / libm) dependencies.
+// =============================================================================
+
+// Floating-point minimum
+float fmin(float a, float b) {
+    if (a < b) {
+        return a;
+    }
+    return b;
+}
+
+// Floating-point maximum
+float fmax(float a, float b) {
+    if (a > b) {
+        return a;
+    }
+    return b;
+}
+
+// Floating-point clamp
+float fclamp(float v, float min_val, float max_val) {
+    if (v < min_val) {
+        return min_val;
+    }
+    if (v > max_val) {
+        return max_val;
+    }
+    return v;
+}
+
+// Linear interpolation: a + (b - a) * t
+float lerp(float a, float b, float t) {
+    return a + (b - a) * t;
+}
+
+// Round to nearest integer (returns float)
+float round(float x) {
+    if (x >= 0.0) {
+        return floor(x + 0.5);
+    }
+    return ceil(x - 0.5);
+}
+
+// Tangent function: sin(x) / cos(x)
+float tan(float x) {
+    float c = cos(x);
+    if (c == 0.0) {
+        return 0.0;
+    }
+    return sin(x) / c;
+}
+
+// Fast quadratic discriminant: b*b - 4*a*c
+take discor(take a, take b, take c) {
+    return b * b - 4 * a * c;
+}
+
+// Pseudo-random number generator (Freestanding LCG via GetTickCount64)
+take rand() {
+    take t = GetTickCount64();
+    take val = (t * 6364136223846793005 + 1442695040888963407) & 2147483647;
+    return val;
+}
+
+// Math namespace wrappers
+float math_sqrt(float x) {
+    return sqrt(x);
+}
+
+float math_abs(float x) {
+    return abs(x);
+}
+
+float math_sin(float x) {
+    return sin(x);
+}
+
+float math_cos(float x) {
+    return cos(x);
+}
+
+float math_tan(float x) {
+    return tan(x);
+}
+
+float math_floor(float x) {
+    return floor(x);
+}
+
+float math_ceil(float x) {
+    return ceil(x);
+}
+
+float math_round(float x) {
+    return round(x);
+}
+
+float math_pow(float b, float e) {
+    return pow(b, e);
+}
+
+take math_min(take a, take b) {
+    return min(a, b);
+}
+
+take math_max(take a, take b) {
+    return max(a, b);
+}
+
+take math_clamp(take v, take lo, take hi) {
+    return clamp(v, lo, hi);
+}
+
+float math_lerp(float a, float b, float t) {
+    return lerp(a, b, t);
+}
+
+take math_rand() {
+    return rand();
+}

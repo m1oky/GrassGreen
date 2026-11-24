@@ -53,6 +53,14 @@ take time_delay_ms(take ms) {
     return time_sleep(ms);
 }
 
+take sleep_ms(take ms) {
+    return time_sleep(ms);
+}
+
+take now_ms() {
+    return time_now_ms();
+}
+
 // High-resolution stopwatch class
 class Stopwatch {
     take start_ticks;

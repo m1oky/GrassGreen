@@ -62,6 +62,26 @@ take mem_free(take ptr) {
     return 0;
 }
 
+take mem_realloc(take ptr, take new_size) {
+    return heap_realloc(ptr, new_size);
+}
+
+// Memory copy via hardware x86_64 rep movsb intrinsic
+take mem_copy(take dst, take src, take count) {
+    if (dst == 0 || src == 0 || count <= 0) {
+        return dst;
+    }
+    return memcpy(dst, src, count);
+}
+
+// Memory fill via hardware x86_64 rep stosb intrinsic
+take mem_set(take dst, take val, take count) {
+    if (dst == 0 || count <= 0) {
+        return dst;
+    }
+    return memset(dst, val, count);
+}
+
 // Fast Linear Arena Allocator on raw memory pointers
 class ArenaAllocator {
     take buffer;

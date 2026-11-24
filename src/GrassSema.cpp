@@ -44,8 +44,8 @@ void GrassSema::registerBuiltins() {
     add_builtin("floor", SemaType::Float(), {SemaType::Float()});
     add_builtin("ceil", SemaType::Float(), {SemaType::Float()});
     add_builtin("pow", SemaType::Float(), {SemaType::Float(), SemaType::Float()});
-    add_builtin("min", SemaType::Float(), {SemaType::Float(), SemaType::Float()});
-    add_builtin("max", SemaType::Float(), {SemaType::Float(), SemaType::Float()});
+    add_builtin("min", SemaType::Any(), {SemaType::Any(), SemaType::Any()});
+    add_builtin("max", SemaType::Any(), {SemaType::Any(), SemaType::Any()});
     add_builtin("rand", SemaType::Int(), {}, true);
     add_builtin("lerp", SemaType::Float(), {SemaType::Float(), SemaType::Float(), SemaType::Float()});
 
@@ -55,8 +55,19 @@ void GrassSema::registerBuiltins() {
     add_builtin("conclus_time", SemaType::String(), {});
     add_builtin("clock_ms", SemaType::Int(), {});
     add_builtin("now_ms", SemaType::Int(), {});
+    add_builtin("sleep_ms", SemaType::Void(), {SemaType::Int()});
+    add_builtin("time_now_ms", SemaType::Int(), {});
+    add_builtin("time_now_us", SemaType::Int(), {});
+    add_builtin("time_frequency", SemaType::Int(), {});
+    add_builtin("time_counter", SemaType::Int(), {});
+    add_builtin("time_sleep", SemaType::Int(), {SemaType::Int()});
+    add_builtin("time_delay_ms", SemaType::Int(), {SemaType::Int()});
     add_builtin("get_date", SemaType::String(), {});
     add_builtin("get_time_str", SemaType::String(), {});
+
+    // Additional Math functions
+    add_builtin("tan", SemaType::Float(), {SemaType::Float()});
+    add_builtin("clamp", SemaType::Any(), {SemaType::Any(), SemaType::Any(), SemaType::Any()});
 
     // CoreMath and Crypto
     add_builtin("sha256", SemaType::String(), {SemaType::Any()});
@@ -78,6 +89,20 @@ void GrassSema::registerBuiltins() {
     add_builtin("fs_is_dir", SemaType::Int(), {SemaType::String()});
     add_builtin("fs_size", SemaType::Int(), {SemaType::String()});
     add_builtin("fs_list", SemaType::String(), {SemaType::String()});
+    add_builtin("fs_open_read", SemaType::Int(), {SemaType::String()});
+    add_builtin("fs_open_write", SemaType::Int(), {SemaType::String()});
+    add_builtin("fs_open_append", SemaType::Int(), {SemaType::String()});
+    add_builtin("fs_close", SemaType::Int(), {SemaType::Any()});
+    add_builtin("fs_get_size", SemaType::Int(), {SemaType::Any()});
+    add_builtin("fs_read", SemaType::Int(), {SemaType::Any(), SemaType::Any(), SemaType::Int()});
+    add_builtin("fs_write", SemaType::Int(), {SemaType::Any(), SemaType::Any(), SemaType::Int()});
+    add_builtin("fs_delete", SemaType::Int(), {SemaType::String()});
+    add_builtin("fs_remove", SemaType::Int(), {SemaType::String()});
+    add_builtin("fs_exists", SemaType::Int(), {SemaType::String()});
+    add_builtin("fs_create", SemaType::Int(), {SemaType::String()});
+    add_builtin("fs_write_all", SemaType::Int(), {SemaType::String(), SemaType::Any(), SemaType::Int()});
+    add_builtin("fs_read_all", SemaType::Int(), {SemaType::String(), SemaType::Any(), SemaType::Int()});
+    add_builtin("fs_copy", SemaType::Int(), {SemaType::String(), SemaType::String()});
 
     // System memory
     add_builtin("memory_free", SemaType::String(), {});
@@ -88,6 +113,77 @@ void GrassSema::registerBuiltins() {
     // Memory management
     add_builtin("alloc", SemaType::Ptr(SemaType::Void()), {SemaType::Int()});
     add_builtin("free", SemaType::Void(), {SemaType::Ptr(SemaType::Void())});
+    add_builtin("realloc", SemaType::Ptr(SemaType::Void()), {SemaType::Ptr(SemaType::Void()), SemaType::Int()});
+    add_builtin("memcpy", SemaType::Ptr(SemaType::Void()), {SemaType::Ptr(SemaType::Void()), SemaType::Ptr(SemaType::Void()), SemaType::Int()});
+    add_builtin("memset", SemaType::Ptr(SemaType::Void()), {SemaType::Ptr(SemaType::Void()), SemaType::Int(), SemaType::Int()});
+    add_builtin("mem_alloc", SemaType::Ptr(SemaType::Void()), {SemaType::Int()});
+    add_builtin("mem_free", SemaType::Void(), {SemaType::Ptr(SemaType::Void())});
+    add_builtin("heap_alloc", SemaType::Ptr(SemaType::Void()), {SemaType::Int()});
+    add_builtin("heap_free", SemaType::Int(), {SemaType::Ptr(SemaType::Void())});
+    add_builtin("heap_realloc", SemaType::Ptr(SemaType::Void()), {SemaType::Ptr(SemaType::Void()), SemaType::Int()});
+    add_builtin("heap_get_process_heap", SemaType::Ptr(SemaType::Void()), {});
+
+    // String operations
+    add_builtin("strlen", SemaType::Int(), {SemaType::Any()});
+    add_builtin("str_len", SemaType::Int(), {SemaType::Any()});
+    add_builtin("strcmp", SemaType::Int(), {SemaType::Any(), SemaType::Any()});
+    add_builtin("str_cmp", SemaType::Int(), {SemaType::Any(), SemaType::Any()});
+    add_builtin("streq", SemaType::Int(), {SemaType::Any(), SemaType::Any()});
+    add_builtin("str_eq", SemaType::Int(), {SemaType::Any(), SemaType::Any()});
+    add_builtin("strcpy", SemaType::Ptr(SemaType::Void()), {SemaType::Any(), SemaType::Any()});
+    add_builtin("str_copy", SemaType::Ptr(SemaType::Void()), {SemaType::Any(), SemaType::Any()});
+    add_builtin("strcat", SemaType::Ptr(SemaType::Void()), {SemaType::Any(), SemaType::Any()});
+    add_builtin("str_cat", SemaType::Ptr(SemaType::Void()), {SemaType::Any(), SemaType::Any()});
+    add_builtin("strdup", SemaType::Ptr(SemaType::Void()), {SemaType::Any()});
+    add_builtin("str_dup", SemaType::Ptr(SemaType::Void()), {SemaType::Any()});
+    add_builtin("str_find", SemaType::Int(), {SemaType::Any(), SemaType::Any()});
+    add_builtin("str_contains", SemaType::Int(), {SemaType::Any(), SemaType::Any()});
+    add_builtin("str_trim", SemaType::Ptr(SemaType::Void()), {SemaType::Any()});
+    add_builtin("str_to_int", SemaType::Int(), {SemaType::Any()});
+    add_builtin("int_to_str", SemaType::Ptr(SemaType::Void()), {SemaType::Int()});
+    add_builtin("str_substr", SemaType::Ptr(SemaType::Void()), {SemaType::Any(), SemaType::Int(), SemaType::Int()});
+
+    // System and OS
+    add_builtin("exit", SemaType::Void(), {SemaType::Int()});
+    add_builtin("sys_exit", SemaType::Void(), {SemaType::Int()});
+    add_builtin("exec", SemaType::Int(), {SemaType::Any()});
+    add_builtin("run", SemaType::Int(), {SemaType::Any()});
+    add_builtin("sys_exec", SemaType::Int(), {SemaType::Any()});
+    add_builtin("get_env", SemaType::Ptr(SemaType::Void()), {SemaType::Any()});
+    add_builtin("sys_get_env", SemaType::Ptr(SemaType::Void()), {SemaType::Any()});
+    add_builtin("set_env", SemaType::Int(), {SemaType::Any(), SemaType::Any()});
+    add_builtin("sys_set_env", SemaType::Int(), {SemaType::Any(), SemaType::Any()});
+    add_builtin("cli_args", SemaType::String(), {});
+    add_builtin("get_cmd_line", SemaType::String(), {});
+    add_builtin("user_name", SemaType::String(), {});
+    add_builtin("pc_name", SemaType::String(), {});
+    add_builtin("screen_w", SemaType::Int(), {});
+    add_builtin("screen_h", SemaType::Int(), {});
+    add_builtin("msgbox", SemaType::Int(), {SemaType::Any(), SemaType::Any()});
+
+    // Networking
+    add_builtin("net_init", SemaType::Int(), {});
+    add_builtin("net_cleanup", SemaType::Int(), {});
+    add_builtin("net_create_tcp", SemaType::Int(), {});
+    add_builtin("net_socket", SemaType::Int(), {SemaType::Int(), SemaType::Int(), SemaType::Int()});
+    add_builtin("net_connect", SemaType::Int(), {SemaType::Int(), SemaType::Any(), SemaType::Int()});
+    add_builtin("net_bind", SemaType::Int(), {SemaType::Int(), SemaType::Int()});
+    add_builtin("net_listen", SemaType::Int(), {SemaType::Int(), SemaType::Int()});
+    add_builtin("net_accept", SemaType::Int(), {SemaType::Int()});
+    add_builtin("net_send", SemaType::Int(), {SemaType::Int(), SemaType::Any(), SemaType::Int()});
+    add_builtin("net_recv", SemaType::Int(), {SemaType::Int(), SemaType::Any(), SemaType::Int()});
+    add_builtin("net_close", SemaType::Int(), {SemaType::Int()});
+
+    // Threading
+    add_builtin("thread_create", SemaType::Ptr(SemaType::Void()), {SemaType::Any(), SemaType::Any()});
+    add_builtin("thread_join", SemaType::Int(), {SemaType::Any()});
+    add_builtin("thread_detach", SemaType::Int(), {SemaType::Any()});
+    add_builtin("thread_id", SemaType::Int(), {});
+    add_builtin("thread_sleep", SemaType::Void(), {SemaType::Int()});
+    add_builtin("mutex_create", SemaType::Ptr(SemaType::Void()), {});
+    add_builtin("mutex_lock", SemaType::Int(), {SemaType::Any()});
+    add_builtin("mutex_unlock", SemaType::Int(), {SemaType::Any()});
+    add_builtin("mutex_destroy", SemaType::Int(), {SemaType::Any()});
 
     // Bare-metal & CPU intrinsics
     add_builtin("port_in8", SemaType::Int(), {SemaType::Int()});
@@ -116,22 +212,68 @@ void GrassSema::registerBuiltins() {
     add_builtin("read_barrier", SemaType::Void(), {});
     add_builtin("write_barrier", SemaType::Void(), {});
 
-    // Win32 API and runtime intrinsics used by stdlib
+    // Win32 API and runtime intrinsics used by stdlib (kernel32.dll, user32.dll, ws2_32.dll, advapi32.dll)
     add_builtin("GetStdHandle", SemaType::Ptr(SemaType::Void()), {SemaType::Int()});
     add_builtin("lstrlenA", SemaType::Int(), {SemaType::Any()});
+    add_builtin("lstrlenW", SemaType::Int(), {SemaType::Any()});
+    add_builtin("lstrcpyA", SemaType::Ptr(SemaType::Void()), {SemaType::Any(), SemaType::Any()});
+    add_builtin("lstrcatA", SemaType::Ptr(SemaType::Void()), {SemaType::Any(), SemaType::Any()});
+    add_builtin("lstrcmpA", SemaType::Int(), {SemaType::Any(), SemaType::Any()});
+    add_builtin("lstrcmpiA", SemaType::Int(), {SemaType::Any(), SemaType::Any()});
     add_builtin("WriteFile", SemaType::Int(), {SemaType::Any(), SemaType::Any(), SemaType::Any(), SemaType::Any(), SemaType::Any()}, true);
     add_builtin("ReadFile", SemaType::Int(), {SemaType::Any(), SemaType::Any(), SemaType::Any(), SemaType::Any(), SemaType::Any()}, true);
     add_builtin("CreateFileA", SemaType::Ptr(SemaType::Void()), {SemaType::Any(), SemaType::Any(), SemaType::Any(), SemaType::Any(), SemaType::Any(), SemaType::Any(), SemaType::Any()}, true);
     add_builtin("CloseHandle", SemaType::Int(), {SemaType::Any()});
     add_builtin("GetFileSizeEx", SemaType::Int(), {SemaType::Any(), SemaType::Any()});
     add_builtin("DeleteFileA", SemaType::Int(), {SemaType::Any()});
+    add_builtin("CreateDirectoryA", SemaType::Int(), {SemaType::Any(), SemaType::Any()}, true);
+    add_builtin("GetFileAttributesA", SemaType::Int(), {SemaType::Any()});
+    add_builtin("CopyFileA", SemaType::Int(), {SemaType::Any(), SemaType::Any(), SemaType::Int()});
     add_builtin("QueryPerformanceFrequency", SemaType::Int(), {SemaType::Any()});
     add_builtin("QueryPerformanceCounter", SemaType::Int(), {SemaType::Any()});
+    add_builtin("GetTickCount64", SemaType::Int(), {});
     add_builtin("Sleep", SemaType::Void(), {SemaType::Int()});
     add_builtin("GetProcessHeap", SemaType::Ptr(SemaType::Void()), {});
     add_builtin("HeapAlloc", SemaType::Ptr(SemaType::Void()), {SemaType::Any(), SemaType::Any(), SemaType::Any()});
     add_builtin("HeapFree", SemaType::Int(), {SemaType::Any(), SemaType::Any(), SemaType::Any()});
     add_builtin("HeapReAlloc", SemaType::Ptr(SemaType::Void()), {SemaType::Any(), SemaType::Any(), SemaType::Any(), SemaType::Any()});
+    add_builtin("VirtualAlloc", SemaType::Ptr(SemaType::Void()), {SemaType::Any(), SemaType::Any(), SemaType::Int(), SemaType::Int()});
+    add_builtin("VirtualFree", SemaType::Int(), {SemaType::Any(), SemaType::Any(), SemaType::Int()});
+    add_builtin("LoadLibraryA", SemaType::Ptr(SemaType::Void()), {SemaType::Any()});
+    add_builtin("GetProcAddress", SemaType::Ptr(SemaType::Void()), {SemaType::Any(), SemaType::Any()});
+    add_builtin("FreeLibrary", SemaType::Int(), {SemaType::Any()});
+    add_builtin("GetLastError", SemaType::Int(), {});
+    add_builtin("SetLastError", SemaType::Void(), {SemaType::Int()});
+    add_builtin("GetCommandLineA", SemaType::String(), {});
+    add_builtin("GetEnvironmentVariableA", SemaType::Int(), {SemaType::Any(), SemaType::Any(), SemaType::Int()});
+    add_builtin("SetEnvironmentVariableA", SemaType::Int(), {SemaType::Any(), SemaType::Any()});
+    add_builtin("GetComputerNameA", SemaType::Int(), {SemaType::Any(), SemaType::Any()});
+    add_builtin("GetUserNameA", SemaType::Int(), {SemaType::Any(), SemaType::Any()});
+    add_builtin("GetCurrentProcessId", SemaType::Int(), {});
+    add_builtin("CreateProcessA", SemaType::Int(), {SemaType::Any(), SemaType::Any(), SemaType::Any(), SemaType::Any(), SemaType::Int(), SemaType::Int(), SemaType::Any(), SemaType::Any(), SemaType::Any(), SemaType::Any()}, true);
+    add_builtin("WinExec", SemaType::Int(), {SemaType::Any(), SemaType::Int()});
+    add_builtin("CreateThread", SemaType::Ptr(SemaType::Void()), {SemaType::Any(), SemaType::Any(), SemaType::Any(), SemaType::Any(), SemaType::Int(), SemaType::Any()}, true);
+    add_builtin("WaitForSingleObject", SemaType::Int(), {SemaType::Any(), SemaType::Int()});
+    add_builtin("CreateMutexA", SemaType::Ptr(SemaType::Void()), {SemaType::Any(), SemaType::Int(), SemaType::Any()}, true);
+    add_builtin("ReleaseMutex", SemaType::Int(), {SemaType::Any()});
+    add_builtin("MessageBoxA", SemaType::Int(), {SemaType::Any(), SemaType::Any(), SemaType::Any(), SemaType::Int()}, true);
+    add_builtin("MessageBoxW", SemaType::Int(), {SemaType::Any(), SemaType::Any(), SemaType::Any(), SemaType::Int()}, true);
+    add_builtin("GetSystemMetrics", SemaType::Int(), {SemaType::Int()});
+    add_builtin("WSAStartup", SemaType::Int(), {SemaType::Int(), SemaType::Any()});
+    add_builtin("WSACleanup", SemaType::Int(), {});
+    add_builtin("socket", SemaType::Int(), {SemaType::Int(), SemaType::Int(), SemaType::Int()});
+    add_builtin("connect", SemaType::Int(), {SemaType::Int(), SemaType::Any(), SemaType::Int()});
+    add_builtin("bind", SemaType::Int(), {SemaType::Int(), SemaType::Any(), SemaType::Int()});
+    add_builtin("listen", SemaType::Int(), {SemaType::Int(), SemaType::Int()});
+    add_builtin("accept", SemaType::Int(), {SemaType::Int(), SemaType::Any(), SemaType::Any()}, true);
+    add_builtin("send", SemaType::Int(), {SemaType::Int(), SemaType::Any(), SemaType::Int(), SemaType::Int()});
+    add_builtin("recv", SemaType::Int(), {SemaType::Int(), SemaType::Any(), SemaType::Int(), SemaType::Int()});
+    add_builtin("closesocket", SemaType::Int(), {SemaType::Int()});
+    add_builtin("htons", SemaType::Int(), {SemaType::Int()});
+    add_builtin("ntohs", SemaType::Int(), {SemaType::Int()});
+    add_builtin("inet_addr", SemaType::Int(), {SemaType::Any()});
+    add_builtin("gethostbyname", SemaType::Ptr(SemaType::Void()), {SemaType::Any()});
+    add_builtin("WSAGetLastError", SemaType::Int(), {});
     add_builtin("ExitProcess", SemaType::Void(), {SemaType::Int()});
 }
 
@@ -1364,6 +1506,9 @@ SemaType GrassSema::checkIndexExpr(const IndexExprAST* idx) {
     }
 
     if (target_type.is_pointer() && target_type.element_type) {
+        if (target_type.element_type->is_void()) {
+            return SemaType::Int();
+        }
         return *target_type.element_type;
     }
     if (target_type.is_string()) {

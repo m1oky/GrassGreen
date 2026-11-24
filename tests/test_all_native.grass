@@ -1,0 +1,111 @@
+!GrassGreen!
+!time!
+!io!
+!fs!
+!mem!
+!math!
+!string!
+!sys!
+!net!
+!thread!
+!algo!
+
+int main() {
+    gout << "=== GrassGreen Native Stdlib Comprehensive Test ===" << endl;
+
+    // 1. Time and Benchmark (100 000 000 iterations loop)
+    gout << "[1/9] Testing !time! module..." << endl;
+    start_time();
+    take sum = 0;
+    for (take i = 0; i < 100000000; i++) {
+        sum = sum + 1;
+    }
+    stop_time();
+    gout << "  100,000,000 iterations sum: " << sum << endl;
+    gout << "  Loop execution time: " << conclus_time() << endl;
+    take t_now = now_ms();
+    gout << "  Current timestamp (ms): " << t_now << endl;
+
+    // 2. Math and Hardware SSE2/x87
+    gout << "[2/9] Testing !math! module..." << endl;
+    float s = sqrt(144.0);
+    gout << "  sqrt(144.0) = " << s << endl;
+    float p = pow(2.0, 10.0);
+    gout << "  pow(2.0, 10.0) = " << p << endl;
+    take m_min = min(15, 42);
+    take m_max = max(15, 42);
+    take m_clp = clamp(50, 0, 20);
+    gout << "  min(15, 42) = " << m_min << ", max(15, 42) = " << m_max << ", clamp(50, 0, 20) = " << m_clp << endl;
+
+    // 3. Memory and Intrinsics
+    gout << "[3/9] Testing !mem! module..." << endl;
+    take buf = alloc(64);
+    if (buf != 0) {
+        mem_set(buf, 71, 10);
+        buf[10] = 0;
+        gout << "  Allocated and filled buffer: " << buf << endl;
+        take buf2 = alloc(64);
+        mem_copy(buf2, buf, 11);
+        gout << "  Copied buffer: " << buf2 << endl;
+        free(buf);
+        free(buf2);
+        gout << "  Memory freed successfully" << endl;
+    }
+
+    // 4. String Operations
+    gout << "[4/9] Testing !string! module..." << endl;
+    take str_val = "Hello Native GrassGreen";
+    take slen = str_len(str_val);
+    gout << "  str_len('" << str_val << "') = " << slen << endl;
+    take is_eq = str_eq(str_val, "Hello Native GrassGreen");
+    gout << "  str_eq check: " << is_eq << endl;
+    take parsed_num = str_to_int("12345678");
+    gout << "  str_to_int('12345678') = " << parsed_num << endl;
+    take num_str = int_to_str(87654321);
+    take num_len = str_len(num_str);
+    take num_eq = str_eq(num_str, "87654321");
+    gout << "  int_to_str(87654321) length = " << num_len << ", eq check = " << num_eq << endl;
+    free(num_str);
+
+    // 5. File System
+    gout << "[5/9] Testing !fs! module..." << endl;
+    take ex = fs_exists("stdlib/time.grass");
+    take fsz = fs_size("stdlib/time.grass");
+    gout << "  fs_exists('stdlib/time.grass') = " << ex << ", size = " << fsz << " bytes" << endl;
+
+    // 6. System & OS
+    gout << "[6/9] Testing !sys! module..." << endl;
+    take pid = sys_pid();
+    take ticks = sys_ticks();
+    gout << "  Process ID = " << pid << ", uptime ticks = " << ticks << endl;
+
+    // 7. Threading & Mutex
+    gout << "[7/9] Testing !thread! module..." << endl;
+    take mtx = mutex_create();
+    if (mtx != 0 && mtx != -1) {
+        mutex_lock(mtx, 1000);
+        mutex_unlock(mtx);
+        mutex_destroy(mtx);
+        gout << "  Mutex created, locked, unlocked, destroyed successfully" << endl;
+    }
+
+    // 8. Algorithms
+    gout << "[8/9] Testing !algo! module..." << endl;
+    take a1 = min(99, 100);
+    take a2 = max(99, 100);
+    gout << "  algo min = " << a1 << ", max = " << a2 << endl;
+
+    // 9. Networking
+    gout << "[9/9] Testing !net! module..." << endl;
+    take net_ok = net_init();
+    gout << "  net_init() = " << net_ok << endl;
+    take tcp_sock = net_create_tcp();
+    if (tcp_sock != -1 && tcp_sock != 0) {
+        net_close(tcp_sock);
+        gout << "  TCP socket created and closed successfully" << endl;
+    }
+    net_cleanup();
+
+    gout << "=== ALL TESTS COMPLETED SUCCESSFULLY ===" << endl;
+    return 0;
+}

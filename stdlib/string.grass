@@ -1,0 +1,247 @@
+!GrassGreen!
+
+// =============================================================================
+// GrassGreen Standard Library: String Operations (Pure GrassGreen Native Runtime)
+// Direct Win32 API String Routines (lstrlenA, lstrcmpA, lstrcpyA, lstrcatA)
+// and heap-backed dynamic String class.
+// Zero C runtime (msvcrt) dependencies.
+// =============================================================================
+
+// Compute string length using Win32 API
+take str_len(take str) {
+    if (str == 0) {
+        return 0;
+    }
+    return lstrlenA(str);
+}
+
+take strlen(take str) {
+    return str_len(str);
+}
+
+// Compare two strings: returns 0 if equal, <0 if s1 < s2, >0 if s1 > s2
+take str_cmp(take s1, take s2) {
+    if (s1 == 0 && s2 == 0) {
+        return 0;
+    }
+    if (s1 == 0) {
+        return -1;
+    }
+    if (s2 == 0) {
+        return 1;
+    }
+    return lstrcmpA(s1, s2);
+}
+
+take strcmp(take s1, take s2) {
+    return str_cmp(s1, s2);
+}
+
+// Check string equality: returns 1 if equal, 0 if different
+take str_eq(take s1, take s2) {
+    return str_cmp(s1, s2) == 0;
+}
+
+take streq(take s1, take s2) {
+    return str_eq(s1, s2);
+}
+
+// Copy string from src to preallocated dst buffer
+take str_copy(take dst, take src) {
+    if (dst == 0 || src == 0) {
+        return dst;
+    }
+    return lstrcpyA(dst, src);
+}
+
+take strcpy(take dst, take src) {
+    return str_copy(dst, src);
+}
+
+// Append src string to end of dst buffer
+take str_cat(take dst, take src) {
+    if (dst == 0 || src == 0) {
+        return dst;
+    }
+    return lstrcatA(dst, src);
+}
+
+take strcat(take dst, take src) {
+    return str_cat(dst, src);
+}
+
+// Duplicate string on process heap
+take str_dup(take str) {
+    if (str == 0) {
+        return 0;
+    }
+    take len = str_len(str);
+    take buf = alloc(len + 1);
+    if (buf == 0) {
+        return 0;
+    }
+    str_copy(buf, str);
+    return buf;
+}
+
+take strdup(take str) {
+    return str_dup(str);
+}
+
+// Free heap-allocated string
+take str_free(take str) {
+    if (str != 0) {
+        free(str);
+    }
+    return 0;
+}
+
+// Parse integer from string
+take str_to_int(take str) {
+    if (str == 0) {
+        return 0;
+    }
+    take res = 0;
+    take sign = 1;
+    take len = str_len(str);
+    take i = 0;
+    if (len > 0 && str[0] == 45) { // '-'
+        sign = -1;
+        i = 1;
+    }
+    while (i < len) {
+        take c = str[i];
+        if (c >= 48 && c <= 57) { // '0'..'9'
+            res = res * 10 + (c - 48);
+        } else {
+            break;
+        }
+        i = i + 1;
+    }
+    return res * sign;
+}
+
+// Format integer to heap-allocated string
+take int_to_str(take val) {
+    if (val == 0) {
+        take zero = alloc(2);
+        zero[0] = 48; // '0'
+        zero[1] = 0;
+        return zero;
+    }
+    take buf = alloc(32);
+    take is_neg = 0;
+    if (val < 0) {
+        is_neg = 1;
+        val = 0 - val;
+    }
+    take temp = alloc(32);
+    take pos = 0;
+    while (val > 0) {
+        take rem = val % 10;
+        temp[pos] = rem + 48;
+        val = val / 10;
+        pos = pos + 1;
+    }
+    take out_pos = 0;
+    if (is_neg == 1) {
+        buf[out_pos] = 45; // '-'
+        out_pos = out_pos + 1;
+    }
+    take k = pos - 1;
+    while (k >= 0) {
+        buf[out_pos] = temp[k];
+        out_pos = out_pos + 1;
+        k = k - 1;
+    }
+    buf[out_pos] = 0;
+    free(temp);
+    return buf;
+}
+
+// Substring extraction into newly allocated heap buffer
+take str_substr(take str, take start_idx, take sub_len) {
+    if (str == 0 || sub_len <= 0) {
+        return 0;
+    }
+    take total_len = str_len(str);
+    if (start_idx >= total_len) {
+        return 0;
+    }
+    if (start_idx + sub_len > total_len) {
+        sub_len = total_len - start_idx;
+    }
+    take buf = alloc(sub_len + 1);
+    if (buf == 0) {
+        return 0;
+    }
+    for (take i = 0; i < sub_len; i++) {
+        buf[i] = str[start_idx + i];
+    }
+    buf[sub_len] = 0;
+    return buf;
+}
+
+// Dynamic Object-Oriented String Class
+class String {
+    take buffer;
+    take length_val;
+    take capacity;
+
+    take init(take initial_str) {
+        if (initial_str == 0) {
+            this.capacity = 16;
+            take b = alloc(this.capacity);
+            b[0] = 0;
+            this.buffer = b;
+            this.length_val = 0;
+            return 1;
+        }
+        take slen = str_len(initial_str);
+        this.capacity = slen + 16;
+        this.buffer = alloc(this.capacity);
+        str_copy(this.buffer, initial_str);
+        this.length_val = slen;
+        return 1;
+    }
+
+    take length() {
+        return this.length_val;
+    }
+
+    take c_str() {
+        return this.buffer;
+    }
+
+    take append(take text) {
+        if (text == 0) {
+            return this.length_val;
+        }
+        take add_len = str_len(text);
+        if (this.length_val + add_len + 1 > this.capacity) {
+            take new_cap = (this.length_val + add_len + 1) * 2;
+            take new_buf = alloc(new_cap);
+            str_copy(new_buf, this.buffer);
+            free(this.buffer);
+            this.buffer = new_buf;
+            this.capacity = new_cap;
+        }
+        str_cat(this.buffer, text);
+        this.length_val = this.length_val + add_len;
+        return this.length_val;
+    }
+
+    take equals(take other_str) {
+        return str_eq(this.buffer, other_str);
+    }
+
+    take destroy() {
+        if (this.buffer != 0) {
+            free(this.buffer);
+            this.buffer = 0;
+        }
+        this.length_val = 0;
+        this.capacity = 0;
+        return 1;
+    }
+}

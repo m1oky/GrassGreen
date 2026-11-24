@@ -1,0 +1,201 @@
+!GrassGreen!
+
+// =============================================================================
+// GrassGreen Standard Library: Networking & Sockets (Pure GrassGreen Native Runtime)
+// Direct WinSock2 API Calls via ws2_32.dll externs:
+// WSAStartup, WSACleanup, socket, connect, bind, listen, accept, send, recv, closesocket
+// Zero C runtime (msvcrt) dependencies.
+// =============================================================================
+
+// Address families
+take net_af_inet() {
+    return 2; // AF_INET
+}
+
+// Socket types
+take net_sock_stream() {
+    return 1; // SOCK_STREAM (TCP)
+}
+
+take net_sock_dgram() {
+    return 2; // SOCK_DGRAM (UDP)
+}
+
+// Protocols
+take net_ipproto_tcp() {
+    return 6; // IPPROTO_TCP
+}
+
+take net_ipproto_udp() {
+    return 17; // IPPROTO_UDP
+}
+
+// Initialize WinSock2 subsystem
+take net_init() {
+    take wsa_data = alloc(512);
+    if (wsa_data == 0) {
+        return 0;
+    }
+    // Version 2.2 (0x0202 = 514)
+    take res = WSAStartup(514, wsa_data);
+    free(wsa_data);
+    return res == 0;
+}
+
+// Terminate WinSock2 subsystem
+take net_cleanup() {
+    return WSACleanup();
+}
+
+// Convert 16-bit integer from host to network byte order
+take net_htons(take host_port) {
+    take lo = host_port & 255;
+    take hi = (host_port >> 8) & 255;
+    return (lo << 8) | hi;
+}
+
+take htons(take host_port) {
+    return net_htons(host_port);
+}
+
+// Create TCP socket
+take net_create_tcp() {
+    return socket(2, 1, 6);
+}
+
+// Create UDP socket
+take net_create_udp() {
+    return socket(2, 2, 17);
+}
+
+take net_socket(take af, take sock_type, take proto) {
+    return socket(af, sock_type, proto);
+}
+
+// Build a 16-byte sockaddr_in structure for IPv4
+// ip: 32-bit integer IPv4 address (e.g. 0x0100007F for 127.0.0.1)
+take net_create_sockaddr(take ip_addr, take port) {
+    take sa = alloc(16);
+    if (sa == 0) {
+        return 0;
+    }
+    // sin_family = AF_INET (2)
+    sa[0] = 2;
+    sa[1] = 0;
+    // sin_port (network byte order)
+    take n_port = net_htons(port);
+    sa[2] = n_port & 255;
+    sa[3] = (n_port >> 8) & 255;
+    // sin_addr (network byte order)
+    sa[4] = ip_addr & 255;
+    sa[5] = (ip_addr >> 8) & 255;
+    sa[6] = (ip_addr >> 16) & 255;
+    sa[7] = (ip_addr >> 24) & 255;
+    // sin_zero padding
+    for (take i = 8; i < 16; i++) {
+        sa[i] = 0;
+    }
+    return sa;
+}
+
+// Connect to remote address
+take net_connect(take sock, take sockaddr_ptr, take addr_len) {
+    if (sock == -1 || sock == 0 || sockaddr_ptr == 0) {
+        return -1;
+    }
+    return connect(sock, sockaddr_ptr, addr_len);
+}
+
+// Bind socket to local port
+take net_bind(take sock, take sockaddr_ptr, take addr_len) {
+    if (sock == -1 || sock == 0 || sockaddr_ptr == 0) {
+        return -1;
+    }
+    return bind(sock, sockaddr_ptr, addr_len);
+}
+
+// Listen for incoming connections
+take net_listen(take sock, take backlog) {
+    if (sock == -1 || sock == 0) {
+        return -1;
+    }
+    return listen(sock, backlog);
+}
+
+// Accept incoming connection
+take net_accept(take sock, take client_addr_ptr, take addr_len_ptr) {
+    if (sock == -1 || sock == 0) {
+        return -1;
+    }
+    return accept(sock, client_addr_ptr, addr_len_ptr);
+}
+
+// Send data over socket
+take net_send(take sock, take buf, take count, take flags) {
+    if (sock == -1 || sock == 0 || buf == 0 || count <= 0) {
+        return -1;
+    }
+    return send(sock, buf, count, flags);
+}
+
+// Receive data from socket
+take net_recv(take sock, take buf, take max_len, take flags) {
+    if (sock == -1 || sock == 0 || buf == 0 || max_len <= 0) {
+        return -1;
+    }
+    return recv(sock, buf, max_len, flags);
+}
+
+// Close socket handle
+take net_close(take sock) {
+    if (sock == -1 || sock == 0) {
+        return 0;
+    }
+    return closesocket(sock);
+}
+
+// Object-Oriented TCP Socket Wrapper
+class Socket {
+    take fd;
+    take is_connected;
+
+    take init() {
+        this.fd = net_create_tcp();
+        this.is_connected = 0;
+        return this.fd != -1;
+    }
+
+    take connect_addr(take ip_addr, take port) {
+        if (this.fd == -1 || this.fd == 0) {
+            this.fd = net_create_tcp();
+        }
+        take sa = net_create_sockaddr(ip_addr, port);
+        take res = net_connect(this.fd, sa, 16);
+        free(sa);
+        if (res == 0) {
+            this.is_connected = 1;
+            return 1;
+        }
+        return 0;
+    }
+
+    take send_bytes(take buf, take len_bytes) {
+        if (this.is_connected == 0) {
+            return -1;
+        }
+        return net_send(this.fd, buf, len_bytes, 0);
+    }
+
+    take recv_bytes(take buf, take max_len) {
+        return net_recv(this.fd, buf, max_len, 0);
+    }
+
+    take close() {
+        if (this.fd != -1 && this.fd != 0) {
+            net_close(this.fd);
+            this.fd = -1;
+        }
+        this.is_connected = 0;
+        return 1;
+    }
+}

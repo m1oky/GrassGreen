@@ -456,7 +456,9 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
     }
     // 7. Проверка библиотеки !time!
     else if (fn == "start_time" || fn == "stop_time" || fn == "conclus_time" ||
-             fn == "time" || fn == "clock_ms" || fn == "now_ms" ||
+             fn == "time" || fn == "clock_ms" || fn == "now_ms" || fn == "sleep_ms" ||
+             fn == "time_now_ms" || fn == "time_now_us" || fn == "time_frequency" ||
+             fn == "time_counter" || fn == "time_sleep" || fn == "time_delay_ms" ||
              fn == "get_date" || fn == "get_time_str") {
         requireLib("time", "!time!", fn + "()", line);
     }
@@ -1635,7 +1637,19 @@ void BytecodeCompiler::parseStatement() {
         string lib = advance().text;
         if (lib == "!GrassGreen!") {
             included_libs.insert("core");
-        } else if (lib == "!sys!") {
+            included_libs.insert("time");
+            included_libs.insert("fastmath");
+            included_libs.insert("coremath");
+            included_libs.insert("fsys");
+            included_libs.insert("memory");
+            included_libs.insert("string");
+            included_libs.insert("sys");
+            included_libs.insert("net");
+            included_libs.insert("thread");
+            included_libs.insert("algo");
+            included_libs.insert("io");
+            included_libs.insert("mmio");
+        } else if (lib == "!sys!" || lib == "!os!") {
             included_libs.insert("sys");
         } else if (lib == "!json!") {
             included_libs.insert("json");
@@ -1651,7 +1665,7 @@ void BytecodeCompiler::parseStatement() {
             included_libs.insert("physics");
         } else if (lib == "!proc!") {
             included_libs.insert("proc");
-        } else if (lib == "!fsys!") {
+        } else if (lib == "!fsys!" || lib == "!fs!") {
             included_libs.insert("fsys");
         } else if (lib == "!GrassNet!" || lib == "!net!") {
             included_libs.insert("net");
@@ -1659,12 +1673,16 @@ void BytecodeCompiler::parseStatement() {
             included_libs.insert("gui");
         } else if (lib == "!time!") {
             included_libs.insert("time");
-        } else if (lib == "!FastMath!") {
+        } else if (lib == "!FastMath!" || lib == "!math!") {
             included_libs.insert("fastmath");
         } else if (lib == "!CoreMath!") {
             included_libs.insert("coremath");
-        } else if (lib == "!memory!") {
+        } else if (lib == "!memory!" || lib == "!mem!") {
             included_libs.insert("memory");
+        } else if (lib == "!string!" || lib == "!str!") {
+            included_libs.insert("string");
+        } else if (lib == "!algo!") {
+            included_libs.insert("algo");
         } else if (lib == "!random!") {
             included_libs.insert("random");
         } else if (lib == "!thread!") {
@@ -1678,6 +1696,7 @@ void BytecodeCompiler::parseStatement() {
             included_libs.insert("baremetal");
         } else if (lib == "!mmio!" || lib == "!io!") {
             included_libs.insert("mmio");
+            included_libs.insert("io");
         } else if (lib == "!database!" || lib == "!gdb!") {
             included_libs.insert("db");
             if (!included_libs.count("core")) is_special_file = true;

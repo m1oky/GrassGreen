@@ -1,0 +1,130 @@
+!GrassGreen!
+
+// =============================================================================
+// GrassGreen Standard Library: System & OS Operations (Pure GrassGreen Native Runtime)
+// Direct Win32 API System Calls via kernel32.dll, user32.dll, advapi32.dll
+// Zero C runtime (msvcrt) dependencies.
+// =============================================================================
+
+// Terminate current process with exit code
+void sys_exit(take code) {
+    ExitProcess(code);
+}
+
+void exit(take code) {
+    sys_exit(code);
+}
+
+// Execute command line asynchronously (SW_SHOWNORMAL = 1)
+take sys_exec(take cmd) {
+    if (cmd == 0) {
+        return 0;
+    }
+    return WinExec(cmd, 1);
+}
+
+take exec(take cmd) {
+    return sys_exec(cmd);
+}
+
+take run(take cmd) {
+    return sys_exec(cmd);
+}
+
+// Retrieve environment variable value into preallocated buffer
+take sys_get_env(take name, take buf, take max_len) {
+    if (name == 0 || buf == 0 || max_len <= 0) {
+        return 0;
+    }
+    return GetEnvironmentVariableA(name, buf, max_len);
+}
+
+take get_env(take name, take buf, take max_len) {
+    return sys_get_env(name, buf, max_len);
+}
+
+// Set environment variable
+take sys_set_env(take name, take val) {
+    if (name == 0) {
+        return 0;
+    }
+    return SetEnvironmentVariableA(name, val);
+}
+
+take set_env(take name, take val) {
+    return sys_set_env(name, val);
+}
+
+// Retrieve complete process command line string
+take sys_cmd_line() {
+    return GetCommandLineA();
+}
+
+take get_cmd_line() {
+    return sys_cmd_line();
+}
+
+take cli_args() {
+    return sys_cmd_line();
+}
+
+// Retrieve logged-in user name into preallocated buffer (advapi32.dll)
+take sys_user_name(take buf, take size_ptr) {
+    if (buf == 0 || size_ptr == 0) {
+        return 0;
+    }
+    return GetUserNameA(buf, size_ptr);
+}
+
+take user_name(take buf, take size_ptr) {
+    return sys_user_name(buf, size_ptr);
+}
+
+// Retrieve computer network name into preallocated buffer (kernel32.dll)
+take sys_pc_name(take buf, take size_ptr) {
+    if (buf == 0 || size_ptr == 0) {
+        return 0;
+    }
+    return GetComputerNameA(buf, size_ptr);
+}
+
+take pc_name(take buf, take size_ptr) {
+    return sys_pc_name(buf, size_ptr);
+}
+
+// Screen width in pixels (SM_CXSCREEN = 0, user32.dll)
+take sys_screen_w() {
+    return GetSystemMetrics(0);
+}
+
+take screen_w() {
+    return sys_screen_w();
+}
+
+// Screen height in pixels (SM_CYSCREEN = 1, user32.dll)
+take sys_screen_h() {
+    return GetSystemMetrics(1);
+}
+
+take screen_h() {
+    return sys_screen_h();
+}
+
+// Display modal message box (user32.dll)
+take sys_msgbox(take title, take text) {
+    return MessageBoxA(0, text, title, 0);
+}
+
+take msgbox(take title, take text) {
+    return sys_msgbox(title, text);
+}
+
+// Current process ID
+take sys_pid() {
+    return GetCurrentProcessId();
+}
+
+// Monotonic system uptime in milliseconds
+take sys_ticks() {
+    return GetTickCount64();
+}

@@ -272,14 +272,62 @@ namespace GrassImport {
         std::string root_canon = getCanonicalKey(root_filepath);
         visited.insert(root_canon);
 
-        // Auto-import stdlib modules when !GrassGreen! is present
+        // Auto-import stdlib modules when !GrassGreen! or module directives are present
         bool has_grassgreen = false;
-        size_t lib_idx = 0;
+        size_t first_lib_idx = 0;
+        bool found_lib = false;
+        std::vector<std::string> requested_modules;
+
         for (size_t k = 0; k < root_tokens.size(); ++k) {
-            if (root_tokens[k].kind == TOK_LIB && root_tokens[k].text == "!GrassGreen!") {
-                has_grassgreen = true;
-                lib_idx = k;
-                break;
+            if (root_tokens[k].kind == TOK_LIB) {
+                if (!found_lib) {
+                    first_lib_idx = k;
+                    found_lib = true;
+                }
+                const std::string& lib = root_tokens[k].text;
+                if (lib == "!GrassGreen!") {
+                    has_grassgreen = true;
+                } else if (lib == "!time!") {
+                    requested_modules.push_back("stdlib/time.grass");
+                } else if (lib == "!io!" || lib == "!mmio!") {
+                    requested_modules.push_back("stdlib/io.grass");
+                } else if (lib == "!fs!" || lib == "!fsys!") {
+                    requested_modules.push_back("stdlib/fsys.grass");
+                } else if (lib == "!mem!" || lib == "!memory!") {
+                    requested_modules.push_back("stdlib/memory.grass");
+                } else if (lib == "!string!" || lib == "!str!") {
+                    requested_modules.push_back("stdlib/string.grass");
+                } else if (lib == "!math!" || lib == "!FastMath!" || lib == "!CoreMath!") {
+                    requested_modules.push_back("stdlib/math.grass");
+                } else if (lib == "!sys!" || lib == "!os!") {
+                    requested_modules.push_back("stdlib/sys.grass");
+                } else if (lib == "!net!" || lib == "!GrassNet!") {
+                    requested_modules.push_back("stdlib/net.grass");
+                } else if (lib == "!thread!") {
+                    requested_modules.push_back("stdlib/thread.grass");
+                } else if (lib == "!algo!") {
+                    requested_modules.push_back("stdlib/algo.grass");
+                }
+            }
+        }
+
+        if (has_grassgreen) {
+            static const char* all_mods[] = {
+                "stdlib/io.grass",
+                "stdlib/fsys.grass",
+                "stdlib/time.grass",
+                "stdlib/memory.grass",
+                "stdlib/string.grass",
+                "stdlib/math.grass",
+                "stdlib/sys.grass",
+                "stdlib/net.grass",
+                "stdlib/thread.grass",
+                "stdlib/algo.grass"
+            };
+            for (const char* m : all_mods) {
+                if (std::find(requested_modules.begin(), requested_modules.end(), m) == requested_modules.end()) {
+                    requested_modules.push_back(m);
+                }
             }
         }
 
@@ -289,18 +337,16 @@ namespace GrassImport {
                                lower_root.find("stdlib/fsys.grass") != std::string::npos ||
                                lower_root.find("stdlib/time.grass") != std::string::npos ||
                                lower_root.find("stdlib/memory.grass") != std::string::npos ||
+                               lower_root.find("stdlib/string.grass") != std::string::npos ||
+                               lower_root.find("stdlib/math.grass") != std::string::npos ||
+                               lower_root.find("stdlib/sys.grass") != std::string::npos ||
+                               lower_root.find("stdlib/net.grass") != std::string::npos ||
+                               lower_root.find("stdlib/thread.grass") != std::string::npos ||
                                lower_root.find("stdlib/algo.grass") != std::string::npos);
 
-        if (has_grassgreen && !is_stdlib_file) {
-            static const char* stdlib_mods[] = {
-                "stdlib/io.grass",
-                "stdlib/fsys.grass",
-                "stdlib/time.grass",
-                "stdlib/memory.grass",
-                "stdlib/algo.grass"
-            };
+        if (!is_stdlib_file && !requested_modules.empty()) {
             std::vector<GrassToken> auto_tokens;
-            for (const char* mod : stdlib_mods) {
+            for (const auto& mod : requested_modules) {
                 std::string resolved = findModuleFile(root_filepath, mod);
                 if (!resolved.empty()) {
                     auto_tokens.push_back(GrassToken(TOK_IDENT, "import", 0.0, 1));
@@ -309,7 +355,8 @@ namespace GrassImport {
                 }
             }
             if (!auto_tokens.empty()) {
-                tokens_to_resolve.insert(tokens_to_resolve.begin() + lib_idx + 1, auto_tokens.begin(), auto_tokens.end());
+                size_t insert_pos = found_lib ? (first_lib_idx + 1) : 0;
+                tokens_to_resolve.insert(tokens_to_resolve.begin() + insert_pos, auto_tokens.begin(), auto_tokens.end());
             }
         }
 

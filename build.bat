@@ -53,22 +53,22 @@ g++ -std=c++20 -O3 -s -static -static-libgcc -static-libstdc++ ^
 :post_build
 if %ERRORLEVEL% equ 0 (
     copy /Y bin\grassc.exe bin\grg.exe >nul
-    if exist "C:\GrassGreen\bin" (
-        copy /Y bin\grassc.exe C:\GrassGreen\bin\grassc.exe >nul
-        copy /Y bin\grassc.exe C:\GrassGreen\bin\grg.exe >nul
-    )
     echo [GrassCompiler] Build SUCCESSFUL: bin\grassc.exe ^& bin\grg.exe
-    if exist "C:\GrassGreen\bin" echo [GrassCompiler] Successfully updated global C:\GrassGreen\bin
 
     echo [GrassCompiler] Building gpm package manager...
     g++ -std=c++17 -O3 src/gpm.cpp -o bin/gpm.exe
-    if exist "C:\GrassGreen\bin" copy /Y bin\gpm.exe C:\GrassGreen\bin\gpm.exe >nul
 
     echo [GrassCompiler] Building libgrassvm embedded library...
     g++ -std=c++17 -O3 -shared src/grassvm_capi.cpp -Iinclude -o bin/grassvm.dll "-Wl,--out-implib,bin/grassvm.lib"
-    if exist "C:\GrassGreen\bin" (
-        copy /Y bin\grassvm.dll C:\GrassGreen\bin\grassvm.dll >nul
-        copy /Y bin\grassvm.lib C:\GrassGreen\bin\grassvm.lib >nul
+
+    if exist "C:\GrassGreen" (
+        if not exist "C:\GrassGreen\bin" mkdir "C:\GrassGreen\bin"
+        if not exist "C:\GrassGreen\stdlib" mkdir "C:\GrassGreen\stdlib"
+        copy /Y bin\*.exe "C:\GrassGreen\bin\" >nul
+        if exist "bin\grassvm.dll" copy /Y bin\grassvm.dll "C:\GrassGreen\bin\" >nul
+        if exist "bin\grassvm.lib" copy /Y bin\grassvm.lib "C:\GrassGreen\bin\" >nul
+        xcopy /Y /E /I stdlib\* "C:\GrassGreen\stdlib\" >nul
+        echo [GrassCompiler] Successfully updated global C:\GrassGreen\bin and synchronized C:\GrassGreen\stdlib
     )
 ) else (
     echo [GrassCompiler] Build FAILED with code %ERRORLEVEL%
