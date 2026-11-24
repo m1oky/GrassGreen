@@ -84,10 +84,10 @@ static void ExtractThreeArgs(const string& line, string& arg1, string& arg2, str
 // Встроенный словарь векторных иконок для команды icon(название)
 static string GetIconSymbol(const string& name) {
     static const map<string, string> icons = {
-        {"search", "🔍"}, {"settings", "⚙️"}, {"user", "👤"}, {"home", "🏠"},
-        {"star", "⭐"}, {"heart", "❤️"}, {"check", "✔️"}, {"close", "✖️"},
-        {"play", "▶️"}, {"lock", "🔒"}, {"key", "🔑"}, {"fire", "🔥"},
-        {"bolt", "⚡"}, {"code", "💻"}, {"download", "⬇️"}, {"bell", "🔔"}
+        {"search", "[search]"}, {"settings", "[settings]"}, {"user", "[user]"}, {"home", "[home]"},
+        {"star", "[star]"}, {"heart", "[heart]"}, {"check", "[check]"}, {"close", "[close]"},
+        {"play", "[play]"}, {"lock", "[lock]"}, {"key", "[key]"}, {"fire", "[fire]"},
+        {"bolt", "[bolt]"}, {"code", "[code]"}, {"download", "[download]"}, {"bell", "[bell]"}
     };
     string key = StripQuotesWeb(name);
     if (icons.count(key)) return icons.at(key);

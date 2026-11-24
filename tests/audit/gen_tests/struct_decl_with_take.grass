@@ -1,0 +1,13 @@
+!GrassGreen!
+struct Widget {
+    int id;
+    int get_val() {
+        return 99;
+    }
+}
+int main() {
+    take w = Widget();
+    take res = w.get_val();
+    gout << "res = " << res << endl;
+    return 0;
+}

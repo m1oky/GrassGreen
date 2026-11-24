@@ -1,0 +1,10 @@
+!GrassGreen!
+int side(int x) {
+    gout << "eval_" << x << " ";
+    return x;
+}
+int main() {
+    take a = 0 && side(1);
+    gout << "res=" << a << endl;
+    return 0;
+}

@@ -1,0 +1,7 @@
+!GrassGreen!
+int main() {
+    take arr = [];
+    arr.push(100);
+    gout << len(arr) << endl;
+    return 0;
+}

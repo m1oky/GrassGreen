@@ -1,0 +1,113 @@
+!GrassGreen!
+
+// =============================================================================
+// GrassGreen Standard Library: Time & Chrono (Pure GrassGreen Native Runtime)
+// High-resolution performance timer and sleeps via kernel32.dll externs:
+// QueryPerformanceCounter, QueryPerformanceFrequency, Sleep
+// Zero C runtime dependencies.
+// =============================================================================
+
+// Retrieve timer frequency (ticks per second)
+take time_frequency() {
+    take freq = 0;
+    QueryPerformanceFrequency(&freq);
+    return freq;
+}
+
+// Retrieve current performance counter value in raw ticks
+take time_counter() {
+    take count = 0;
+    QueryPerformanceCounter(&count);
+    return count;
+}
+
+// Retrieve current timestamp in milliseconds
+take time_now_ms() {
+    take freq = time_frequency();
+    if (freq == 0) {
+        return 0;
+    }
+    take count = time_counter();
+    return (count * 1000) / freq;
+}
+
+// Retrieve current timestamp in microseconds
+take time_now_us() {
+    take freq = time_frequency();
+    if (freq == 0) {
+        return 0;
+    }
+    take count = time_counter();
+    return (count * 1000000) / freq;
+}
+
+// Millisecond sleep delay
+take time_sleep(take ms) {
+    if (ms > 0) {
+        Sleep(ms);
+    }
+    return 0;
+}
+
+take time_delay_ms(take ms) {
+    return time_sleep(ms);
+}
+
+// High-resolution stopwatch class
+class Stopwatch {
+    take start_ticks;
+    take stop_ticks;
+    take freq;
+    take is_running;
+
+    take start() {
+        this.freq = time_frequency();
+        this.start_ticks = time_counter();
+        this.stop_ticks = this.start_ticks;
+        this.is_running = 1;
+        return this.start_ticks;
+    }
+
+    take stop() {
+        this.stop_ticks = time_counter();
+        this.is_running = 0;
+        return this.elapsed_ms();
+    }
+
+    take reset() {
+        this.start_ticks = 0;
+        this.stop_ticks = 0;
+        this.is_running = 0;
+        return 0;
+    }
+
+    take elapsed_ticks() {
+        if (this.is_running == 1) {
+            take cur = time_counter();
+            return cur - this.start_ticks;
+        }
+        return this.stop_ticks - this.start_ticks;
+    }
+
+    take elapsed_ms() {
+        if (this.freq == 0) {
+            this.freq = time_frequency();
+        }
+        if (this.freq == 0) {
+            return 0;
+        }
+        take ticks = this.elapsed_ticks();
+        return (ticks * 1000) / this.freq;
+    }
+
+    take elapsed_us() {
+        if (this.freq == 0) {
+            this.freq = time_frequency();
+        }
+        if (this.freq == 0) {
+            return 0;
+        }
+        take ticks = this.elapsed_ticks();
+        return (ticks * 1000000) / this.freq;
+    }
+}

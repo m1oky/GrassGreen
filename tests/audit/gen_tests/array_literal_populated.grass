@@ -1,0 +1,6 @@
+!GrassGreen!
+int main() {
+    take arr = [10, 20, 30];
+    gout << len(arr) << endl;
+    return 0;
+}

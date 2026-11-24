@@ -1,0 +1,9 @@
+!GrassGreen!
+int main() {
+    take a = -7 / 3;
+    take b = -7 % 3;
+    take c = 7 / -3;
+    take d = 7 % -3;
+    gout << a << " " << b << " " << c << " " << d << endl;
+    return 0;
+}

@@ -1,0 +1,178 @@
+!GrassGreen!
+
+// =============================================================================
+// GrassGreen Multifile Application: Simulation Engine (engine.grass)
+// OOP Class Hierarchy with inheritance, virtual method overrides (vtable),
+// Dynamic allocations (alloc / free), and manual RAII resource lifecycle.
+// =============================================================================
+
+// Base Component Class
+class Component {
+    take id;
+    take enabled;
+    take type_code;
+
+    take init(take comp_id, take code) {
+        this.id = comp_id;
+        this.enabled = 1;
+        this.type_code = code;
+        return 1;
+    }
+
+    take update(take dt) {
+        return 0; // Base virtual method to be overridden
+    }
+
+    take cleanup() {
+        this.enabled = 0;
+        return 0; // Base cleanup hook
+    }
+}
+
+// Derived Transform Component inheriting from Component
+class TransformComponent : Component {
+    float pos_x;
+    float pos_y;
+    float pos_z;
+    float scale;
+
+    take init_transform(take comp_id, float x, float y, float z) {
+        this.init(comp_id, 101); // 101 = Transform type
+        this.pos_x = x;
+        this.pos_y = y;
+        this.pos_z = z;
+        this.scale = 1.0;
+        return 1;
+    }
+
+    // Overridden virtual update method
+    take update(take dt) {
+        if (this.enabled == 0) {
+            return 0;
+        }
+        this.pos_x = this.pos_x + 0.05;
+        this.pos_y = this.pos_y + 0.02;
+        this.pos_z = this.pos_z - 0.01;
+        return 1;
+    }
+
+    // Overridden virtual cleanup method
+    take cleanup() {
+        this.pos_x = 0.0;
+        this.pos_y = 0.0;
+        this.pos_z = 0.0;
+        this.scale = 0.0;
+        this.enabled = 0;
+        return 1;
+    }
+}
+
+// Derived Physics Component inheriting from Component
+class PhysicsComponent : Component {
+    float vel_x;
+    float vel_y;
+    float vel_z;
+    float mass;
+    float damping;
+
+    take init_physics(take comp_id, float m, float damp) {
+        this.init(comp_id, 102); // 102 = Physics type
+        this.vel_x = 1.25;
+        this.vel_y = 0.50;
+        this.vel_z = -0.75;
+        this.mass = m;
+        this.damping = damp;
+        return 1;
+    }
+
+    // Overridden virtual update method
+    take update(take dt) {
+        if (this.enabled == 0) {
+            return 0;
+        }
+        this.vel_x = this.vel_x * this.damping;
+        this.vel_y = this.vel_y * this.damping;
+        this.vel_z = this.vel_z * this.damping;
+        return 1;
+    }
+
+    // Overridden virtual cleanup method
+    take cleanup() {
+        this.vel_x = 0.0;
+        this.vel_y = 0.0;
+        this.vel_z = 0.0;
+        this.mass = 0.0;
+        this.enabled = 0;
+        return 1;
+    }
+}
+
+// Entity Class managing component instances and heap buffer allocation/deallocation
+class Entity {
+    take id;
+    take active;
+    take health;
+    take max_health;
+    take transform_buffer;
+    take physics_buffer;
+    take is_allocated;
+
+    TransformComponent transform;
+    PhysicsComponent physics;
+
+    take create(take entity_id, take initial_hp) {
+        this.id = entity_id;
+        this.active = 1;
+        this.health = initial_hp;
+        this.max_health = initial_hp;
+
+        // Manual heap allocations for sub-buffers
+        this.transform_buffer = alloc(64);
+        this.physics_buffer = alloc(64);
+        this.is_allocated = 1;
+
+        this.transform.init_transform(entity_id * 10 + 1, 0.0, 0.0, 0.0);
+        this.physics.init_physics(entity_id * 10 + 2, 10.0, 0.999);
+        return 1;
+    }
+
+    take take_damage(take dmg) {
+        this.health = this.health - dmg;
+        if (this.health <= 0) {
+            this.health = 0;
+            this.active = 0;
+        }
+        return this.health;
+    }
+
+    take update(take dt) {
+        if (this.active == 0) {
+            return 0;
+        }
+        // Polymorphic method calls through vtable
+        this.transform.update(dt);
+        this.physics.update(dt);
+        return 1;
+    }
+
+    // RAII / Manual teardown freeing allocated memory buffers
+    take destroy() {
+        this.transform.cleanup();
+        this.physics.cleanup();
+
+        if (this.is_allocated == 1) {
+            if (this.transform_buffer != 0) {
+                free(this.transform_buffer);
+                this.transform_buffer = 0;
+            }
+            if (this.physics_buffer != 0) {
+                free(this.physics_buffer);
+                this.physics_buffer = 0;
+            }
+            this.is_allocated = 0;
+        }
+
+        this.active = 0;
+        return 1;
+    }
+}

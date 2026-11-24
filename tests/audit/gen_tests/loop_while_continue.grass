@@ -1,0 +1,14 @@
+!GrassGreen!
+int main() {
+    take i = 0;
+    take sum = 0;
+    while (i < 10) {
+        i = i + 1;
+        if (i % 2 == 0) {
+            continue;
+        }
+        sum = sum + i;
+    }
+    gout << "sum = " << sum << endl;
+    return 0;
+}

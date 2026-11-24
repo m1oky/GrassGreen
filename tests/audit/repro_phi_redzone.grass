@@ -1,0 +1,28 @@
+!GrassGreen!
+// Repro: emit_phi_copies writes to stack scratch slots below RSP (red-zone violation)
+// On Windows x64, no red zone is allowed; interrupts or APCs can corrupt data below RSP
+
+int phi_chain(int a, int b, int c, int d, int e) {
+    take x = a;
+    take y = b;
+    take z = c;
+    take w = d;
+    take v = e;
+    take i = 0;
+    while (i < 10) {
+        take t = x;
+        x = y;
+        y = z;
+        z = w;
+        w = v;
+        v = t;
+        i = i + 1;
+    }
+    return x + y + z + w + v;
+}
+
+int main() {
+    take res = phi_chain(1, 2, 3, 4, 5);
+    gout << "phi_res = " << res << endl;
+    return 0;
+}

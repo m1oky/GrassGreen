@@ -335,6 +335,8 @@ public:
             dispatch_table[OP_BIT_OR]        = &&do_bit_or;
             dispatch_table[OP_BIT_XOR]       = &&do_bit_xor;
             dispatch_table[OP_BIT_NOT]       = &&do_bit_not;
+            dispatch_table[OP_BIT_SHL]       = &&do_bit_shl;
+            dispatch_table[OP_BIT_SHR]       = &&do_bit_shr;
             dispatch_table[OP_CMP_EQ]        = &&do_cmp_eq;
             dispatch_table[OP_CMP_NEQ]       = &&do_cmp_neq;
             dispatch_table[OP_CMP_LT]        = &&do_cmp_lt;
@@ -719,6 +721,18 @@ public:
     do_bit_not: {
         GrassValue a = pop();
         push(GrassValue::Num((double)(~(long long)a.toNumber())));
+        DISPATCH_STEP();
+    }
+
+    do_bit_shl: {
+        GrassValue b = pop(), a = pop();
+        push(GrassValue::Num((double)((long long)a.toNumber() << (long long)b.toNumber())));
+        DISPATCH_STEP();
+    }
+
+    do_bit_shr: {
+        GrassValue b = pop(), a = pop();
+        push(GrassValue::Num((double)((long long)a.toNumber() >> (long long)b.toNumber())));
         DISPATCH_STEP();
     }
 
@@ -3752,6 +3766,8 @@ struct CompilerOptions {
     string abi_str = "win64";        // --abi win64|sysv64|cdecl32|baremetal64|baremetal32
     uint64_t base_addr = 0x100000;   // --base-addr
     bool no_sema = false;            // --no-sema
+    bool use_gcc = false;            // --use-gcc
+    string target = "";              // --target <windows|linux>
 };
 
 void PrintVersion(bool lang_ru) {
@@ -4137,6 +4153,9 @@ bool ProcessCompilation(CompilerOptions& opt) {
         }
 
         grass::sema::GrassSema sema;
+        if (program_ast->is_strict) {
+            sema.set_strict(true);
+        }
         if (!sema.analyze(*program_ast)) {
             if (opt.lang_ru) cerr << "\n[GrassSema]: Ошибки семантического анализа:\n";
             else cerr << "\n[GrassSema]: Semantic analysis errors:\n";
@@ -4159,6 +4178,8 @@ bool ProcessCompilation(CompilerOptions& opt) {
         nopt.emit_bin_path = opt.emit_bin_path;
         nopt.lang_ru = opt.lang_ru;
         nopt.run_after_build = opt.run_after_build;
+        nopt.use_gcc = opt.use_gcc;
+        nopt.target = opt.target;
 
         string base_name = input_path;
         size_t last_dot = base_name.rfind('.');
@@ -4195,7 +4216,7 @@ bool ProcessCompilation(CompilerOptions& opt) {
             }
         }
 
-        if (!nres.obj_file_created.empty() && (opt.emit_obj || opt.native_mode)) {
+        if (!nres.obj_file_created.empty() && opt.emit_obj) {
             if (opt.lang_ru) cout << "[GrassNativeCompiler]: Сгенерирован объектный файл -> " << nres.obj_file_created << "\n";
             else cout << "[GrassNativeCompiler]: Object file generated -> " << nres.obj_file_created << "\n";
         }
@@ -4221,7 +4242,12 @@ bool ProcessCompilation(CompilerOptions& opt) {
         if (opt.run_after_build && !nres.exe_file_created.empty()) {
             if (opt.lang_ru) cout << "[GrassNative]: Запуск нативного исполняемого файла...\n\n";
             else cout << "[GrassNative]: Executing native binary...\n\n";
-            int run_code = std::system(nres.exe_file_created.c_str());
+            std::string run_cmd = nres.exe_file_created;
+            for (char& c : run_cmd) {
+                if (c == '/') c = '\\';
+            }
+            run_cmd = "\"" + run_cmd + "\"";
+            int run_code = std::system(run_cmd.c_str());
             return (run_code == 0);
         }
         return true;
@@ -4502,6 +4528,23 @@ int main(int argc, char* argv[]) {
             } else if (arg == "--native") {
                 opt.native_mode = true;
                 opt.emit_bytecode_only = false;
+            } else if (arg == "--use-gcc") {
+                opt.use_gcc = true;
+            } else if (arg == "--target" || arg.rfind("--target=", 0) == 0) {
+                string target_val;
+                if (arg.rfind("--target=", 0) == 0) {
+                    target_val = arg.substr(9);
+                } else if (i + 1 < argc) {
+                    target_val = argv[++i];
+                }
+                opt.target = target_val;
+                if (target_val == "linux") {
+                    opt.abi_str = "sysv64";
+                    opt.arch_str = "x64";
+                } else if (target_val == "windows") {
+                    opt.abi_str = "win64";
+                    opt.arch_str = "x64";
+                }
             } else if (arg == "--no-sema") {
                 opt.no_sema = true;
             } else if (arg == "--emit-ir") {

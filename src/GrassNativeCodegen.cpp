@@ -1,9 +1,12 @@
 #include "GrassNativeCodegen.h"
+#include "GrassNativeDebug.h"
 #include "GrassImport.h"
 #include "GrassSema.h"
 #include "GrassNativeOOP.h"
 #include "GrassNativeMemory.h"
 #include "GrassNativeStdlib.h"
+#include "GrassAdvancedOpt.h"
+#include "GrassElfWriter.h"
 
 #include <iostream>
 #include <fstream>
@@ -399,6 +402,55 @@ int64_t grass_array_len(void* ptr) {
         bool in_stream_io_ = false;
         std::string last_struct_name_;
 
+        std::vector<std::string> namespace_stack_;
+        std::vector<std::string> using_namespaces_;
+        std::unordered_map<std::string, std::string> using_symbols_;
+
+        std::string current_namespace() const {
+            if (namespace_stack_.empty()) return "";
+            std::string res;
+            for (size_t i = 0; i < namespace_stack_.size(); ++i) {
+                if (i > 0) res += "::";
+                res += namespace_stack_[i];
+            }
+            return res;
+        }
+
+        std::string qualify_name(const std::string& name) const {
+            if (name.find("::") != std::string::npos) return name;
+            std::string ns = current_namespace();
+            if (ns.empty()) return name;
+            return ns + "::" + name;
+        }
+
+        std::string resolve_callee(const std::string& callee) const {
+            if (callee.find("::") != std::string::npos) {
+                std::string mangled = grass::sema::GrassSema::mangleName(callee);
+                if (module_.get_function(mangled)) return mangled;
+                if (module_.get_function(callee)) return callee;
+                return mangled;
+            }
+            auto sit = using_symbols_.find(callee);
+            if (sit != using_symbols_.end()) {
+                std::string mangled = grass::sema::GrassSema::mangleName(sit->second);
+                if (module_.get_function(mangled)) return mangled;
+                if (module_.get_function(sit->second)) return sit->second;
+            }
+            if (!namespace_stack_.empty()) {
+                std::string q = current_namespace() + "::" + callee;
+                std::string mangled = grass::sema::GrassSema::mangleName(q);
+                if (module_.get_function(mangled)) return mangled;
+                if (module_.get_function(q)) return q;
+            }
+            for (const auto& uns : using_namespaces_) {
+                std::string q = uns + "::" + callee;
+                std::string mangled = grass::sema::GrassSema::mangleName(q);
+                if (module_.get_function(mangled)) return mangled;
+                if (module_.get_function(q)) return q;
+            }
+            return callee;
+        }
+
         const GrassToken& peek(int offset = 0) const {
             size_t idx = pos_ + offset;
             if (idx >= tokens_.size()) return tokens_.back();
@@ -473,6 +525,21 @@ int64_t grass_array_len(void* ptr) {
             ir::IRType* src_type = builder_.get_function()->get_value(val).type;
             if (!src_type || src_type->equals(target_type)) return val;
 
+            if (target_type->is_bool()) {
+                if (src_type->is_integer()) {
+                    ir::ValueId zero = builder_.create_const_int(src_type, 0);
+                    return builder_.create_icmp_ne(val, zero);
+                }
+                if (src_type->is_pointer()) {
+                    ir::ValueId null_ptr = builder_.create_const_int(src_type, 0);
+                    return builder_.create_icmp_ne(val, null_ptr);
+                }
+            }
+
+            if (src_type->is_bool() && target_type->is_integer()) {
+                return builder_.create_zext(val, target_type);
+            }
+
             if (src_type->is_integer() && target_type->is_integer()) {
                 uint32_t src_bits = src_type->bit_width();
                 uint32_t tgt_bits = target_type->bit_width();
@@ -482,6 +549,18 @@ int64_t grass_array_len(void* ptr) {
                     return builder_.create_sext(val, target_type);
                 }
                 return val;
+            }
+
+            if (src_type->is_pointer() && target_type->is_integer()) {
+                return builder_.create_ptrtoint(val, target_type);
+            }
+
+            if (src_type->is_integer() && target_type->is_pointer()) {
+                return builder_.create_inttoptr(val, target_type);
+            }
+
+            if (src_type->is_pointer() && target_type->is_pointer()) {
+                return builder_.create_bitcast(val, target_type);
             }
 
             if (src_type->is_integer() && target_type->is_floating_point()) {
@@ -503,7 +582,7 @@ int64_t grass_array_len(void* ptr) {
             if (!t1 || !t2 || t1->equals(t2)) return;
 
             if (t1->is_floating_point() || t2->is_floating_point()) {
-                ir::IRType* target = (t1->is_f64() || t2->is_f64()) ? ctx_.get_f64_type() : ctx_.get_f32_type();
+                ir::IRType* target = ctx_.get_f64_type();
                 lhs = coerce_type(lhs, target);
                 rhs = coerce_type(rhs, target);
             } else if (t1->is_integer() && t2->is_integer()) {
@@ -512,6 +591,14 @@ int64_t grass_array_len(void* ptr) {
                 if (w1 > w2) {
                     rhs = coerce_type(rhs, t1);
                 } else {
+                    lhs = coerce_type(lhs, t2);
+                }
+            } else if (t1->is_pointer() || t2->is_pointer()) {
+                if (t1->is_pointer() && t2->is_pointer()) {
+                    rhs = coerce_type(rhs, t1);
+                } else if (t1->is_pointer() && t2->is_integer()) {
+                    rhs = coerce_type(rhs, t1);
+                } else if (t1->is_integer() && t2->is_pointer()) {
                     lhs = coerce_type(lhs, t2);
                 }
             }
@@ -535,27 +622,84 @@ int64_t grass_array_len(void* ptr) {
               oop_delegate_(oop_del), memory_delegate_(mem_del), stdlib_delegate_(stdlib_del),
               oop_mgr_(oop_mgr), mem_mgr_(mem_mgr) {}
 
+        bool lower_declaration(std::string& error) {
+            if (peek().kind == TOK_LIB) {
+                advance();
+                return true;
+            }
+            if (peek().kind == TOK_SEMI) {
+                advance();
+                return true;
+            }
+            if (peek().kind == TOK_IDENT && peek().text == "@strict") {
+                advance();
+                return true;
+            }
+            if (peek().kind == TOK_USING || (peek().kind == TOK_IDENT && peek().text == "using")) {
+                advance();
+                bool is_ns = false;
+                if (peek().kind == TOK_NAMESPACE || (peek().kind == TOK_IDENT && peek().text == "namespace")) {
+                    advance();
+                    is_ns = true;
+                }
+                std::string path = advance().text;
+                while (match(TOK_COLON_COLON)) {
+                    if (peek().kind == TOK_IDENT) path += "::" + advance().text;
+                }
+                match(TOK_SEMI);
+                if (is_ns) {
+                    using_namespaces_.push_back(path);
+                } else {
+                    size_t last_col = path.rfind("::");
+                    std::string sym = (last_col != std::string::npos) ? path.substr(last_col + 2) : path;
+                    using_symbols_[sym] = path;
+                }
+                return true;
+            }
+            if (peek().kind == TOK_NAMESPACE || (peek().kind == TOK_IDENT && peek().text == "namespace")) {
+                advance();
+                if (peek().kind != TOK_IDENT) {
+                    error = "Expected namespace name!";
+                    return false;
+                }
+                std::string ns_name = advance().text;
+                while (match(TOK_COLON_COLON)) {
+                    if (peek().kind == TOK_IDENT) ns_name += "::" + advance().text;
+                }
+                if (!match(TOK_LBRACE)) {
+                    error = "Expected '{' after namespace name!";
+                    return false;
+                }
+                namespace_stack_.push_back(ns_name);
+                while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
+                    if (!lower_declaration(error)) return false;
+                }
+                match(TOK_RBRACE);
+                match(TOK_SEMI);
+                namespace_stack_.pop_back();
+                return true;
+            }
+            if (peek().kind == TOK_IDENT && (peek().text == "struct" || peek().text == "class")) {
+                if (!parse_struct_definition(error)) return false;
+                return true;
+            }
+            bool is_fn = false;
+            if (is_type_or_func_keyword(peek().text) || (oop_mgr_ && oop_mgr_->has_class(peek().text))) {
+                size_t off = 1;
+                while (peek(off).kind == TOK_STAR) off++;
+                if (peek(off).kind == TOK_IDENT && peek(off + 1).kind == TOK_LPAREN) is_fn = true;
+            }
+            if (is_fn) {
+                if (!parse_function(error)) return false;
+                return true;
+            }
+            advance();
+            return true;
+        }
+
         bool lower(std::string& error) {
             while (peek().kind != TOK_EOF) {
-                if (peek().kind == TOK_LIB) {
-                    advance(); // skip library directive e.g. !GrassGreen!, !time!
-                    continue;
-                }
-                if (peek().kind == TOK_SEMI) {
-                    advance();
-                    continue;
-                }
-                if (peek().kind == TOK_IDENT && peek().text == "struct") {
-                    if (!parse_struct_definition(error)) return false;
-                    continue;
-                }
-                if (is_type_or_func_keyword(peek().text) &&
-                    peek(1).kind == TOK_IDENT && peek(2).kind == TOK_LPAREN) {
-                    if (!parse_function(error)) return false;
-                    continue;
-                }
-                // Skip unhandled top-level tokens gracefully
-                advance();
+                if (!lower_declaration(error)) return false;
             }
             return true;
         }
@@ -564,26 +708,42 @@ int64_t grass_array_len(void* ptr) {
         static bool is_type_or_func_keyword(const std::string& s) {
             return s == "int" || s == "take" || s == "void" || s == "fn" ||
                    s == "double" || s == "float" || s == "string" || s == "bool" ||
-                   s == "i8" || s == "i16" || s == "i32" || s == "i64";
+                   s == "uint8" || s == "uint16" || s == "uint32" || s == "uint64" ||
+                   s == "int8" || s == "int16" || s == "int32" || s == "int64" ||
+                   s == "uint8_t" || s == "uint16_t" || s == "uint32_t" || s == "uint64_t" ||
+                   s == "int8_t" || s == "int16_t" || s == "int32_t" || s == "int64_t" ||
+                   s == "u8" || s == "u16" || s == "u32" || s == "u64" ||
+                   s == "i8" || s == "i16" || s == "i32" || s == "i64" ||
+                   s == "f32" || s == "f64" || s == "char" || s == "byte" || s == "size_t";
         }
 
         static bool is_var_keyword(const std::string& s) {
             return s == "take" || s == "int" || s == "double" || s == "float" ||
                    s == "string" || s == "bool" || s == "set" || s == "array" ||
-                   s == "i8" || s == "i16" || s == "i32" || s == "i64";
+                   s == "uint8" || s == "uint16" || s == "uint32" || s == "uint64" ||
+                   s == "int8" || s == "int16" || s == "int32" || s == "int64" ||
+                   s == "uint8_t" || s == "uint16_t" || s == "uint32_t" || s == "uint64_t" ||
+                   s == "int8_t" || s == "int16_t" || s == "int32_t" || s == "int64_t" ||
+                   s == "u8" || s == "u16" || s == "u32" || s == "u64" ||
+                   s == "i8" || s == "i16" || s == "i32" || s == "i64" ||
+                   s == "f32" || s == "f64" || s == "char" || s == "byte" || s == "size_t";
         }
 
         ir::IRType* parse_type_name(const std::string& name) {
             if (name == "void") return ctx_.get_void_type();
             if (name == "bool") return ctx_.get_i1_type();
-            if (name == "i8") return ctx_.get_i8_type();
-            if (name == "i16") return ctx_.get_i16_type();
-            if (name == "i32" || name == "int") return ctx_.get_i32_type();
-            if (name == "i64" || name == "take") return ctx_.get_i64_type();
-            if (name == "float") return ctx_.get_f32_type();
-            if (name == "double") return ctx_.get_f64_type();
+            if (name == "i8" || name == "u8" || name == "int8" || name == "uint8" || name == "char" || name == "byte") return ctx_.get_i8_type();
+            if (name == "i16" || name == "u16" || name == "int16" || name == "uint16") return ctx_.get_i16_type();
+            if (name == "i32" || name == "u32" || name == "int32" || name == "uint32" || name == "int") return ctx_.get_i32_type();
+            if (name == "i64" || name == "u64" || name == "int64" || name == "uint64" || name == "take" || name == "size_t") return ctx_.get_i64_type();
+            if (name == "float" || name == "double" || name == "f32" || name == "f64") return ctx_.get_f64_type();
             if (name == "string") return ctx_.get_ptr_type(ctx_.get_i8_type());
             if (name == "array") return ctx_.get_ptr_type(ctx_.get_void_type());
+            if (name == "nullptr" || name == "null") return ctx_.get_ptr_type(ctx_.get_void_type());
+            if (oop_mgr_ && oop_mgr_->has_class(name)) {
+                const auto* cd = oop_mgr_->get_class(name);
+                return cd ? cd->ir_struct_type : ctx_.get_i64_type();
+            }
             return ctx_.get_i64_type();
         }
 
@@ -592,21 +752,32 @@ int64_t grass_array_len(void* ptr) {
             ir::IRType* ret_type = nullptr;
             std::vector<ir::IRType*> param_types;
             std::vector<std::string> param_names;
+            std::vector<std::string> param_struct_names;
             size_t body_start_pos = 0;
             size_t body_end_pos = 0;
         };
 
         bool parse_struct_definition(std::string& error) {
-            advance(); // consume 'struct'
+            bool is_class = (advance().text == "class"); // consume 'struct' or 'class'
             if (peek().kind != TOK_IDENT) {
-                error = "Line " + std::to_string(peek().line) + ": Expected struct name!";
+                error = "Line " + std::to_string(peek().line) + ": Expected " + (is_class ? "class" : "struct") + " name!";
                 return false;
             }
             std::string struct_name = advance().text;
-            if (!consume(TOK_LBRACE, "Expected '{' after struct name!", error)) return false;
+            std::string base_class = "";
+            if (match(TOK_COLON)) {
+                if (peek().kind == TOK_IDENT) {
+                    base_class = advance().text;
+                }
+            }
+            if (!consume(TOK_LBRACE, "Expected '{' after name!", error)) return false;
 
             if (oop_mgr_) {
-                oop_mgr_->begin_struct(struct_name);
+                if (is_class) {
+                    oop_mgr_->begin_class(struct_name, base_class);
+                } else {
+                    oop_mgr_->begin_struct(struct_name);
+                }
             }
 
             std::vector<ir::IRType*> field_types;
@@ -627,10 +798,20 @@ int64_t grass_array_len(void* ptr) {
                         advance(); // '('
                         std::vector<ir::IRType*> param_types;
                         std::vector<std::string> param_names;
+                        std::vector<std::string> param_struct_names;
                         if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
                             while (true) {
                                 ir::IRType* ptype = ctx_.get_i64_type();
-                                if (is_type_or_func_keyword(peek().text)) {
+                                std::string struct_name = "";
+                                if (peek().kind == TOK_IDENT && peek(1).kind == TOK_IDENT) {
+                                    std::string tname = advance().text;
+                                    if (oop_mgr_ && oop_mgr_->has_class(tname)) {
+                                        struct_name = tname;
+                                        ptype = ctx_.get_ptr_type();
+                                    } else {
+                                        ptype = parse_type_name(tname);
+                                    }
+                                } else if (is_type_or_func_keyword(peek().text)) {
                                     ptype = parse_type_name(advance().text);
                                 }
                                 if (peek().kind != TOK_IDENT) {
@@ -640,6 +821,7 @@ int64_t grass_array_len(void* ptr) {
                                 std::string pname = advance().text;
                                 param_types.push_back(ptype);
                                 param_names.push_back(pname);
+                                param_struct_names.push_back(struct_name);
                                 if (!match(TOK_COMMA)) break;
                             }
                         }
@@ -659,7 +841,7 @@ int64_t grass_array_len(void* ptr) {
                         size_t body_end = pos_;
                         consume(TOK_RBRACE, "Expected '}' closing method body!", error);
 
-                        pending_methods.push_back({ mname, ftype, param_types, param_names, body_start, body_end });
+                        pending_methods.push_back({ mname, ftype, param_types, param_names, param_struct_names, body_start, body_end });
                         if (oop_mgr_) {
                             oop_mgr_->add_method(mname, ftype, param_types, param_names);
                         }
@@ -715,7 +897,8 @@ int64_t grass_array_len(void* ptr) {
                 for (size_t i = 1; i < fn->arguments.size(); ++i) {
                     ir::ValueId p_alloca = builder_.create_alloca(fn->arguments[i].type, 1, 0, fn->arguments[i].name);
                     builder_.create_store(fn->arguments[i].id, p_alloca);
-                    declare_var(fn->arguments[i].name, p_alloca, fn->arguments[i].type);
+                    std::string sname = (i - 1 < pm.param_struct_names.size()) ? pm.param_struct_names[i - 1] : "";
+                    declare_var(fn->arguments[i].name, p_alloca, fn->arguments[i].type, sname);
                 }
 
                 size_t saved_pos = pos_;
@@ -749,9 +932,14 @@ int64_t grass_array_len(void* ptr) {
         bool parse_function(std::string& error) {
             std::string ret_type_name = advance().text;
             ir::IRType* ret_type = parse_type_name(ret_type_name);
+            while (match(TOK_STAR)) {
+                ret_type = ctx_.get_ptr_type(ret_type);
+            }
 
-            std::string fn_name = advance().text;
-            ir::IRFunction* fn = module_.create_function(fn_name, ret_type);
+            std::string raw_fn_name = advance().text;
+            std::string qualified_name = qualify_name(raw_fn_name);
+            std::string mangled_name = grass::sema::GrassSema::mangleName(qualified_name);
+            ir::IRFunction* fn = module_.create_function(mangled_name, ret_type);
 
             builder_.set_function(fn);
             scopes_.clear();
@@ -762,21 +950,34 @@ int64_t grass_array_len(void* ptr) {
             struct ParamInfo {
                 std::string name;
                 ir::IRType* type;
+                std::string struct_name;
             };
             std::vector<ParamInfo> params;
 
             if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
                 while (true) {
                     ir::IRType* ptype = ctx_.get_i64_type();
-                    if (is_type_or_func_keyword(peek().text)) {
+                    std::string struct_name = "";
+                    if (peek().kind == TOK_IDENT && peek(1).kind == TOK_IDENT) {
+                        std::string tname = advance().text;
+                        if (oop_mgr_ && oop_mgr_->has_class(tname)) {
+                            struct_name = tname;
+                            ptype = ctx_.get_ptr_type();
+                        } else {
+                            ptype = parse_type_name(tname);
+                        }
+                    } else if (is_type_or_func_keyword(peek().text)) {
                         ptype = parse_type_name(advance().text);
+                    }
+                    while (match(TOK_STAR)) {
+                        ptype = ctx_.get_ptr_type(ptype);
                     }
                     if (peek().kind != TOK_IDENT) {
                         error = "Line " + std::to_string(peek().line) + ": Expected parameter name!";
                         return false;
                     }
                     std::string pname = advance().text;
-                    params.push_back({ pname, ptype });
+                    params.push_back({ pname, ptype, struct_name });
                     fn->add_argument(pname, ptype);
                     if (!match(TOK_COMMA)) break;
                 }
@@ -791,11 +992,14 @@ int64_t grass_array_len(void* ptr) {
             for (size_t i = 0; i < params.size(); ++i) {
                 ir::ValueId alloca_id = builder_.create_alloca(params[i].type, 1, 0, params[i].name);
                 builder_.create_store(fn->arguments[i].id, alloca_id);
-                declare_var(params[i].name, alloca_id, params[i].type);
+                declare_var(params[i].name, alloca_id, params[i].type, params[i].struct_name);
             }
 
             while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
-                if (!parse_statement(error)) return false;
+                if (!parse_statement(error)) {
+                    if (error.empty()) error = "Failed to parse statement in function '" + mangled_name + "' near token '" + peek().text + "' (line " + std::to_string(peek().line) + ")";
+                    return false;
+                }
             }
             if (!consume(TOK_RBRACE, "Expected '}' closing function body!", error)) return false;
 
@@ -816,6 +1020,7 @@ int64_t grass_array_len(void* ptr) {
         }
 
         bool parse_statement(std::string& error) {
+            last_struct_name_.clear();
             if (match(TOK_SEMI)) return true;
 
             // Block { ... }
@@ -849,7 +1054,8 @@ int64_t grass_array_len(void* ptr) {
                             } else if (vtype->is_floating_point()) {
                                 builder_.create_call("grass_print_double", ctx_.get_void_type(), { val });
                             } else if (vtype->is_bool()) {
-                                builder_.create_call("grass_print_bool", ctx_.get_void_type(), { val });
+                                ir::ValueId val_i64 = builder_.create_zext(val, ctx_.get_i64_type());
+                                builder_.create_call("grass_print_int", ctx_.get_void_type(), { val_i64 });
                             } else {
                                 builder_.create_call("grass_print_int", ctx_.get_void_type(), { val });
                             }
@@ -888,7 +1094,15 @@ int64_t grass_array_len(void* ptr) {
 
             // Variable Declaration
             bool is_struct_decl = (oop_mgr_ && oop_mgr_->has_class(peek().text));
-            if ((is_var_keyword(peek().text) || is_struct_decl) && peek(1).kind == TOK_IDENT) {
+            bool is_vdecl = false;
+            if (is_var_keyword(peek().text) || is_type_or_func_keyword(peek().text) || is_struct_decl) {
+                size_t off = 1;
+                while (peek(off).kind == TOK_STAR) off++;
+                if (peek(off).kind == TOK_IDENT) {
+                    is_vdecl = true;
+                }
+            }
+            if (is_vdecl) {
                 std::string type_name = advance().text;
                 ir::IRType* vtype = nullptr;
                 std::string struct_name = "";
@@ -899,28 +1113,70 @@ int64_t grass_array_len(void* ptr) {
                 } else {
                     vtype = parse_type_name(type_name);
                 }
+                while (match(TOK_STAR)) {
+                    vtype = ctx_.get_ptr_type(vtype);
+                }
 
-                while (peek().kind == TOK_IDENT) {
+                while (peek().kind == TOK_IDENT || peek().kind == TOK_STAR) {
+                    ir::IRType* cur_vtype = vtype;
+                    while (match(TOK_STAR)) {
+                        cur_vtype = ctx_.get_ptr_type(cur_vtype);
+                    }
+                    if (peek().kind != TOK_IDENT) break;
                     std::string var_name = advance().text;
 
-                    if (match(TOK_ASSIGN)) {
+                    if (type_name == "take") {
+                        if (!match(TOK_ASSIGN)) {
+                            error = "Variable '" + var_name + "' declared with 'take' requires an explicit initializer!";
+                            return false;
+                        }
+                        last_struct_name_.clear();
                         ir::ValueId init_val = parse_expression(error);
-                        if (!init_val) return false;
-                        if ((type_name == "take" || type_name == "var" || type_name == "set") && builder_.get_function()->has_value(init_val)) {
+                        if (!init_val) {
+                            if (error.empty()) error = "Failed to evaluate initializer for variable '" + var_name + "'";
+                            return false;
+                        }
+                        ir::IRType* actual_t = builder_.get_function()->get_value(init_val).type;
+                        if (!actual_t || actual_t->is_void()) {
+                            error = "Initializer for 'take " + var_name + "' cannot have void type!";
+                            return false;
+                        }
+                        cur_vtype = actual_t;
+                        if (cur_vtype->is_struct()) {
+                            struct_name = cur_vtype->struct_name;
+                        } else if (cur_vtype->is_pointer() && !last_struct_name_.empty() && oop_mgr_ && oop_mgr_->has_class(last_struct_name_)) {
+                            struct_name = last_struct_name_;
+                        }
+                        ir::ValueId alloca_id = builder_.create_alloca(cur_vtype, 1, 0, var_name);
+                        declare_var(var_name, alloca_id, cur_vtype, struct_name);
+                        builder_.create_store(init_val, alloca_id);
+                    } else if (match(TOK_ASSIGN)) {
+                        last_struct_name_.clear();
+                        ir::ValueId init_val = parse_expression(error);
+                        if (!init_val) {
+                            if (error.empty()) error = "Failed to evaluate initializer for variable '" + var_name + "'";
+                            return false;
+                        }
+                        if (type_name == "var" || type_name == "set") {
                             ir::IRType* actual_t = builder_.get_function()->get_value(init_val).type;
                             if (actual_t && !actual_t->is_void()) {
-                                vtype = actual_t;
+                                cur_vtype = actual_t;
+                            }
+                            if (cur_vtype && cur_vtype->is_struct()) {
+                                struct_name = cur_vtype->struct_name;
+                            } else if (cur_vtype && cur_vtype->is_pointer() && !last_struct_name_.empty() && oop_mgr_ && oop_mgr_->has_class(last_struct_name_)) {
+                                struct_name = last_struct_name_;
                             }
                         }
-                        ir::ValueId alloca_id = builder_.create_alloca(vtype, 1, 0, var_name);
-                        declare_var(var_name, alloca_id, vtype, struct_name);
-                        init_val = coerce_type(init_val, vtype);
+                        ir::ValueId alloca_id = builder_.create_alloca(cur_vtype, 1, 0, var_name);
+                        declare_var(var_name, alloca_id, cur_vtype, struct_name);
+                        init_val = coerce_type(init_val, cur_vtype);
                         builder_.create_store(init_val, alloca_id);
                     } else {
-                        ir::ValueId alloca_id = builder_.create_alloca(vtype, 1, 0, var_name);
-                        declare_var(var_name, alloca_id, vtype, struct_name);
+                        ir::ValueId alloca_id = builder_.create_alloca(cur_vtype, 1, 0, var_name);
+                        declare_var(var_name, alloca_id, cur_vtype, struct_name);
                         if (!is_struct_decl) {
-                            ir::ValueId default_val = builder_.create_const_int(vtype, 0);
+                            ir::ValueId default_val = builder_.create_const_int(cur_vtype, 0);
                             builder_.create_store(default_val, alloca_id);
                         }
                     }
@@ -1115,8 +1371,10 @@ int64_t grass_array_len(void* ptr) {
                     if (exp_t && !exp_t->is_void()) {
                         ret_val = coerce_type(ret_val, exp_t);
                     }
+                    if (mem_mgr_) mem_mgr_->emit_all_cleanups(builder_);
                     builder_.create_ret(ret_val);
                 } else {
+                    if (mem_mgr_) mem_mgr_->emit_all_cleanups(builder_);
                     builder_.create_ret_void();
                 }
                 match(TOK_SEMI);
@@ -1139,6 +1397,76 @@ int64_t grass_array_len(void* ptr) {
         }
 
         ir::ValueId parse_assignment(std::string& error) {
+            // Check for pointer dereference assignment: *ptr = expr or **ptr = expr
+            if (peek().kind == TOK_STAR) {
+                size_t look = 0;
+                while (peek(look).kind == TOK_STAR) look++;
+                if (peek(look).kind == TOK_IDENT && peek(look + 1).kind == TOK_ASSIGN) {
+                    advance(); // consume '*'
+                    int deref_count = 1;
+                    while (match(TOK_STAR)) deref_count++;
+                    std::string ptr_name = advance().text;
+                    const VarBinding* ptr_var = lookup_var(ptr_name);
+                    if (!ptr_var) {
+                        error = "Undeclared pointer variable: " + ptr_name;
+                        return 0;
+                    }
+                    ir::ValueId target_addr = builder_.create_load(ptr_var->alloca_id, ptr_name + "_val");
+                    for (int d = 1; d < deref_count; ++d) {
+                        target_addr = builder_.create_load(target_addr, ptr_name + "_deref");
+                    }
+                    match(TOK_ASSIGN);
+                    ir::ValueId rhs = parse_assignment(error);
+                    if (!rhs) return 0;
+                    builder_.create_store(rhs, target_addr);
+                    return rhs;
+                }
+            }
+
+            // Check for arrow member assignment: ptr->field = expr or ptr->field += expr
+            if (peek().kind == TOK_IDENT && peek(1).kind == TOK_ARROW && peek(2).kind == TOK_IDENT &&
+                (peek(3).kind == TOK_ASSIGN || peek(3).kind == TOK_PLUS_ASSIGN ||
+                 peek(3).kind == TOK_MINUS_ASSIGN || peek(3).kind == TOK_MUL_ASSIGN ||
+                 peek(3).kind == TOK_DIV_ASSIGN)) {
+                std::string ptr_name = advance().text;
+                advance(); // consume '->'
+                std::string field_name = advance().text;
+                GrassTokenKind op = advance().kind;
+
+                const VarBinding* ptr_var = lookup_var(ptr_name);
+                if (!ptr_var) {
+                    error = "Undeclared pointer object: " + ptr_name;
+                    return 0;
+                }
+                ir::ValueId inst_ptr = builder_.create_load(ptr_var->alloca_id, ptr_name + "_ptr");
+                std::string sname = ptr_var->struct_type_name;
+                ir::ValueId rhs = parse_assignment(error);
+                if (!rhs) return 0;
+
+                if (op == TOK_ASSIGN) {
+                    if (oop_mgr_) {
+                        oop_mgr_->emit_store_field(builder_, inst_ptr, sname, field_name, rhs);
+                    }
+                    return rhs;
+                } else {
+                    ir::ValueId cur = 0;
+                    if (oop_mgr_) {
+                        cur = oop_mgr_->emit_load_field(builder_, inst_ptr, sname, field_name, field_name + "_val");
+                    }
+                    match_types(cur, rhs);
+                    ir::ValueId computed = 0;
+                    if (op == TOK_PLUS_ASSIGN) computed = builder_.create_add(cur, rhs);
+                    else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_sub(cur, rhs);
+                    else if (op == TOK_MUL_ASSIGN) computed = builder_.create_mul(cur, rhs);
+                    else if (op == TOK_DIV_ASSIGN) computed = builder_.create_sdiv(cur, rhs);
+
+                    if (oop_mgr_) {
+                        oop_mgr_->emit_store_field(builder_, inst_ptr, sname, field_name, computed);
+                    }
+                    return computed;
+                }
+            }
+
             // Check for member assignment: obj.field = expr or obj.field += expr
             if (peek().kind == TOK_IDENT && peek(1).kind == TOK_DOT && peek(2).kind == TOK_IDENT &&
                 (peek(3).kind == TOK_ASSIGN || peek(3).kind == TOK_PLUS_ASSIGN ||
@@ -1188,6 +1516,48 @@ int64_t grass_array_len(void* ptr) {
                 }
             }
 
+            // Check for array element assignment: arr[idx] = expr
+            if (peek().kind == TOK_IDENT && peek(1).kind == TOK_LBRACKET) {
+                size_t look = pos_ + 2;
+                int depth = 1;
+                while (look < tokens_.size() && depth > 0) {
+                    if (tokens_[look].kind == TOK_LBRACKET) depth++;
+                    else if (tokens_[look].kind == TOK_RBRACKET) depth--;
+                    look++;
+                }
+                if (look < tokens_.size() && (tokens_[look].kind == TOK_ASSIGN ||
+                    tokens_[look].kind == TOK_PLUS_ASSIGN || tokens_[look].kind == TOK_MINUS_ASSIGN ||
+                    tokens_[look].kind == TOK_MUL_ASSIGN || tokens_[look].kind == TOK_DIV_ASSIGN)) {
+                    std::string arr_name = advance().text;
+                    advance(); // consume '['
+                    ir::ValueId idx = parse_expression(error);
+                    if (!idx || !consume(TOK_RBRACKET, "Expected ']'", error)) return 0;
+                    GrassTokenKind op = advance().kind;
+                    ir::ValueId rhs = parse_assignment(error);
+                    if (!rhs) return 0;
+
+                    const VarBinding* var = lookup_var(arr_name);
+                    if (!var) {
+                        error = "Undeclared array: " + arr_name;
+                        return 0;
+                    }
+                    ir::ValueId arr_ptr = builder_.create_load(var->alloca_id, arr_name + "_ptr");
+                    if (op == TOK_ASSIGN) {
+                        builder_.create_call("grass_array_set", ctx_.get_void_type(), { arr_ptr, idx, rhs });
+                        return rhs;
+                    } else {
+                        ir::ValueId cur = builder_.create_call("grass_array_get", ctx_.get_i64_type(), { arr_ptr, idx });
+                        ir::ValueId computed = 0;
+                        if (op == TOK_PLUS_ASSIGN) computed = builder_.create_add(cur, rhs);
+                        else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_sub(cur, rhs);
+                        else if (op == TOK_MUL_ASSIGN) computed = builder_.create_mul(cur, rhs);
+                        else if (op == TOK_DIV_ASSIGN) computed = builder_.create_sdiv(cur, rhs);
+                        builder_.create_call("grass_array_set", ctx_.get_void_type(), { arr_ptr, idx, computed });
+                        return computed;
+                    }
+                }
+            }
+
             // Check for assignment: identifier = expr
             if (peek().kind == TOK_IDENT &&
                 (peek(1).kind == TOK_ASSIGN || peek(1).kind == TOK_PLUS_ASSIGN ||
@@ -1234,7 +1604,12 @@ int64_t grass_array_len(void* ptr) {
             while (match(TOK_OR)) {
                 ir::ValueId rhs = parse_logical_and(error);
                 if (!rhs) return 0;
-                lhs = builder_.create_or(lhs, rhs);
+                ir::IRType* lt = builder_.get_function()->get_value(lhs).type;
+                ir::IRType* rt = builder_.get_function()->get_value(rhs).type;
+                ir::ValueId lhs_b = (lt && lt->is_bool()) ? lhs : builder_.create_icmp_ne(lhs, builder_.create_const_int(lt ? lt : ctx_.get_i64_type(), 0));
+                ir::ValueId rhs_b = (rt && rt->is_bool()) ? rhs : builder_.create_icmp_ne(rhs, builder_.create_const_int(rt ? rt : ctx_.get_i64_type(), 0));
+                ir::ValueId or_res = builder_.create_or(lhs_b, rhs_b);
+                lhs = builder_.create_zext(or_res, ctx_.get_i64_type());
             }
             return lhs;
         }
@@ -1246,7 +1621,12 @@ int64_t grass_array_len(void* ptr) {
             while (match(TOK_AND)) {
                 ir::ValueId rhs = parse_bitwise_or(error);
                 if (!rhs) return 0;
-                lhs = builder_.create_and(lhs, rhs);
+                ir::IRType* lt = builder_.get_function()->get_value(lhs).type;
+                ir::IRType* rt = builder_.get_function()->get_value(rhs).type;
+                ir::ValueId lhs_b = (lt && lt->is_bool()) ? lhs : builder_.create_icmp_ne(lhs, builder_.create_const_int(lt ? lt : ctx_.get_i64_type(), 0));
+                ir::ValueId rhs_b = (rt && rt->is_bool()) ? rhs : builder_.create_icmp_ne(rhs, builder_.create_const_int(rt ? rt : ctx_.get_i64_type(), 0));
+                ir::ValueId and_res = builder_.create_and(lhs_b, rhs_b);
+                lhs = builder_.create_zext(and_res, ctx_.get_i64_type());
             }
             return lhs;
         }
@@ -1296,8 +1676,14 @@ int64_t grass_array_len(void* ptr) {
                 ir::ValueId rhs = parse_relational(error);
                 if (!rhs) return 0;
                 match_types(lhs, rhs);
-                if (op == TOK_EQ) lhs = builder_.create_icmp_eq(lhs, rhs);
-                else lhs = builder_.create_icmp_ne(lhs, rhs);
+                ir::IRType* lt = builder_.get_function()->get_value(lhs).type;
+                if (lt && lt->is_floating_point()) {
+                    if (op == TOK_EQ) lhs = builder_.create_fcmp(ir::FCmpCond::OEQ, lhs, rhs);
+                    else lhs = builder_.create_fcmp(ir::FCmpCond::ONE, lhs, rhs);
+                } else {
+                    if (op == TOK_EQ) lhs = builder_.create_icmp_eq(lhs, rhs);
+                    else lhs = builder_.create_icmp_ne(lhs, rhs);
+                }
             }
             return lhs;
         }
@@ -1312,10 +1698,18 @@ int64_t grass_array_len(void* ptr) {
                 ir::ValueId rhs = parse_shift(error);
                 if (!rhs) return 0;
                 match_types(lhs, rhs);
-                if (op == TOK_LT) lhs = builder_.create_icmp_slt(lhs, rhs);
-                else if (op == TOK_LTE) lhs = builder_.create_icmp_sle(lhs, rhs);
-                else if (op == TOK_GT) lhs = builder_.create_icmp_sgt(lhs, rhs);
-                else if (op == TOK_GTE) lhs = builder_.create_icmp_sge(lhs, rhs);
+                ir::IRType* lt = builder_.get_function()->get_value(lhs).type;
+                if (lt && lt->is_floating_point()) {
+                    if (op == TOK_LT) lhs = builder_.create_fcmp(ir::FCmpCond::OLT, lhs, rhs);
+                    else if (op == TOK_LTE) lhs = builder_.create_fcmp(ir::FCmpCond::OLE, lhs, rhs);
+                    else if (op == TOK_GT) lhs = builder_.create_fcmp(ir::FCmpCond::OGT, lhs, rhs);
+                    else if (op == TOK_GTE) lhs = builder_.create_fcmp(ir::FCmpCond::OGE, lhs, rhs);
+                } else {
+                    if (op == TOK_LT) lhs = builder_.create_icmp_slt(lhs, rhs);
+                    else if (op == TOK_LTE) lhs = builder_.create_icmp_sle(lhs, rhs);
+                    else if (op == TOK_GT) lhs = builder_.create_icmp_sgt(lhs, rhs);
+                    else if (op == TOK_GTE) lhs = builder_.create_icmp_sge(lhs, rhs);
+                }
             }
             return lhs;
         }
@@ -1345,9 +1739,69 @@ int64_t grass_array_len(void* ptr) {
                 GrassTokenKind op = advance().kind;
                 ir::ValueId rhs = parse_multiplicative(error);
                 if (!rhs) return 0;
+
+                ir::IRType* lt = builder_.get_function()->get_value(lhs).type;
+                ir::IRType* rt = builder_.get_function()->get_value(rhs).type;
+
+                // Pointer arithmetic: ptr + n, ptr - n
+                if (lt && lt->is_pointer() && rt && rt->is_integer()) {
+                    uint64_t elem_sz = 8;
+                    if (lt->element_type) {
+                        elem_sz = lt->element_type->size();
+                        if (elem_sz <= 0) elem_sz = 1;
+                    }
+                    ir::ValueId scaled_rhs = rhs;
+                    if (elem_sz != 1) {
+                        ir::ValueId sz_val = builder_.create_const_int(ctx_.get_i64_type(), elem_sz);
+                        rhs = coerce_type(rhs, ctx_.get_i64_type());
+                        scaled_rhs = builder_.create_mul(rhs, sz_val);
+                    }
+                    if (op == TOK_PLUS) lhs = builder_.create_add(lhs, scaled_rhs);
+                    else lhs = builder_.create_sub(lhs, scaled_rhs);
+                    continue;
+                }
+                // n + ptr
+                if (op == TOK_PLUS && rt && rt->is_pointer() && lt && lt->is_integer()) {
+                    uint64_t elem_sz = 8;
+                    if (rt->element_type) {
+                        elem_sz = rt->element_type->size();
+                        if (elem_sz <= 0) elem_sz = 1;
+                    }
+                    ir::ValueId scaled_lhs = lhs;
+                    if (elem_sz != 1) {
+                        ir::ValueId sz_val = builder_.create_const_int(ctx_.get_i64_type(), elem_sz);
+                        lhs = coerce_type(lhs, ctx_.get_i64_type());
+                        scaled_lhs = builder_.create_mul(lhs, sz_val);
+                    }
+                    lhs = builder_.create_add(scaled_lhs, rhs);
+                    continue;
+                }
+                // ptr1 - ptr2: (ptr1 - ptr2) / sizeof(T)
+                if (op == TOK_MINUS && lt && lt->is_pointer() && rt && rt->is_pointer()) {
+                    uint64_t elem_sz = 8;
+                    if (lt->element_type) {
+                        elem_sz = lt->element_type->size();
+                        if (elem_sz <= 0) elem_sz = 1;
+                    }
+                    ir::ValueId diff = builder_.create_sub(lhs, rhs);
+                    if (elem_sz != 1) {
+                        ir::ValueId sz_val = builder_.create_const_int(ctx_.get_i64_type(), elem_sz);
+                        lhs = builder_.create_sdiv(diff, sz_val);
+                    } else {
+                        lhs = diff;
+                    }
+                    continue;
+                }
+
                 match_types(lhs, rhs);
-                if (op == TOK_PLUS) lhs = builder_.create_add(lhs, rhs);
-                else lhs = builder_.create_sub(lhs, rhs);
+                lt = builder_.get_function()->get_value(lhs).type;
+                if (lt && lt->is_floating_point()) {
+                    if (op == TOK_PLUS) lhs = builder_.create_fadd(lhs, rhs);
+                    else lhs = builder_.create_fsub(lhs, rhs);
+                } else {
+                    if (op == TOK_PLUS) lhs = builder_.create_add(lhs, rhs);
+                    else lhs = builder_.create_sub(lhs, rhs);
+                }
             }
             return lhs;
         }
@@ -1361,21 +1815,110 @@ int64_t grass_array_len(void* ptr) {
                 ir::ValueId rhs = parse_unary(error);
                 if (!rhs) return 0;
                 match_types(lhs, rhs);
-                if (op == TOK_STAR) lhs = builder_.create_mul(lhs, rhs);
-                else if (op == TOK_SLASH) lhs = builder_.create_sdiv(lhs, rhs);
-                else if (op == TOK_MOD) lhs = builder_.create_srem(lhs, rhs);
+                ir::IRType* lt = builder_.get_function()->get_value(lhs).type;
+                if (lt && lt->is_floating_point()) {
+                    if (op == TOK_STAR) lhs = builder_.create_fmul(lhs, rhs);
+                    else if (op == TOK_SLASH) lhs = builder_.create_fdiv(lhs, rhs);
+                    else lhs = builder_.create_srem(lhs, rhs);
+                } else {
+                    if (op == TOK_STAR) lhs = builder_.create_mul(lhs, rhs);
+                    else if (op == TOK_SLASH) lhs = builder_.create_sdiv(lhs, rhs);
+                    else if (op == TOK_MOD) lhs = builder_.create_srem(lhs, rhs);
+                }
             }
             return lhs;
         }
 
         ir::ValueId parse_unary(std::string& error) {
+            // Address-of operator &var, &arr[i], &obj.field
+            if (match(TOK_AMP)) {
+                if (peek().kind == TOK_IDENT) {
+                    std::string id = advance().text;
+                    if (match(TOK_LBRACKET)) {
+                        ir::ValueId idx = parse_expression(error);
+                        consume(TOK_RBRACKET, "Expected ']'", error);
+                        const VarBinding* var = lookup_var(id);
+                        if (!var) { error = "Undeclared array: " + id; return 0; }
+                        ir::ValueId arr_ptr = builder_.create_load(var->alloca_id, id + "_ptr");
+                        return builder_.create_gep(arr_ptr, { idx }, nullptr, id + "_elem_addr");
+                    } else if (match(TOK_DOT)) {
+                        std::string field_name = advance().text;
+                        const VarBinding* var = lookup_var(id);
+                        if (!var) { error = "Undeclared object: " + id; return 0; }
+                        ir::ValueId inst_ptr = var->alloca_id;
+                        if (var->type && var->type->is_pointer()) {
+                            inst_ptr = builder_.create_load(var->alloca_id, id + "_ptr");
+                        }
+                        if (oop_mgr_) {
+                            return oop_mgr_->emit_field_gep(builder_, inst_ptr, var->struct_type_name, field_name);
+                        }
+                        return inst_ptr;
+                    } else {
+                        const VarBinding* var = lookup_var(id);
+                        if (!var) { error = "Undeclared variable: " + id; return 0; }
+                        return var->alloca_id;
+                    }
+                }
+            }
+
+            // Dereference operator *ptr
+            if (match(TOK_STAR)) {
+                ir::ValueId ptr_val = parse_unary(error);
+                if (!ptr_val) return 0;
+                ir::IRType* pt = builder_.get_function()->get_value(ptr_val).type;
+                if (pt && pt->is_pointer() && pt->element_type && pt->element_type->is_struct()) {
+                    last_struct_name_ = pt->element_type->struct_name;
+                }
+                return builder_.create_load(ptr_val, "deref");
+            }
+
+            // C-style cast (Type*)expr or (Type)expr
+            if (peek().kind == TOK_LPAREN) {
+                size_t off = 1;
+                if (peek(off).kind == TOK_IDENT && (is_type_or_func_keyword(peek(off).text) || (oop_mgr_ && oop_mgr_->has_class(peek(off).text)))) {
+                    std::string tname = peek(off).text;
+                    off++;
+                    while (peek(off).kind == TOK_COLON_COLON) {
+                        off++;
+                        if (peek(off).kind == TOK_IDENT) { tname += "::" + peek(off).text; off++; } else break;
+                    }
+                    int ptr_cnt = 0;
+                    while (peek(off).kind == TOK_STAR) { ptr_cnt++; off++; }
+                    if (peek(off).kind == TOK_RPAREN) {
+                        auto next_k = peek(off + 1).kind;
+                        if (next_k == TOK_IDENT || next_k == TOK_NUMBER || next_k == TOK_STRING ||
+                            next_k == TOK_LPAREN || next_k == TOK_STAR || next_k == TOK_AMP ||
+                            next_k == TOK_MINUS || next_k == TOK_NULLPTR) {
+                            advance(); // consume '('
+                            ir::IRType* tgt_t = parse_type_name(advance().text);
+                            while (match(TOK_COLON_COLON)) advance();
+                            while (match(TOK_STAR)) tgt_t = ctx_.get_ptr_type(tgt_t);
+                            match(TOK_RPAREN);
+                            ir::ValueId val = parse_unary(error);
+                            if (!val) return 0;
+                            return coerce_type(val, tgt_t);
+                        }
+                    }
+                }
+            }
+
             if (match(TOK_MINUS)) {
                 ir::ValueId operand = parse_unary(error);
+                if (!operand) return 0;
+                ir::IRType* ot = builder_.get_function()->get_value(operand).type;
+                if (ot && ot->is_floating_point()) {
+                    return builder_.create_fneg(operand);
+                }
                 return builder_.create_neg(operand);
             }
             if (match(TOK_NOT)) {
                 ir::ValueId operand = parse_unary(error);
-                ir::ValueId zero = builder_.create_const_int(ctx_.get_i64_type(), 0);
+                if (!operand) return 0;
+                ir::IRType* ot = builder_.get_function()->get_value(operand).type;
+                if (ot && ot->is_bool()) {
+                    return builder_.create_xor(operand, builder_.create_const_i1(true));
+                }
+                ir::ValueId zero = builder_.create_const_int(ot ? ot : ctx_.get_i64_type(), 0);
                 return builder_.create_icmp_eq(operand, zero);
             }
             if (match(TOK_TILDE)) {
@@ -1424,6 +1967,7 @@ int64_t grass_array_len(void* ptr) {
                         return 0;
                     }
                     std::string member_name = advance().text;
+                    std::string receiver_struct = last_struct_name_;
                     if (match(TOK_LPAREN)) {
                         // Method call e.g. arr.push(10) or hero.status() or hero.take_damage(35)
                         std::vector<ir::ValueId> args;
@@ -1440,18 +1984,120 @@ int64_t grass_array_len(void* ptr) {
                             std::vector<ir::ValueId> push_args = { base };
                             push_args.insert(push_args.end(), args.begin(), args.end());
                             builder_.create_call("grass_array_push", ctx_.get_void_type(), push_args);
+                            last_struct_name_.clear();
                             return base;
-                        } else if (oop_mgr_ && !last_struct_name_.empty()) {
-                            base = oop_mgr_->emit_call_method(builder_, base, last_struct_name_, member_name, args);
+                        } else if (member_name == "len" || member_name == "size") {
+                            last_struct_name_.clear();
+                            return builder_.create_call("grass_array_len", ctx_.get_i64_type(), { base });
+                        } else if (oop_mgr_ && !receiver_struct.empty()) {
+                            const auto* cd = oop_mgr_->get_class(receiver_struct);
+                            const auto* md = cd ? cd->find_method(member_name) : nullptr;
+                            base = oop_mgr_->emit_call_method(builder_, base, receiver_struct, member_name, args);
+                            if (md && md->return_type && md->return_type->is_struct()) {
+                                last_struct_name_ = md->return_type->struct_name;
+                            } else if (md && md->return_type && md->return_type->is_pointer() && md->return_type->element_type && md->return_type->element_type->is_struct()) {
+                                last_struct_name_ = md->return_type->element_type->struct_name;
+                            } else {
+                                last_struct_name_.clear();
+                            }
                             return base;
                         }
                     } else {
                         // Field access e.g. this.name, hero.hp
-                        if (oop_mgr_ && !last_struct_name_.empty()) {
-                            base = oop_mgr_->emit_load_field(builder_, base, last_struct_name_, member_name);
-                            return base;
+                        if (oop_mgr_ && !receiver_struct.empty()) {
+                            std::string prev_struct = receiver_struct;
+                            const auto* cd = oop_mgr_->get_class(prev_struct);
+                            std::string next_struct = "";
+                            if (cd) {
+                                auto fit = cd->field_indices.find(member_name);
+                                if (fit != cd->field_indices.end()) {
+                                    const auto& fld = cd->fields[fit->second];
+                                    if (fld.type) {
+                                        if (fld.type->is_struct()) {
+                                            next_struct = fld.type->struct_name;
+                                        } else if (fld.type->is_pointer() && fld.type->element_type && fld.type->element_type->is_struct()) {
+                                            next_struct = fld.type->element_type->struct_name;
+                                        }
+                                    }
+                                }
+                            }
+                            base = oop_mgr_->emit_load_field(builder_, base, prev_struct, member_name);
+                            last_struct_name_ = next_struct;
                         }
                     }
+                    continue;
+                }
+                // Pointer member access ptr->field / ptr->method(args)
+                if (match(TOK_ARROW)) {
+                    if (peek().kind != TOK_IDENT) {
+                        error = "Expected identifier after '->'!";
+                        return 0;
+                    }
+                    std::string member_name = advance().text;
+                    std::string receiver_struct = last_struct_name_;
+                    if (match(TOK_LPAREN)) {
+                        std::vector<ir::ValueId> args;
+                        if (peek().kind != TOK_RPAREN) {
+                            while (true) {
+                                ir::ValueId arg = parse_expression(error);
+                                if (!arg) return 0;
+                                args.push_back(arg);
+                                if (!match(TOK_COMMA)) break;
+                            }
+                        }
+                        consume(TOK_RPAREN, "Expected ')' closing method call!", error);
+                        if (oop_mgr_ && !receiver_struct.empty()) {
+                            const auto* cd = oop_mgr_->get_class(receiver_struct);
+                            const auto* md = cd ? cd->find_method(member_name) : nullptr;
+                            base = oop_mgr_->emit_call_method(builder_, base, receiver_struct, member_name, args);
+                            if (md && md->return_type && md->return_type->is_struct()) {
+                                last_struct_name_ = md->return_type->struct_name;
+                            } else if (md && md->return_type && md->return_type->is_pointer() && md->return_type->element_type && md->return_type->element_type->is_struct()) {
+                                last_struct_name_ = md->return_type->element_type->struct_name;
+                            } else {
+                                last_struct_name_.clear();
+                            }
+                            return base;
+                        }
+                    } else {
+                        if (oop_mgr_ && !receiver_struct.empty()) {
+                            std::string prev_struct = receiver_struct;
+                            const auto* cd = oop_mgr_->get_class(prev_struct);
+                            std::string next_struct = "";
+                            if (cd) {
+                                auto fit = cd->field_indices.find(member_name);
+                                if (fit != cd->field_indices.end()) {
+                                    const auto& fld = cd->fields[fit->second];
+                                    if (fld.type) {
+                                        if (fld.type->is_struct()) {
+                                            next_struct = fld.type->struct_name;
+                                        } else if (fld.type->is_pointer() && fld.type->element_type && fld.type->element_type->is_struct()) {
+                                            next_struct = fld.type->element_type->struct_name;
+                                        }
+                                    }
+                                }
+                            }
+                            base = oop_mgr_->emit_load_field(builder_, base, prev_struct, member_name);
+                            last_struct_name_ = next_struct;
+                        }
+                    }
+                    continue;
+                }
+                // Cast: expr as Type* or expr as Type
+                if (match(TOK_AS)) {
+                    if (peek().kind != TOK_IDENT) {
+                        error = "Expected type name after 'as'!";
+                        return 0;
+                    }
+                    std::string tname = advance().text;
+                    while (match(TOK_COLON_COLON)) {
+                        if (peek().kind == TOK_IDENT) tname += "::" + advance().text;
+                    }
+                    ir::IRType* tgt_t = parse_type_name(tname);
+                    while (match(TOK_STAR)) {
+                        tgt_t = ctx_.get_ptr_type(tgt_t);
+                    }
+                    base = coerce_type(base, tgt_t);
                     continue;
                 }
                 // Array subscript: base[idx]
@@ -1478,16 +2124,35 @@ int64_t grass_array_len(void* ptr) {
                 return inner;
             }
 
-            // Array literal: []
+            // Array literal: [] or [elem1, elem2, ...]
             if (match(TOK_LBRACKET)) {
-                consume(TOK_RBRACKET, "Expected ']' closing empty array!", error);
-                return builder_.create_call("grass_array_create", ctx_.get_ptr_type(), {});
+                ir::ValueId arr = builder_.create_call("grass_array_create", ctx_.get_ptr_type(), {});
+                if (!match(TOK_RBRACKET)) {
+                    do {
+                        ir::ValueId elem = parse_expression(error);
+                        if (!elem) return 0;
+                        builder_.create_call("grass_array_push", ctx_.get_void_type(), { arr, elem });
+                    } while (match(TOK_COMMA));
+                    if (!consume(TOK_RBRACKET, "Expected ']' closing array literal!", error)) return 0;
+                }
+                return arr;
             }
 
             // Number literal
             if (peek().kind == TOK_NUMBER) {
-                double val = advance().num_val;
-                if (std::floor(val) == val && std::fabs(val) < 1e15) {
+                last_struct_name_.clear();
+                const auto& tok = advance();
+                bool is_float = (tok.text.find('.') != std::string::npos ||
+                                 tok.text.find('e') != std::string::npos ||
+                                 tok.text.find('E') != std::string::npos);
+                if (!is_float) {
+                    try {
+                        int64_t ival = std::stoll(tok.text);
+                        return builder_.create_const_i64(ival);
+                    } catch (...) {}
+                }
+                double val = tok.num_val;
+                if (!is_float && std::floor(val) == val) {
                     return builder_.create_const_i64(static_cast<int64_t>(val));
                 }
                 return builder_.create_const_f64(val);
@@ -1495,6 +2160,7 @@ int64_t grass_array_len(void* ptr) {
 
             // String literal
             if (peek().kind == TOK_STRING) {
+                last_struct_name_.clear();
                 std::string s = advance().text;
                 std::string sym = add_rodata_string(s);
                 return builder_.create_call(sym, ctx_.get_ptr_type(ctx_.get_i8_type()), {});
@@ -1502,20 +2168,67 @@ int64_t grass_array_len(void* ptr) {
 
             // Boolean literals: true / false
             if (peek().kind == TOK_IDENT && peek().text == "true") {
+                last_struct_name_.clear();
                 advance();
                 return builder_.create_const_i1(true);
             }
             if (peek().kind == TOK_IDENT && peek().text == "false") {
+                last_struct_name_.clear();
                 advance();
                 return builder_.create_const_i1(false);
+            }
+
+            // Nullptr literal
+            if (peek().kind == TOK_NULLPTR || (peek().kind == TOK_IDENT && (peek().text == "nullptr" || peek().text == "null"))) {
+                last_struct_name_.clear();
+                advance();
+                return builder_.create_const_int(ctx_.get_ptr_type(ctx_.get_void_type()), 0);
+            }
+
+            // Sizeof operator
+            if (match(TOK_SIZEOF)) {
+                last_struct_name_.clear();
+                if (!match(TOK_LPAREN)) {
+                    error = "Expected '(' after sizeof";
+                    return 0;
+                }
+                bool is_type = is_type_or_func_keyword(peek().text) || (oop_mgr_ && oop_mgr_->has_class(peek().text));
+                if (is_type) {
+                    std::string tname = advance().text;
+                    while (match(TOK_COLON_COLON)) {
+                        if (peek().kind == TOK_IDENT) tname += "::" + advance().text;
+                    }
+                    ir::IRType* t = parse_type_name(tname);
+                    while (match(TOK_STAR)) {
+                        t = ctx_.get_ptr_type(t);
+                    }
+                    consume(TOK_RPAREN, "Expected ')' after sizeof(Type)", error);
+                    uint64_t sz = t ? t->size() : 8;
+                    if (sz == 0 && t && t->is_void()) sz = 1;
+                    return builder_.create_const_i64(static_cast<int64_t>(sz));
+                } else {
+                    ir::ValueId expr_val = parse_expression(error);
+                    consume(TOK_RPAREN, "Expected ')' after sizeof(expr)", error);
+                    uint64_t sz = 8;
+                    if (expr_val && builder_.get_function()->has_value(expr_val)) {
+                        ir::IRType* et = builder_.get_function()->get_value(expr_val).type;
+                        if (et) sz = et->size();
+                    }
+                    return builder_.create_const_i64(static_cast<int64_t>(sz));
+                }
             }
 
             // Identifier or Function Call
             if (peek().kind == TOK_IDENT) {
                 std::string ident = advance().text;
+                while (match(TOK_COLON_COLON)) {
+                    if (peek().kind == TOK_IDENT) {
+                        ident += "::" + advance().text;
+                    }
+                }
 
-                // Member access ahead? (e.g. hero.name or this.hp)
-                if (peek().kind == TOK_DOT) {
+                // Member access ahead? (e.g. hero.name or ptr->name)
+                if (peek().kind == TOK_DOT || peek().kind == TOK_ARROW) {
                     const VarBinding* var = lookup_var(ident);
                     if (!var) {
                         error = "Undeclared identifier: " + ident;
@@ -1542,7 +2255,29 @@ int64_t grass_array_len(void* ptr) {
                     }
                     consume(TOK_RPAREN, "Expected ')' closing function arguments!", error);
 
+                    std::string target_call_name = resolve_callee(ident);
                     ir::IRType* call_ret_type = ctx_.get_i64_type();
+                    if (ident == "len" || ident == "size") {
+                        ident = "grass_array_len";
+                        target_call_name = ident;
+                    } else if (ident == "alloc") {
+                        ident = "grass_alloc";
+                        target_call_name = ident;
+                        call_ret_type = ctx_.get_ptr_type();
+                    } else if (ident == "free") {
+                        ident = "grass_free";
+                        target_call_name = ident;
+                        call_ret_type = ctx_.get_void_type();
+                    } else if (ident == "realloc") {
+                        ident = "grass_realloc";
+                        target_call_name = ident;
+                        call_ret_type = ctx_.get_ptr_type();
+                    }
+
+                    if (oop_mgr_ && oop_mgr_->has_class(ident)) {
+                        last_struct_name_ = ident;
+                        return oop_mgr_->emit_new_object(builder_, ident, args);
+                    }
                     const native::NativeFunctionDesc* std_fn = native::GrassNativeStdlib::instance().find_function(ident);
                     if (std_fn && std_fn->return_type) {
                         call_ret_type = std_fn->return_type;
@@ -1559,8 +2294,12 @@ int64_t grass_array_len(void* ptr) {
                         call_ret_type = ctx_.get_i64_type();
                     }
 
-                    ir::IRFunction* target_fn = module_.get_function(ident);
+                    ir::IRFunction* target_fn = module_.get_function(target_call_name);
+                    if (!target_fn && target_call_name != ident) {
+                        target_fn = module_.get_function(ident);
+                    }
                     if (target_fn) {
+                        call_ret_type = target_fn->return_type;
                         for (size_t i = 0; i < args.size() && i < target_fn->arguments.size(); ++i) {
                             args[i] = coerce_type(args[i], target_fn->arguments[i].type);
                         }
@@ -1570,7 +2309,8 @@ int64_t grass_array_len(void* ptr) {
                         }
                     }
 
-                    return builder_.create_call(ident, call_ret_type, args);
+                    last_struct_name_.clear();
+                    return builder_.create_call(target_fn ? target_fn->name : target_call_name, call_ret_type, args);
                 }
 
                 // Variable access
@@ -1579,6 +2319,14 @@ int64_t grass_array_len(void* ptr) {
                     error = "Undeclared identifier: " + ident;
                     return 0;
                 }
+                if (!var->struct_type_name.empty()) {
+                    last_struct_name_ = var->struct_type_name;
+                    if (var->type && var->type->is_pointer()) {
+                        return builder_.create_load(var->alloca_id, ident + "_ptr");
+                    }
+                    return var->alloca_id;
+                }
+                last_struct_name_.clear();
                 if (match(TOK_INC)) {
                     ir::ValueId cur = builder_.create_load(var->alloca_id, ident);
                     ir::ValueId one = builder_.create_const_int(var->type, 1);
@@ -1682,9 +2430,7 @@ int64_t grass_array_len(void* ptr) {
                                          const std::string& source_path) {
         auto profile = options_.freestanding ? grass::native::RuntimeProfile::Freestanding : grass::native::RuntimeProfile::FullOS;
         auto& stdlib = grass::native::GrassNativeStdlib::instance();
-        if (!stdlib.is_initialized()) {
-            stdlib.initialize(module.context);
-        }
+        stdlib.initialize(module.context);
         ir::IRType* i64_t = module.context.get_i64_type();
         ir::IRType* ptr_t = module.context.get_ptr_type(module.context.get_i8_type());
         if (!stdlib.has_function("pow_mod")) {
@@ -1713,7 +2459,12 @@ int64_t grass_array_len(void* ptr) {
             mem2reg.run_on_function(*fn);
         }
 
-        // Step 2: Optimization pipeline
+        // Step 2: Advanced optimizations (Inlining, LICM, Loop Unrolling, Strength Reduction)
+        if (opt_level >= 2) {
+            grass::opt::GrassAdvancedOpt::optimize(module, opt_level);
+        }
+
+        // Step 3: Optimization pipeline
         if (opt_level > 0) {
             ir::PassManager pm;
             pm.add_standard_optimizations();
@@ -1754,6 +2505,7 @@ int64_t grass_array_len(void* ptr) {
         ir::LinearScanAllocator allocator(options_.abi);
 
         backend::GrassX86Encoder encoder(options_.arch);
+        grass::debug::GrassDebugTableBuilder debug_builder;
 
         for (auto& fn : module.functions) {
             if (fn->is_declaration || fn->blocks.empty()) {
@@ -1799,11 +2551,46 @@ int64_t grass_array_len(void* ptr) {
                 }
             }
 
+            std::vector<backend::Reg> used_callee_xmm;
+            if (options_.abi == TargetABI::Win64 && options_.arch == TargetArch::X86_64) {
+                for (ir::PhysReg pr : alloc_res.used_callee_saved) {
+                    backend::Reg r = phys_reg_to_backend(pr, options_.arch);
+                    if (r != backend::Reg::None && backend::reg_is_xmm(r)) {
+                        used_callee_xmm.push_back(r);
+                    }
+                }
+            }
+
+            int32_t xmm_save_base = alloca_stack_cursor + 16;
+            std::unordered_map<backend::Reg, int32_t> xmm_save_offsets;
+            for (backend::Reg xr : used_callee_xmm) {
+                xmm_save_base = (xmm_save_base + 15) & ~15;
+                xmm_save_offsets[xr] = xmm_save_base;
+                xmm_save_base += 16;
+            }
+
+            size_t max_call_args = 0;
+            for (const auto& bb : fn->blocks) {
+                for (const auto& inst : bb->instructions) {
+                    if (inst->op == ir::IROp::Call) {
+                        max_call_args = std::max(max_call_args, inst->operands.size());
+                    }
+                }
+            }
+
+            int32_t phi_scratch_base = xmm_save_base + 16;
+
             // Compute stack frame
             backend::StackFrameRequest req;
-            req.local_vars_size = alloca_stack_cursor + 256;
+            req.local_vars_size = phi_scratch_base + 512;
             req.has_calls = true;
-            req.max_outgoing_args_size = (options_.abi == TargetABI::Win64) ? 32 : 0;
+            if (options_.abi == TargetABI::Win64) {
+                uint32_t out_args = (max_call_args > 4) ? static_cast<uint32_t>(32 + (max_call_args - 4) * 8) : 32;
+                req.max_outgoing_args_size = (out_args + 15) & ~15;
+            } else {
+                uint32_t out_args = (max_call_args > 6) ? static_cast<uint32_t>((max_call_args - 6) * 8) : 0;
+                req.max_outgoing_args_size = (out_args + 15) & ~15;
+            }
             req.use_frame_pointer = true;
             for (ir::PhysReg pr : alloc_res.used_callee_saved) {
                 backend::Reg r = phys_reg_to_backend(pr, options_.arch);
@@ -1827,6 +2614,13 @@ int64_t grass_array_len(void* ptr) {
                 encoder.mov_rr(backend::Reg::RBP, backend::Reg::RSP);
                 for (backend::Reg r : frame_info.callee_saved_regs) encoder.push_r(r);
                 if (frame_info.total_frame_size > 0) encoder.sub_ri(backend::Reg::RSP, frame_info.total_frame_size);
+                for (backend::Reg xr : used_callee_xmm) {
+                    int32_t off = xmm_save_offsets[xr];
+                    encoder.movsd_mx(backend::mem(backend::Reg::RBP, -off, 8), xr);
+                }
+                if (fn->name == "main" && !options_.freestanding) {
+                    encoder.call_extern("grass_install_runtime_crash_handler");
+                }
             } else {
                 encoder.push_r(backend::Reg::EBP);
                 encoder.mov_rr(backend::Reg::EBP, backend::Reg::ESP);
@@ -1895,13 +2689,80 @@ int64_t grass_array_len(void* ptr) {
                 }
             };
 
+            auto load_binary_fp = [&](ir::ValueId v0, ir::ValueId v1, backend::Reg& out_lhs, backend::Reg& out_rhs) {
+                backend::Reg r0 = get_loc_reg(v0);
+                backend::Reg r1 = get_loc_reg(v1);
+
+                if (r0 != backend::Reg::None && r1 != backend::Reg::None) {
+                    out_lhs = r0;
+                    out_rhs = r1;
+                    return;
+                }
+                if (r0 != backend::Reg::None && r1 == backend::Reg::None) {
+                    out_lhs = r0;
+                    backend::Reg tmp = (r0 == backend::Reg::XMM1) ? backend::Reg::XMM2 : backend::Reg::XMM1;
+                    int32_t off = get_spill_offset(v1);
+                    encoder.movsd_xm(tmp, backend::mem(backend::Reg::RBP, -off, 8));
+                    out_rhs = tmp;
+                    return;
+                }
+                if (r0 == backend::Reg::None && r1 != backend::Reg::None) {
+                    out_rhs = r1;
+                    backend::Reg tmp = (r1 == backend::Reg::XMM0) ? backend::Reg::XMM2 : backend::Reg::XMM0;
+                    int32_t off = get_spill_offset(v0);
+                    encoder.movsd_xm(tmp, backend::mem(backend::Reg::RBP, -off, 8));
+                    out_lhs = tmp;
+                    return;
+                }
+                int32_t off0 = get_spill_offset(v0);
+                int32_t off1 = get_spill_offset(v1);
+                encoder.movsd_xm(backend::Reg::XMM0, backend::mem(backend::Reg::RBP, -off0, 8));
+                encoder.movsd_xm(backend::Reg::XMM1, backend::mem(backend::Reg::RBP, -off1, 8));
+                out_lhs = backend::Reg::XMM0;
+                out_rhs = backend::Reg::XMM1;
+            };
+
+            auto load_binary_gpr = [&](ir::ValueId v0, ir::ValueId v1, backend::Reg& out_lhs, backend::Reg& out_rhs) {
+                backend::Reg r0 = get_loc_reg(v0);
+                backend::Reg r1 = get_loc_reg(v1);
+
+                if (r0 != backend::Reg::None && r1 != backend::Reg::None) {
+                    out_lhs = r0;
+                    out_rhs = r1;
+                    return;
+                }
+                if (r0 != backend::Reg::None && r1 == backend::Reg::None) {
+                    out_lhs = r0;
+                    backend::Reg tmp = (r0 == backend::Reg::R10) ? backend::Reg::R11 : backend::Reg::R10;
+                    int32_t off = get_spill_offset(v1);
+                    encoder.mov_rm(tmp, backend::mem(backend::Reg::RBP, -off, 8));
+                    out_rhs = tmp;
+                    return;
+                }
+                if (r0 == backend::Reg::None && r1 != backend::Reg::None) {
+                    out_rhs = r1;
+                    backend::Reg tmp = (r1 == backend::Reg::R11) ? backend::Reg::R10 : backend::Reg::R11;
+                    int32_t off = get_spill_offset(v0);
+                    encoder.mov_rm(tmp, backend::mem(backend::Reg::RBP, -off, 8));
+                    out_lhs = tmp;
+                    return;
+                }
+                int32_t off0 = get_spill_offset(v0);
+                int32_t off1 = get_spill_offset(v1);
+                encoder.mov_rm(backend::Reg::R11, backend::mem(backend::Reg::RBP, -off0, 8));
+                encoder.mov_rm(backend::Reg::R10, backend::mem(backend::Reg::RBP, -off1, 8));
+                out_lhs = backend::Reg::R11;
+                out_rhs = backend::Reg::R10;
+            };
+
             // Incoming function arguments placement
             const auto& arg_regs = abi_spec.get_integer_arg_regs();
             for (size_t i = 0; i < fn->arguments.size(); ++i) {
                 if (i < arg_regs.size()) {
                     store_val(fn->arguments[i].id, arg_regs[i]);
                 } else {
-                    int32_t stack_off = 16 + (i - arg_regs.size()) * 8;
+                    int32_t shadow_disp = (options_.abi == TargetABI::Win64) ? 32 : 0;
+                    int32_t stack_off = 16 + shadow_disp + static_cast<int32_t>(i - arg_regs.size()) * 8;
                     backend::Reg tmp = backend::Reg::R10;
                     encoder.mov_rm(tmp, backend::mem(backend::Reg::RBP, stack_off, 8));
                     store_val(fn->arguments[i].id, tmp);
@@ -1928,7 +2789,7 @@ int64_t grass_array_len(void* ptr) {
                 if (moves.empty()) return;
 
                 // Pass 1: save all source values into stack scratch slots
-                int32_t scratch_base = frame_info.total_frame_size + 64;
+                int32_t scratch_base = phi_scratch_base;
                 for (size_t i = 0; i < moves.size(); ++i) {
                     int32_t off = scratch_base + static_cast<int32_t>(i * 8);
                     if (moves[i].is_fp) {
@@ -1958,6 +2819,7 @@ int64_t grass_array_len(void* ptr) {
                 encoder.bind_label(bb_labels[bb.get()]);
 
                 for (const auto& inst : bb->instructions) {
+                    size_t inst_code_start = encoder.code_size();
                     try {
                     switch (inst->op) {
                         case ir::IROp::ConstInt: {
@@ -1994,81 +2856,150 @@ int64_t grass_array_len(void* ptr) {
                             break;
                         }
                         case ir::IROp::Add: {
+                            backend::Reg lhs, rhs;
+                            load_binary_gpr(inst->operands[0], inst->operands[1], lhs, rhs);
                             backend::Reg dst = get_loc_reg(inst->result_id);
                             backend::Reg out = (dst != backend::Reg::None && backend::reg_is_gpr(dst)) ? dst : backend::Reg::R11;
-                            backend::Reg lhs = load_val(inst->operands[0], out);
-                            backend::Reg rhs = load_val(inst->operands[1], backend::Reg::R10);
-                            if (lhs != out) encoder.mov_rr(out, lhs);
-                            encoder.add_rr(out, rhs);
-                            store_val(inst->result_id, out);
+                            if (out == rhs) {
+                                encoder.mov_rr(backend::Reg::R9, lhs);
+                                encoder.add_rr(backend::Reg::R9, rhs);
+                                store_val(inst->result_id, backend::Reg::R9);
+                            } else {
+                                if (lhs != out) encoder.mov_rr(out, lhs);
+                                encoder.add_rr(out, rhs);
+                                store_val(inst->result_id, out);
+                            }
                             break;
                         }
                         case ir::IROp::Sub: {
+                            backend::Reg lhs, rhs;
+                            load_binary_gpr(inst->operands[0], inst->operands[1], lhs, rhs);
                             backend::Reg dst = get_loc_reg(inst->result_id);
                             backend::Reg out = (dst != backend::Reg::None && backend::reg_is_gpr(dst)) ? dst : backend::Reg::R11;
-                            backend::Reg lhs = load_val(inst->operands[0], out);
-                            backend::Reg rhs = load_val(inst->operands[1], backend::Reg::R10);
-                            if (lhs != out) encoder.mov_rr(out, lhs);
-                            encoder.sub_rr(out, rhs);
-                            store_val(inst->result_id, out);
+                            if (out == rhs) {
+                                encoder.mov_rr(backend::Reg::R9, lhs);
+                                encoder.sub_rr(backend::Reg::R9, rhs);
+                                store_val(inst->result_id, backend::Reg::R9);
+                            } else {
+                                if (lhs != out) encoder.mov_rr(out, lhs);
+                                encoder.sub_rr(out, rhs);
+                                store_val(inst->result_id, out);
+                            }
                             break;
                         }
                         case ir::IROp::Mul: {
+                            backend::Reg lhs, rhs;
+                            load_binary_gpr(inst->operands[0], inst->operands[1], lhs, rhs);
                             backend::Reg dst = get_loc_reg(inst->result_id);
                             backend::Reg out = (dst != backend::Reg::None && backend::reg_is_gpr(dst)) ? dst : backend::Reg::R11;
-                            backend::Reg lhs = load_val(inst->operands[0], out);
-                            backend::Reg rhs = load_val(inst->operands[1], backend::Reg::R10);
-                            if (lhs != out) encoder.mov_rr(out, lhs);
-                            encoder.imul_rr(out, rhs);
-                            store_val(inst->result_id, out);
+                            if (out == rhs) {
+                                encoder.mov_rr(backend::Reg::R9, lhs);
+                                encoder.imul_rr(backend::Reg::R9, rhs);
+                                store_val(inst->result_id, backend::Reg::R9);
+                            } else {
+                                if (lhs != out) encoder.mov_rr(out, lhs);
+                                encoder.imul_rr(out, rhs);
+                                store_val(inst->result_id, out);
+                            }
                             break;
                         }
                         case ir::IROp::SDiv: {
                             backend::Reg lhs = load_val(inst->operands[0], backend::Reg::RAX);
                             backend::Reg rhs = load_val(inst->operands[1], backend::Reg::R10);
+                            backend::LabelId non_zero_lbl = encoder.create_label();
+                            backend::LabelId done_lbl = encoder.create_label();
+                            encoder.test_rr(rhs, rhs);
+                            encoder.jcc_label(backend::CondCode::NE, non_zero_lbl);
+                            encoder.xor_rr(backend::Reg::RAX, backend::Reg::RAX);
+                            encoder.jmp_label(done_lbl);
+                            encoder.bind_label(non_zero_lbl);
                             if (lhs != backend::Reg::RAX) encoder.mov_rr(backend::Reg::RAX, lhs);
+                            backend::LabelId do_div_lbl = encoder.create_label();
+                            encoder.cmp_ri(rhs, -1);
+                            encoder.jcc_label(backend::CondCode::NE, do_div_lbl);
+                            encoder.mov_ri64(backend::Reg::R11, static_cast<int64_t>(0x8000000000000000ULL));
+                            encoder.cmp_rr(backend::Reg::RAX, backend::Reg::R11);
+                            encoder.jcc_label(backend::CondCode::NE, do_div_lbl);
+                            encoder.jmp_label(done_lbl);
+                            encoder.bind_label(do_div_lbl);
                             encoder.cqo();
                             encoder.idiv_r(rhs);
+                            encoder.bind_label(done_lbl);
                             store_val(inst->result_id, backend::Reg::RAX);
                             break;
                         }
                         case ir::IROp::SRem: {
                             backend::Reg lhs = load_val(inst->operands[0], backend::Reg::RAX);
                             backend::Reg rhs = load_val(inst->operands[1], backend::Reg::R10);
+                            backend::LabelId non_zero_lbl = encoder.create_label();
+                            backend::LabelId done_lbl = encoder.create_label();
+                            encoder.test_rr(rhs, rhs);
+                            encoder.jcc_label(backend::CondCode::NE, non_zero_lbl);
+                            encoder.xor_rr(backend::Reg::RDX, backend::Reg::RDX);
+                            encoder.jmp_label(done_lbl);
+                            encoder.bind_label(non_zero_lbl);
                             if (lhs != backend::Reg::RAX) encoder.mov_rr(backend::Reg::RAX, lhs);
+                            backend::LabelId do_rem_lbl = encoder.create_label();
+                            encoder.cmp_ri(rhs, -1);
+                            encoder.jcc_label(backend::CondCode::NE, do_rem_lbl);
+                            encoder.mov_ri64(backend::Reg::R11, static_cast<int64_t>(0x8000000000000000ULL));
+                            encoder.cmp_rr(backend::Reg::RAX, backend::Reg::R11);
+                            encoder.jcc_label(backend::CondCode::NE, do_rem_lbl);
+                            encoder.xor_rr(backend::Reg::RDX, backend::Reg::RDX);
+                            encoder.jmp_label(done_lbl);
+                            encoder.bind_label(do_rem_lbl);
                             encoder.cqo();
                             encoder.idiv_r(rhs);
+                            encoder.bind_label(done_lbl);
                             store_val(inst->result_id, backend::Reg::RDX);
                             break;
                         }
                         case ir::IROp::And: {
+                            backend::Reg lhs, rhs;
+                            load_binary_gpr(inst->operands[0], inst->operands[1], lhs, rhs);
                             backend::Reg dst = get_loc_reg(inst->result_id);
                             backend::Reg out = (dst != backend::Reg::None && backend::reg_is_gpr(dst)) ? dst : backend::Reg::R11;
-                            backend::Reg lhs = load_val(inst->operands[0], out);
-                            backend::Reg rhs = load_val(inst->operands[1], backend::Reg::R10);
-                            if (lhs != out) encoder.mov_rr(out, lhs);
-                            encoder.and_rr(out, rhs);
-                            store_val(inst->result_id, out);
+                            if (out == rhs) {
+                                encoder.mov_rr(backend::Reg::R9, lhs);
+                                encoder.and_rr(backend::Reg::R9, rhs);
+                                store_val(inst->result_id, backend::Reg::R9);
+                            } else {
+                                if (lhs != out) encoder.mov_rr(out, lhs);
+                                encoder.and_rr(out, rhs);
+                                store_val(inst->result_id, out);
+                            }
                             break;
                         }
                         case ir::IROp::Or: {
+                            backend::Reg lhs, rhs;
+                            load_binary_gpr(inst->operands[0], inst->operands[1], lhs, rhs);
                             backend::Reg dst = get_loc_reg(inst->result_id);
                             backend::Reg out = (dst != backend::Reg::None && backend::reg_is_gpr(dst)) ? dst : backend::Reg::R11;
-                            backend::Reg lhs = load_val(inst->operands[0], out);
-                            backend::Reg rhs = load_val(inst->operands[1], backend::Reg::R10);
-                            if (lhs != out) encoder.mov_rr(out, lhs);
-                            encoder.or_rr(out, rhs);
-                            store_val(inst->result_id, out);
+                            if (out == rhs) {
+                                encoder.mov_rr(backend::Reg::R9, lhs);
+                                encoder.or_rr(backend::Reg::R9, rhs);
+                                store_val(inst->result_id, backend::Reg::R9);
+                            } else {
+                                if (lhs != out) encoder.mov_rr(out, lhs);
+                                encoder.or_rr(out, rhs);
+                                store_val(inst->result_id, out);
+                            }
                             break;
                         }
                         case ir::IROp::Xor: {
+                            backend::Reg lhs, rhs;
+                            load_binary_gpr(inst->operands[0], inst->operands[1], lhs, rhs);
                             backend::Reg dst = get_loc_reg(inst->result_id);
                             backend::Reg out = (dst != backend::Reg::None && backend::reg_is_gpr(dst)) ? dst : backend::Reg::R11;
-                            backend::Reg lhs = load_val(inst->operands[0], out);
-                            backend::Reg rhs = load_val(inst->operands[1], backend::Reg::R10);
-                            if (lhs != out) encoder.mov_rr(out, lhs);
-                            encoder.xor_rr(out, rhs);
-                            store_val(inst->result_id, out);
+                            if (out == rhs) {
+                                encoder.mov_rr(backend::Reg::R9, lhs);
+                                encoder.xor_rr(backend::Reg::R9, rhs);
+                                store_val(inst->result_id, backend::Reg::R9);
+                            } else {
+                                if (lhs != out) encoder.mov_rr(out, lhs);
+                                encoder.xor_rr(out, rhs);
+                                store_val(inst->result_id, out);
+                            }
                             break;
                         }
                         case ir::IROp::Neg: {
@@ -2108,14 +3039,14 @@ int64_t grass_array_len(void* ptr) {
                             break;
                         }
                         case ir::IROp::ICmp: {
+                            backend::Reg lhs, rhs;
+                            load_binary_gpr(inst->operands[0], inst->operands[1], lhs, rhs);
                             backend::Reg dst = get_loc_reg(inst->result_id);
                             backend::Reg out = (dst != backend::Reg::None && backend::reg_is_gpr(dst)) ? dst : backend::Reg::R11;
-                            backend::Reg lhs = load_val(inst->operands[0], out);
-                            backend::Reg rhs = load_val(inst->operands[1], backend::Reg::R10);
                             encoder.cmp_rr(lhs, rhs);
                             backend::CondCode cc = icmp_to_cond_code(inst->icmp_cond);
-                            encoder.setcc_r(cc, backend::Reg::AL);
-                            encoder.movzx_rr8(out, backend::Reg::AL);
+                            encoder.setcc_r(cc, backend::Reg::R11B);
+                            encoder.movzx_rr8(out, backend::Reg::R11B);
                             store_val(inst->result_id, out);
                             break;
                         }
@@ -2128,17 +3059,51 @@ int64_t grass_array_len(void* ptr) {
                             break;
                         }
                         case ir::IROp::Load: {
-                            backend::Reg dst = get_loc_reg(inst->result_id);
-                            backend::Reg out = (dst != backend::Reg::None && backend::reg_is_gpr(dst)) ? dst : backend::Reg::R11;
+                            ir::IRType* rt = fn->get_value(inst->result_id).type;
                             backend::Reg ptr = load_val(inst->operands[0], backend::Reg::R10);
-                            encoder.mov_rm(out, backend::mem(ptr, 0, 8));
-                            store_val(inst->result_id, out);
+                            if (rt && rt->is_floating_point()) {
+                                backend::Reg dst = get_loc_reg(inst->result_id);
+                                backend::Reg out = (dst != backend::Reg::None && backend::reg_is_xmm(dst)) ? dst : backend::Reg::XMM0;
+                                encoder.movsd_xm(out, backend::mem(ptr, 0, 8));
+                                store_val(inst->result_id, out);
+                            } else {
+                                backend::Reg dst = get_loc_reg(inst->result_id);
+                                backend::Reg out = (dst != backend::Reg::None && backend::reg_is_gpr(dst)) ? dst : backend::Reg::R11;
+                                uint8_t ld_size = 8;
+                                if (rt) {
+                                    ld_size = static_cast<uint8_t>(rt->size());
+                                    if (ld_size == 0) ld_size = 8;
+                                }
+                                if (ld_size == 1) {
+                                    encoder.movzx_rm8(out, backend::mem(ptr, 0, 1));
+                                } else if (ld_size == 2) {
+                                    encoder.movzx_rm16(out, backend::mem(ptr, 0, 2));
+                                } else if (ld_size == 4) {
+                                    encoder.mov_rm(backend::reg_with_size(out, 4), backend::mem(ptr, 0, 4));
+                                } else {
+                                    encoder.mov_rm(out, backend::mem(ptr, 0, 8));
+                                }
+                                store_val(inst->result_id, out);
+                            }
                             break;
                         }
                         case ir::IROp::Store: {
                             backend::Reg ptr = load_val(inst->operands[1], backend::Reg::R10);
-                            backend::Reg val = load_val(inst->operands[0], backend::Reg::R11);
-                            encoder.mov_mr(backend::mem(ptr, 0, 8), val);
+                            ir::IRType* val_t = fn->get_value(inst->operands[0]).type;
+                            if (val_t && val_t->is_floating_point()) {
+                                backend::Reg val = load_val(inst->operands[0], backend::Reg::XMM0);
+                                encoder.movsd_mx(backend::mem(ptr, 0, 8), val);
+                            } else {
+                                backend::Reg val = load_val(inst->operands[0], backend::Reg::R11);
+                                uint8_t st_size = 8;
+                                ir::IRType* ptr_t = fn->get_value(inst->operands[1]).type;
+                                if (ptr_t && ptr_t->element_type) {
+                                    st_size = static_cast<uint8_t>(ptr_t->element_type->size());
+                                    if (st_size == 0) st_size = 8;
+                                }
+                                backend::Reg val_sized = backend::reg_with_size(val, st_size);
+                                encoder.mov_mr(backend::mem(ptr, 0, st_size), val_sized);
+                            }
                             break;
                         }
                         case ir::IROp::GetElementPtr: {
@@ -2148,18 +3113,133 @@ int64_t grass_array_len(void* ptr) {
                             encoder.mov_rr(out, base);
                             if (inst->gep_field_index >= 0) {
                                 int64_t byte_off = static_cast<int64_t>(inst->gep_field_index) * 8;
+                                ir::IRType* base_t = fn->get_value(inst->operands[0]).type;
+                                if (base_t && base_t->element_type && base_t->element_type->is_struct()) {
+                                    byte_off = static_cast<int64_t>(base_t->element_type->get_field_offset(static_cast<uint32_t>(inst->gep_field_index)));
+                                }
                                 if (byte_off != 0) {
                                     encoder.add_ri(out, static_cast<int32_t>(byte_off));
                                 }
                             } else if (inst->operands.size() > 1) {
+                                int64_t elem_sz = 8;
+                                ir::IRType* base_t = fn->get_value(inst->operands[0]).type;
+                                if (base_t && base_t->element_type) {
+                                    elem_sz = static_cast<int64_t>(base_t->element_type->size());
+                                    if (elem_sz <= 0) elem_sz = 1;
+                                }
                                 backend::Reg idx = load_val(inst->operands[1], backend::Reg::R10);
-                                encoder.imul_rri(backend::Reg::R10, idx, 8);
-                                encoder.add_rr(out, backend::Reg::R10);
+                                if (elem_sz != 1) {
+                                    encoder.imul_rri(backend::Reg::R10, idx, static_cast<int32_t>(elem_sz));
+                                    encoder.add_rr(out, backend::Reg::R10);
+                                } else {
+                                    encoder.add_rr(out, idx);
+                                }
                             }
                             store_val(inst->result_id, out);
                             break;
                         }
                         case ir::IROp::Call: {
+                            // Check for bare-metal intrinsics first
+                            if (inst->callee_name == "port_in8" || inst->callee_name == "io_in8" || inst->callee_name == "inb") {
+                                backend::Reg p = load_val(inst->operands[0], backend::Reg::RDX);
+                                if (p != backend::Reg::RDX) encoder.mov_rr(backend::Reg::RDX, p);
+                                encoder.in_al_dx();
+                                encoder.movzx_rr8(backend::Reg::RAX, backend::Reg::AL);
+                                if (inst->result_id != ir::kInvalidValueId) {
+                                    store_val(inst->result_id, backend::Reg::RAX);
+                                }
+                                break;
+                            }
+                            if (inst->callee_name == "port_out8" || inst->callee_name == "io_out8" || inst->callee_name == "outb") {
+                                backend::Reg p = load_val(inst->operands[0], backend::Reg::RDX);
+                                backend::Reg v = load_val(inst->operands[1], backend::Reg::RAX);
+                                if (v == backend::Reg::RDX && p != backend::Reg::RDX) {
+                                    encoder.xchg_rr(backend::Reg::RDX, p);
+                                    encoder.mov_rr(backend::Reg::RAX, p);
+                                } else {
+                                    if (p != backend::Reg::RDX) encoder.mov_rr(backend::Reg::RDX, p);
+                                    if (v != backend::Reg::RAX) encoder.mov_rr(backend::Reg::RAX, v);
+                                }
+                                encoder.out_dx_al();
+                                break;
+                            }
+                            if (inst->callee_name == "cpu_cli" || inst->callee_name == "cli") {
+                                encoder.cli();
+                                break;
+                            }
+                            if (inst->callee_name == "cpu_sti" || inst->callee_name == "sti") {
+                                encoder.sti();
+                                break;
+                            }
+                            if (inst->callee_name == "cpu_hlt" || inst->callee_name == "hlt") {
+                                encoder.hlt();
+                                break;
+                            }
+                            if (inst->callee_name == "memory_barrier" || inst->callee_name == "read_barrier" || inst->callee_name == "write_barrier") {
+                                encoder.mfence();
+                                break;
+                            }
+                            if (inst->callee_name == "mmio_read8") {
+                                backend::Reg addr = load_val(inst->operands[0], backend::Reg::R10);
+                                encoder.movzx_rm8(backend::Reg::RAX, backend::mem(addr, 0, 1));
+                                if (inst->result_id != ir::kInvalidValueId) {
+                                    store_val(inst->result_id, backend::Reg::RAX);
+                                }
+                                break;
+                            }
+                            if (inst->callee_name == "mmio_read16") {
+                                backend::Reg addr = load_val(inst->operands[0], backend::Reg::R10);
+                                encoder.movzx_rm16(backend::Reg::RAX, backend::mem(addr, 0, 2));
+                                if (inst->result_id != ir::kInvalidValueId) {
+                                    store_val(inst->result_id, backend::Reg::RAX);
+                                }
+                                break;
+                            }
+                            if (inst->callee_name == "mmio_read32") {
+                                backend::Reg addr = load_val(inst->operands[0], backend::Reg::R10);
+                                encoder.mov_rm(backend::Reg::EAX, backend::mem(addr, 0, 4));
+                                if (inst->result_id != ir::kInvalidValueId) {
+                                    store_val(inst->result_id, backend::Reg::RAX);
+                                }
+                                break;
+                            }
+                            if (inst->callee_name == "mmio_read64") {
+                                backend::Reg addr = load_val(inst->operands[0], backend::Reg::R10);
+                                encoder.mov_rm(backend::Reg::RAX, backend::mem(addr, 0, 8));
+                                if (inst->result_id != ir::kInvalidValueId) {
+                                    store_val(inst->result_id, backend::Reg::RAX);
+                                }
+                                break;
+                            }
+                            if (inst->callee_name == "mmio_write8") {
+                                backend::Reg addr = load_val(inst->operands[0], backend::Reg::R10);
+                                backend::Reg val = load_val(inst->operands[1], backend::Reg::R11);
+                                backend::Reg val8 = backend::reg_with_size(val, 1);
+                                encoder.mov_mr(backend::mem(addr, 0, 1), val8);
+                                break;
+                            }
+                            if (inst->callee_name == "mmio_write16") {
+                                backend::Reg addr = load_val(inst->operands[0], backend::Reg::R10);
+                                backend::Reg val = load_val(inst->operands[1], backend::Reg::R11);
+                                backend::Reg val16 = backend::reg_with_size(val, 2);
+                                encoder.mov_mr(backend::mem(addr, 0, 2), val16);
+                                break;
+                            }
+                            if (inst->callee_name == "mmio_write32") {
+                                backend::Reg addr = load_val(inst->operands[0], backend::Reg::R10);
+                                backend::Reg val = load_val(inst->operands[1], backend::Reg::R11);
+                                backend::Reg val32 = backend::reg_with_size(val, 4);
+                                encoder.mov_mr(backend::mem(addr, 0, 4), val32);
+                                break;
+                            }
+                            if (inst->callee_name == "mmio_write64") {
+                                backend::Reg addr = load_val(inst->operands[0], backend::Reg::R10);
+                                backend::Reg val = load_val(inst->operands[1], backend::Reg::R11);
+                                backend::Reg val64 = backend::reg_with_size(val, 8);
+                                encoder.mov_mr(backend::mem(addr, 0, 8), val64);
+                                break;
+                            }
+
                             // Check if callee is a string symbol in rodata
                             if (rodata_symbols.count(inst->callee_name)) {
                                 encoder.lea_symbol(backend::Reg::RAX, inst->callee_name);
@@ -2261,35 +3341,97 @@ int64_t grass_array_len(void* ptr) {
                             break;
                         }
                         case ir::IROp::FAdd: {
-                            backend::Reg lhs = load_val(inst->operands[0], backend::Reg::XMM0);
-                            backend::Reg rhs = load_val(inst->operands[1], backend::Reg::XMM1);
-                            if (lhs != backend::Reg::XMM0) encoder.movsd_xx(backend::Reg::XMM0, lhs);
-                            encoder.addsd_xx(backend::Reg::XMM0, rhs);
-                            store_val(inst->result_id, backend::Reg::XMM0);
+                            backend::Reg lhs, rhs;
+                            load_binary_fp(inst->operands[0], inst->operands[1], lhs, rhs);
+                            backend::Reg dst = get_loc_reg(inst->result_id);
+                            backend::Reg out = (dst != backend::Reg::None && backend::reg_is_xmm(dst)) ? dst : backend::Reg::XMM0;
+                            if (out == rhs) {
+                                encoder.movsd_xx(backend::Reg::XMM2, lhs);
+                                encoder.addsd_xx(backend::Reg::XMM2, rhs);
+                                store_val(inst->result_id, backend::Reg::XMM2);
+                            } else {
+                                if (out != lhs) encoder.movsd_xx(out, lhs);
+                                encoder.addsd_xx(out, rhs);
+                                store_val(inst->result_id, out);
+                            }
                             break;
                         }
                         case ir::IROp::FSub: {
-                            backend::Reg lhs = load_val(inst->operands[0], backend::Reg::XMM0);
-                            backend::Reg rhs = load_val(inst->operands[1], backend::Reg::XMM1);
-                            if (lhs != backend::Reg::XMM0) encoder.movsd_xx(backend::Reg::XMM0, lhs);
-                            encoder.subsd_xx(backend::Reg::XMM0, rhs);
-                            store_val(inst->result_id, backend::Reg::XMM0);
+                            backend::Reg lhs, rhs;
+                            load_binary_fp(inst->operands[0], inst->operands[1], lhs, rhs);
+                            backend::Reg dst = get_loc_reg(inst->result_id);
+                            backend::Reg out = (dst != backend::Reg::None && backend::reg_is_xmm(dst)) ? dst : backend::Reg::XMM0;
+                            if (out == rhs) {
+                                encoder.movsd_xx(backend::Reg::XMM2, lhs);
+                                encoder.subsd_xx(backend::Reg::XMM2, rhs);
+                                store_val(inst->result_id, backend::Reg::XMM2);
+                            } else {
+                                if (out != lhs) encoder.movsd_xx(out, lhs);
+                                encoder.subsd_xx(out, rhs);
+                                store_val(inst->result_id, out);
+                            }
                             break;
                         }
                         case ir::IROp::FMul: {
-                            backend::Reg lhs = load_val(inst->operands[0], backend::Reg::XMM0);
-                            backend::Reg rhs = load_val(inst->operands[1], backend::Reg::XMM1);
-                            if (lhs != backend::Reg::XMM0) encoder.movsd_xx(backend::Reg::XMM0, lhs);
-                            encoder.mulsd_xx(backend::Reg::XMM0, rhs);
-                            store_val(inst->result_id, backend::Reg::XMM0);
+                            backend::Reg lhs, rhs;
+                            load_binary_fp(inst->operands[0], inst->operands[1], lhs, rhs);
+                            backend::Reg dst = get_loc_reg(inst->result_id);
+                            backend::Reg out = (dst != backend::Reg::None && backend::reg_is_xmm(dst)) ? dst : backend::Reg::XMM0;
+                            if (out == rhs) {
+                                encoder.movsd_xx(backend::Reg::XMM2, lhs);
+                                encoder.mulsd_xx(backend::Reg::XMM2, rhs);
+                                store_val(inst->result_id, backend::Reg::XMM2);
+                            } else {
+                                if (out != lhs) encoder.movsd_xx(out, lhs);
+                                encoder.mulsd_xx(out, rhs);
+                                store_val(inst->result_id, out);
+                            }
                             break;
                         }
                         case ir::IROp::FDiv: {
-                            backend::Reg lhs = load_val(inst->operands[0], backend::Reg::XMM0);
-                            backend::Reg rhs = load_val(inst->operands[1], backend::Reg::XMM1);
-                            if (lhs != backend::Reg::XMM0) encoder.movsd_xx(backend::Reg::XMM0, lhs);
-                            encoder.divsd_xx(backend::Reg::XMM0, rhs);
-                            store_val(inst->result_id, backend::Reg::XMM0);
+                            backend::Reg lhs, rhs;
+                            load_binary_fp(inst->operands[0], inst->operands[1], lhs, rhs);
+                            backend::Reg dst = get_loc_reg(inst->result_id);
+                            backend::Reg out = (dst != backend::Reg::None && backend::reg_is_xmm(dst)) ? dst : backend::Reg::XMM0;
+                            if (out == rhs) {
+                                encoder.movsd_xx(backend::Reg::XMM2, lhs);
+                                encoder.divsd_xx(backend::Reg::XMM2, rhs);
+                                store_val(inst->result_id, backend::Reg::XMM2);
+                            } else {
+                                if (out != lhs) encoder.movsd_xx(out, lhs);
+                                encoder.divsd_xx(out, rhs);
+                                store_val(inst->result_id, out);
+                            }
+                            break;
+                        }
+                        case ir::IROp::FCmp: {
+                            backend::Reg lhs, rhs;
+                            load_binary_fp(inst->operands[0], inst->operands[1], lhs, rhs);
+                            encoder.ucomisd_xx(lhs, rhs);
+                            backend::CondCode cc = backend::CondCode::E;
+                            switch (inst->fcmp_cond) {
+                                case ir::FCmpCond::OEQ: cc = backend::CondCode::E; break;
+                                case ir::FCmpCond::ONE: cc = backend::CondCode::NE; break;
+                                case ir::FCmpCond::OLT: cc = backend::CondCode::B; break;
+                                case ir::FCmpCond::OLE: cc = backend::CondCode::BE; break;
+                                case ir::FCmpCond::OGT: cc = backend::CondCode::A; break;
+                                case ir::FCmpCond::OGE: cc = backend::CondCode::AE; break;
+                            }
+                            backend::Reg dst = get_loc_reg(inst->result_id);
+                            backend::Reg out = (dst != backend::Reg::None && backend::reg_is_gpr(dst)) ? dst : backend::Reg::R11;
+                            encoder.setcc_r(cc, backend::Reg::R11B);
+                            encoder.movzx_rr8(out, backend::Reg::R11B);
+                            store_val(inst->result_id, out);
+                            break;
+                        }
+                        case ir::IROp::FNeg: {
+                            backend::Reg src = load_val(inst->operands[0], backend::Reg::XMM1);
+                            backend::Reg dst = get_loc_reg(inst->result_id);
+                            backend::Reg out = (dst != backend::Reg::None && backend::reg_is_xmm(dst)) ? dst : backend::Reg::XMM0;
+                            encoder.xorpd_xx(backend::Reg::XMM2, backend::Reg::XMM2);
+                            encoder.subsd_xx(backend::Reg::XMM2, src);
+                            if (out != backend::Reg::XMM2) encoder.movsd_xx(out, backend::Reg::XMM2);
+                            store_val(inst->result_id, out);
                             break;
                         }
                         case ir::IROp::SIToFP: {
@@ -2306,7 +3448,10 @@ int64_t grass_array_len(void* ptr) {
                         }
                         case ir::IROp::Trunc:
                         case ir::IROp::SExt:
-                        case ir::IROp::ZExt: {
+                        case ir::IROp::ZExt:
+                        case ir::IROp::PtrToInt:
+                        case ir::IROp::IntToPtr:
+                        case ir::IROp::Bitcast: {
                             backend::Reg src = load_val(inst->operands[0], backend::Reg::RAX);
                             store_val(inst->result_id, src);
                             break;
@@ -2318,6 +3463,15 @@ int64_t grass_array_len(void* ptr) {
                         default:
                             break;
                     }
+                    size_t inst_code_end = encoder.code_size();
+                    if (inst_code_end > inst_code_start && inst->loc.line > 0) {
+                        debug_builder.add_entry(static_cast<uint32_t>(inst_code_start),
+                                                static_cast<uint32_t>(inst_code_end),
+                                                inst->loc.file,
+                                                fn->name,
+                                                inst->loc.line,
+                                                inst->loc.column);
+                    }
                     } catch (const std::exception& ex) {
                         error = std::string("In block '") + bb->name + "' inst op=" + std::to_string(static_cast<int>(inst->op)) +
                                 ": " + ex.what();
@@ -2328,6 +3482,10 @@ int64_t grass_array_len(void* ptr) {
 
             // Function epilogue
             encoder.bind_label(epilogue_label);
+            for (backend::Reg xr : used_callee_xmm) {
+                int32_t off = xmm_save_offsets[xr];
+                encoder.movsd_xm(xr, backend::mem(backend::Reg::RBP, -off, 8));
+            }
             if (frame_info.total_frame_size > 0) {
                 encoder.add_ri((options_.arch == TargetArch::X86_64) ? backend::Reg::RSP : backend::Reg::ESP,
                                frame_info.total_frame_size);
@@ -2344,12 +3502,32 @@ int64_t grass_array_len(void* ptr) {
 
         unit.text = encoder.code();
         unit.relocations = encoder.relocations();
+
+        // Attach Grass debug table into .rodata
+        debug_builder.set_text_bounds(0x1000, encoder.code_size());
+        std::vector<uint8_t> debug_bytes = debug_builder.serialize();
+        if (!debug_bytes.empty()) {
+            uint64_t debug_table_offset = unit.rodata.size();
+            while (debug_table_offset % 16 != 0) {
+                unit.rodata.push_back(0);
+                debug_table_offset++;
+            }
+            unit.rodata.insert(unit.rodata.end(), debug_bytes.begin(), debug_bytes.end());
+
+            backend::SymbolDef debug_sym;
+            debug_sym.name = "__grass_debug_table";
+            debug_sym.section = backend::SectionKind::RoData;
+            debug_sym.offset = debug_table_offset;
+            debug_sym.size = debug_bytes.size();
+            debug_sym.is_global = true;
+            debug_sym.is_external = false;
+            unit.symbols.push_back(debug_sym);
+        }
         return true;
     }
 
     bool NativeCompiler::ensure_runtime_c_file(std::string& runtime_path, std::string& error) {
         runtime_path = "bin/grass_native_runtime.c";
-        if (fs::exists(runtime_path)) return true;
 
         if (!fs::exists("bin")) {
             std::error_code ec;
@@ -2361,7 +3539,21 @@ int64_t grass_array_len(void* ptr) {
             error = "Failed to create runtime file: " + runtime_path;
             return false;
         }
-        out << kEmbeddedRuntimeC;
+        out << kEmbeddedRuntimeC << "\n";
+        out << grass::debug::generate_runtime_crash_handler_c() << "\n";
+        out << R"(
+#if defined(_WIN32)
+static void __cdecl grass_auto_init_veh(void) {
+    grass_install_runtime_crash_handler();
+}
+#pragma section(".CRT$XCU", read)
+__declspec(allocate(".CRT$XCU")) static void (__cdecl *p_grass_auto_init_veh)(void) = grass_auto_init_veh;
+#elif defined(__GNUC__) || defined(__clang__)
+__attribute__((constructor)) static void grass_auto_init_sig(void) {
+    grass_install_runtime_crash_handler();
+}
+#endif
+)";
         out.close();
         return true;
     }
@@ -2402,28 +3594,64 @@ int64_t grass_array_len(void* ptr) {
 
     bool NativeCompiler::link_executable(const std::string& obj_path,
                                          const std::string& exe_path,
+                                         const CompiledUnit& unit,
                                          std::string& error) {
         if (options_.freestanding) {
             return true;
         }
 
-        std::string runtime_c;
-        if (!ensure_runtime_c_file(runtime_c, error)) return false;
+        // If user explicitly requested gcc linker via --use-gcc
+        if (options_.use_gcc) {
+            std::string runtime_c;
+            if (!ensure_runtime_c_file(runtime_c, error)) return false;
 
-        std::ostringstream cmd;
-        cmd << "gcc -O2 \"" << obj_path << "\" \"" << runtime_c << "\" -o \"" << exe_path << "\"";
-        if (options_.abi == TargetABI::Win64 || options_.abi == TargetABI::Cdecl32) {
-            cmd << " -lkernel32 -lws2_32 -luser32 -lm";
-        } else {
-            cmd << " -lm";
+            std::ostringstream cmd;
+            cmd << "gcc -O2 \"" << obj_path << "\" \"" << runtime_c << "\" -o \"" << exe_path << "\"";
+            if (options_.abi == TargetABI::Win64 || options_.abi == TargetABI::Cdecl32) {
+                cmd << " -lkernel32 -lws2_32 -luser32 -lm";
+            } else {
+                cmd << " -lm";
+            }
+
+            int code = std::system(cmd.str().c_str());
+            if (code != 0) {
+                error = "System linker invocation failed with code " + std::to_string(code) + ": " + cmd.str();
+                return false;
+            }
+            return true;
         }
 
-        int code = std::system(cmd.str().c_str());
-        if (code != 0) {
-            error = "System linker invocation failed with code " + std::to_string(code) + ": " + cmd.str();
+        // Linux ELF64 binary emission (--target=linux or sysv64 ABI)
+        if (options_.target == "linux" || options_.abi == TargetABI::SysV64) {
+            backend::ElfWriterConfig elf_cfg;
+            elf_cfg.auto_inject_syscalls = true;
+            elf_cfg.entry_symbol = "main";
+            if (!backend::GrassElfWriter::write_elf_exe_file(unit, exe_path, elf_cfg, nullptr, &error)) {
+                return false;
+            }
+            return true;
+        }
+
+        // Windows PE32+ executable (default for --native without gcc)
+        std::string entry_point = "main";
+        for (const auto& s : unit.symbols) {
+            if (s.name == "_start" && !s.is_external) {
+                entry_point = "_start";
+                break;
+            }
+        }
+
+        if (!backend::GrassObjWriter::write_pe_executable_file(unit, exe_path, &error, entry_point)) {
             return false;
         }
         return true;
+    }
+
+    bool NativeCompiler::link_executable(const std::string& obj_path,
+                                         const std::string& exe_path,
+                                         std::string& error) {
+        CompiledUnit empty_unit;
+        return link_executable(obj_path, exe_path, empty_unit, error);
     }
 
     NativeCodegenResult NativeCompiler::compile(const std::vector<GrassToken>& tokens, const std::string& source_path) {
@@ -2476,12 +3704,19 @@ int64_t grass_array_len(void* ptr) {
 
         // Stage 5: Linking Executable (if output_exe_path is set or default native target)
         if (!options_.output_exe_path.empty() && !options_.freestanding) {
-            if (!link_executable(res.obj_file_created, options_.output_exe_path, error)) {
+            if (!link_executable(res.obj_file_created, options_.output_exe_path, res.compiled_unit, error)) {
                 res.success = false;
                 res.error_message = "Link Error: " + error;
                 return res;
             }
             res.exe_file_created = options_.output_exe_path;
+
+            // Clean up temporary .obj if explicit --emit-obj was not specified
+            if (options_.emit_obj_path.empty() && !res.obj_file_created.empty()) {
+                std::error_code ec;
+                std::filesystem::remove(res.obj_file_created, ec);
+                res.obj_file_created.clear();
+            }
         }
 
         res.success = true;

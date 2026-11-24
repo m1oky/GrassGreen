@@ -45,6 +45,11 @@ struct SemaType {
         t.element_type = std::make_shared<SemaType>(base);
         return t;
     }
+    static SemaType Nullptr() {
+        SemaType t(SemaTypeKind::Pointer, "nullptr", 1);
+        t.element_type = std::make_shared<SemaType>(SemaType::Void());
+        return t;
+    }
     static SemaType CustomStruct(const std::string& sname) {
         return SemaType(SemaTypeKind::Struct, sname);
     }
@@ -68,14 +73,28 @@ struct SemaType {
         return true;
     }
 
-    bool is_assignable_to(const SemaType& target) const {
+    bool is_assignable_to(const SemaType& target, bool strict = false) const {
+        if (strict) {
+            if (target.is_pointer() && !is_pointer()) {
+                if (kind == SemaTypeKind::Pointer && (name == "void" || name == "nullptr")) return true;
+                return false;
+            }
+            if (!target.is_pointer() && is_pointer()) return false;
+            if (target.is_pointer() && is_pointer()) {
+                if (target.name == "void" || name == "void" || name == "nullptr" || equals(target)) return true;
+                return false;
+            }
+            if (target.kind == SemaTypeKind::Float && kind == SemaTypeKind::Int) return true;
+            if (kind == target.kind && pointer_depth == target.pointer_depth) return true;
+            return equals(target);
+        }
         if (kind == target.kind && pointer_depth == target.pointer_depth) {
             if (kind == SemaTypeKind::Int || kind == SemaTypeKind::Float || kind == SemaTypeKind::Bool || kind == SemaTypeKind::Void || kind == SemaTypeKind::String) return true;
         }
         if (target.is_any() || is_any()) return true;
         if (target.is_unknown() || is_unknown()) return true;
         if (target.is_pointer() && is_pointer()) {
-            if (target.name == "void" || name == "void" || equals(target)) return true;
+            if (target.name == "void" || name == "void" || name == "nullptr" || equals(target)) return true;
             return false;
         }
         if (!target.is_pointer() && is_pointer()) return false;
@@ -202,6 +221,11 @@ private:
     const StructSymbol* current_struct_ = nullptr;
     std::vector<SemaDiagnostic> diagnostics_;
 
+    bool strict_mode_ = false;
+    std::vector<std::string> namespace_stack_;
+    std::vector<std::string> using_namespaces_;
+    std::unordered_map<std::string, std::string> using_symbols_;
+
     void enterScope(Scope::Kind kind);
     void exitScope();
     void reportError(const SourceLocation& loc, const std::string& msg, const std::string& hint = "");
@@ -209,6 +233,9 @@ private:
 
     void registerBuiltins();
     SemaType resolveType(const std::string& type_name, int ptr_depth = 0, const SourceLocation& loc = {});
+
+    std::string currentNamespace() const;
+    std::string qualifyName(const std::string& name) const;
 
     // Analysis passes
     void pass1_registerDeclarations(const ProgramAST& program);
@@ -219,6 +246,8 @@ private:
     void checkStructDecl(const StructDeclAST* st);
     void checkClassDecl(const ClassDeclAST* cls);
     void checkModuleDecl(const ModuleDeclAST* mod);
+    void checkNamespaceDecl(const NamespaceDeclAST* ns);
+    void checkUsingDecl(const UsingDeclAST* u);
 
     void checkStmt(const StmtAST* stmt);
     void checkBlockStmt(const BlockStmtAST* block);
@@ -242,11 +271,17 @@ private:
     SemaType checkArrayLiteralExpr(const ArrayLiteralExprAST* arr);
     SemaType checkAllocExpr(const AllocExprAST* alloc);
     SemaType checkFreeExpr(const FreeExprAST* free_expr);
+    SemaType checkCastExpr(const CastExprAST* cast);
+    SemaType checkSizeofExpr(const SizeofExprAST* sz);
 
     bool returnsOnAllPaths(const StmtAST* stmt);
 
 public:
     GrassSema();
+    void set_strict(bool s) { strict_mode_ = s; }
+    bool is_strict() const { return strict_mode_; }
+    static std::string mangleName(const std::string& name);
+
     bool analyze(const ProgramAST& program);
     const std::vector<SemaDiagnostic>& getDiagnostics() const { return diagnostics_; }
     bool hasErrors() const;

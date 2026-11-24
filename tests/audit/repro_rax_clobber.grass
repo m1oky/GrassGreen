@@ -1,0 +1,22 @@
+!GrassGreen!
+// Repro: RAX register clobbering in comparisons
+// encoder.setcc_r(cc, Reg::AL) clobbers RAX, which was assigned to loop counter
+// Causes nested while loop with break to loop infinitely in native mode
+
+int main() {
+    take i = 0;
+    take count = 0;
+    while (i < 5) {
+        take j = 0;
+        while (j < 5) {
+            j = j + 1;
+            if (j == 3) {
+                break;
+            }
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    gout << "count = " << count << endl;
+    return 0;
+}

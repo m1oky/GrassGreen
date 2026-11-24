@@ -1,0 +1,150 @@
+!GrassGreen!
+
+// =============================================================================
+// GrassGreen Multifile Application: Math Utilities (math_utils.grass)
+// High-precision floating point math, 4x4 Matrix transformations,
+// Trigonometric Taylor series, and deep recursion testing XMM register spilling.
+// =============================================================================
+
+struct Mat4 {
+    float m00; float m01; float m02; float m03;
+    float m10; float m11; float m12; float m13;
+    float m20; float m21; float m22; float m23;
+    float m30; float m31; float m32; float m33;
+}
+
+struct Vec3 {
+    float x;
+    float y;
+    float z;
+}
+
+// Float absolute value
+take math_abs(float v) {
+    if (v < 0.0) {
+        return 0.0 - v;
+    }
+    return v;
+}
+
+// Fast square root via Newton-Raphson approximation
+take math_sqrt(float v) {
+    if (v <= 0.0) {
+        return 0.0;
+    }
+    float guess = v;
+    for (take iter = 0; iter < 12; iter++) {
+        guess = (guess + v / guess) * 0.5;
+    }
+    return guess;
+}
+
+// Convert degrees to radians
+take math_deg_to_rad(float deg) {
+    return deg * 0.017453292519943295;
+}
+
+// High-precision Taylor expansion for sine
+take math_sin(float x) {
+    // Normalize x to -PI .. PI range
+    while (x > 3.14159265) {
+        x = x - 6.28318530;
+    }
+    while (x < -3.14159265) {
+        x = x + 6.28318530;
+    }
+    float x2 = x * x;
+    float x3 = x * x2;
+    float x5 = x3 * x2;
+    float x7 = x5 * x2;
+    float x9 = x7 * x2;
+    return x - (x3 / 6.0) + (x5 / 120.0) - (x7 / 5040.0) + (x9 / 362880.0);
+}
+
+// High-precision Taylor expansion for cosine
+take math_cos(float x) {
+    while (x > 3.14159265) {
+        x = x - 6.28318530;
+    }
+    while (x < -3.14159265) {
+        x = x + 6.28318530;
+    }
+    float x2 = x * x;
+    float x4 = x2 * x2;
+    float x6 = x4 * x2;
+    float x8 = x6 * x2;
+    return 1.0 - (x2 / 2.0) + (x4 / 24.0) - (x6 / 720.0) + (x8 / 40320.0);
+}
+
+// Initialize 4x4 matrix to identity
+take mat4_set_identity(Mat4 m) {
+    m.m00 = 1.0; m.m01 = 0.0; m.m02 = 0.0; m.m03 = 0.0;
+    m.m10 = 0.0; m.m11 = 1.0; m.m12 = 0.0; m.m13 = 0.0;
+    m.m20 = 0.0; m.m21 = 0.0; m.m22 = 1.0; m.m23 = 0.0;
+    m.m30 = 0.0; m.m31 = 0.0; m.m32 = 0.0; m.m33 = 1.0;
+    return 1;
+}
+
+// 4x4 Matrix multiplication: out = a * b (64 floating point mul/add ops)
+take mat4_multiply(Mat4 a, Mat4 b, Mat4 out) {
+    out.m00 = a.m00 * b.m00 + a.m01 * b.m10 + a.m02 * b.m20 + a.m03 * b.m30;
+    out.m01 = a.m00 * b.m01 + a.m01 * b.m11 + a.m02 * b.m21 + a.m03 * b.m31;
+    out.m02 = a.m00 * b.m02 + a.m01 * b.m12 + a.m02 * b.m22 + a.m03 * b.m32;
+    out.m03 = a.m00 * b.m03 + a.m01 * b.m13 + a.m02 * b.m23 + a.m03 * b.m33;
+
+    out.m10 = a.m10 * b.m00 + a.m11 * b.m10 + a.m12 * b.m20 + a.m13 * b.m30;
+    out.m11 = a.m10 * b.m01 + a.m11 * b.m11 + a.m12 * b.m21 + a.m13 * b.m31;
+    out.m12 = a.m10 * b.m02 + a.m11 * b.m12 + a.m12 * b.m22 + a.m13 * b.m32;
+    out.m13 = a.m10 * b.m03 + a.m11 * b.m13 + a.m12 * b.m23 + a.m13 * b.m33;
+
+    out.m20 = a.m20 * b.m00 + a.m21 * b.m10 + a.m22 * b.m20 + a.m23 * b.m30;
+    out.m21 = a.m20 * b.m01 + a.m21 * b.m11 + a.m22 * b.m21 + a.m23 * b.m31;
+    out.m22 = a.m20 * b.m02 + a.m21 * b.m12 + a.m22 * b.m22 + a.m23 * b.m32;
+    out.m23 = a.m20 * b.m03 + a.m21 * b.m13 + a.m22 * b.m23 + a.m23 * b.m33;
+
+    out.m30 = a.m30 * b.m00 + a.m31 * b.m10 + a.m32 * b.m20 + a.m33 * b.m30;
+    out.m31 = a.m30 * b.m01 + a.m31 * b.m11 + a.m32 * b.m21 + a.m33 * b.m31;
+    out.m32 = a.m30 * b.m02 + a.m31 * b.m12 + a.m32 * b.m22 + a.m33 * b.m32;
+    out.m33 = a.m30 * b.m03 + a.m31 * b.m13 + a.m32 * b.m23 + a.m33 * b.m33;
+    return 1;
+}
+
+// Transform 3D position vector by 4x4 matrix
+take mat4_transform_vec3(Mat4 m, Vec3 in_pos, Vec3 out_pos) {
+    float x = in_pos.x;
+    float y = in_pos.y;
+    float z = in_pos.z;
+    out_pos.x = m.m00 * x + m.m01 * y + m.m02 * z + m.m03;
+    out_pos.y = m.m10 * x + m.m11 * y + m.m12 * z + m.m13;
+    out_pos.z = m.m20 * x + m.m21 * y + m.m22 * z + m.m23;
+    return 1;
+}
+
+// Heavy float calculation to maximize XMM register pressure (8 parallel float variables)
+take xmm_heavy_pipeline(float a, float b, float c, float d, float e, float f, float g, float h) {
+    float r1 = a * b + c * d;
+    float r2 = e * f - g * h;
+    float r3 = math_sin(a) * math_cos(b);
+    float r4 = math_sin(c) * math_cos(d);
+    float r5 = math_sqrt(math_abs(r1)) + math_sqrt(math_abs(r2));
+    float r6 = (r3 + 1.5) * (r4 + 2.5);
+    float r7 = (r1 + r2) / (math_abs(r3 - r4) + 0.001);
+    float r8 = (e + f) * (g - h) + r5;
+    return (r1 + r2 + r3 + r4 + r5 + r6 + r7 + r8) * 0.125;
+}
+
+// Deep recursive evaluation testing XMM register preservation and stack spilling
+take recursive_xmm_spill(float seed, int depth) {
+    if (depth <= 0) {
+        return seed;
+    }
+    float s1 = math_sin(seed);
+    float c1 = math_cos(seed);
+    float mid = (s1 * 1.5 + c1 * 0.5) * 0.95;
+
+    // Recursive call forces caller-saved and callee-saved XMM preservation on stack frame
+    float sub_result = recursive_xmm_spill(mid, depth - 1);
+
+    // Re-use pre-call values s1 and c1 after returning from recursion
+    return sub_result + (s1 * 0.05) - (c1 * 0.02);
+}

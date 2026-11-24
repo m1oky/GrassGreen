@@ -1,0 +1,10 @@
+!GrassGreen!
+class Entity {
+    int id;
+}
+int main() {
+    Entity e;
+    e.id = 1;
+    gout << e.id << endl;
+    return 0;
+}

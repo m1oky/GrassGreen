@@ -1,0 +1,10 @@
+!GrassGreen!
+int main() {
+    take a = 1.5;
+    take b = 2.5;
+    take lt = a < b;
+    take gt = a > b;
+    take eq = a == 1.5;
+    gout << lt << " " << gt << " " << eq << endl;
+    return 0;
+}

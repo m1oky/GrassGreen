@@ -1,0 +1,12 @@
+!GrassGreen!
+// Repro: Floating-point arithmetic lowering emits integer GPR instructions
+// ASTLowerer::parse_additive emits create_add instead of create_fadd
+// Codegen crashes with: "Expected general purpose register"
+
+int main() {
+    take a = 1.5;
+    take b = 2.5;
+    take c = a + b;
+    gout << "c = " << c << endl;
+    return 0;
+}

@@ -1,0 +1,11 @@
+!GrassGreen!
+// Repro: array.push() is rejected by GrassSema
+// GrassSema.cpp:945-947: "Member access 'push' on non-struct type '[]'"
+// Fails compilation unless --no-sema is passed
+
+int main() {
+    take arr = [];
+    arr.push(10);
+    gout << "len = " << len(arr) << endl;
+    return 0;
+}

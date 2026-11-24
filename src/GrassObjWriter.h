@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <sstream>
 #include <iomanip>
 #include <fstream>
@@ -95,6 +96,93 @@ namespace grass::backend {
         uint8_t  number_of_aux_symbols;
     };
     static_assert(sizeof(COFF_SymbolRecord) == 18, "COFF_SymbolRecord must be 18 bytes");
+
+    // =========================================================================
+    // PE32+ (Windows x64 Executable) Binary Structures
+    // =========================================================================
+
+    constexpr uint16_t PE_DOS_MAGIC                     = 0x5A4D;     // "MZ"
+    constexpr uint32_t PE_SIGNATURE                     = 0x00004550; // "PE\0\0"
+    constexpr uint16_t PE_OPTIONAL_HDR64_MAGIC          = 0x020B;     // PE32+
+    constexpr uint16_t PE_SUBSYSTEM_WINDOWS_GUI         = 2;
+    constexpr uint16_t PE_SUBSYSTEM_WINDOWS_CUI         = 3;          // Console
+    constexpr uint64_t PE_DEFAULT_IMAGE_BASE            = 0x140000000ULL;
+    constexpr uint32_t PE_DEFAULT_SECTION_ALIGNMENT     = 0x1000;
+    constexpr uint32_t PE_DEFAULT_FILE_ALIGNMENT        = 0x200;
+
+    struct PE_DosHeader {
+        uint16_t e_magic;    // 0x5A4D ("MZ")
+        uint16_t e_cblp;
+        uint16_t e_cp;
+        uint16_t e_crlc;
+        uint16_t e_cparhdr;
+        uint16_t e_minalloc;
+        uint16_t e_maxalloc;
+        uint16_t e_ss;
+        uint16_t e_sp;
+        uint16_t e_csum;
+        uint16_t e_ip;
+        uint16_t e_cs;
+        uint16_t e_lfarlc;
+        uint16_t e_ovno;
+        uint16_t e_res[4];
+        uint16_t e_oemid;
+        uint16_t e_oeminfo;
+        uint16_t e_res2[10];
+        uint32_t e_lfanew;   // Offset to PE signature
+    };
+    static_assert(sizeof(PE_DosHeader) == 64, "PE_DosHeader must be 64 bytes");
+
+    struct PE_DataDirectory {
+        uint32_t virtual_address;
+        uint32_t size;
+    };
+    static_assert(sizeof(PE_DataDirectory) == 8, "PE_DataDirectory must be 8 bytes");
+
+    struct PE32Plus_OptionalHeader {
+        uint16_t magic;
+        uint8_t  major_linker_version;
+        uint8_t  minor_linker_version;
+        uint32_t size_of_code;
+        uint32_t size_of_initialized_data;
+        uint32_t size_of_uninitialized_data;
+        uint32_t address_of_entry_point;
+        uint32_t base_of_code;
+
+        uint64_t image_base;
+        uint32_t section_alignment;
+        uint32_t file_alignment;
+        uint16_t major_operating_system_version;
+        uint16_t minor_operating_system_version;
+        uint16_t major_image_version;
+        uint16_t minor_image_version;
+        uint16_t major_subsystem_version;
+        uint16_t minor_subsystem_version;
+        uint32_t win32_version_value;
+        uint32_t size_of_image;
+        uint32_t size_of_headers;
+        uint32_t check_sum;
+        uint16_t subsystem;
+        uint16_t dll_characteristics;
+        uint64_t size_of_stack_reserve;
+        uint64_t size_of_stack_commit;
+        uint64_t size_of_heap_reserve;
+        uint64_t size_of_heap_commit;
+        uint32_t loader_flags;
+        uint32_t number_of_rva_and_sizes;
+
+        PE_DataDirectory data_directories[16];
+    };
+    static_assert(sizeof(PE32Plus_OptionalHeader) == 240, "PE32Plus_OptionalHeader must be 240 bytes");
+
+    struct PE_ImportDirectoryEntry {
+        uint32_t original_first_thunk; // ILT RVA
+        uint32_t time_date_stamp;
+        uint32_t forwarder_chain;
+        uint32_t name_rva;             // DLL name RVA
+        uint32_t first_thunk;          // IAT RVA
+    };
+    static_assert(sizeof(PE_ImportDirectoryEntry) == 20, "PE_ImportDirectoryEntry must be 20 bytes");
 
     // =========================================================================
     // ELF Constants and Binary Structures (System V ELF Specification)
@@ -489,11 +577,34 @@ namespace grass::backend {
         static bool write_flat_binary_file(const CompiledUnit& unit, uint64_t base_address, const std::string& filename, const std::string& map_filename = "", std::string* out_error = nullptr);
         static std::string generate_link_map(const LinkMap& map);
 
+        static bool write_pe_executable(const CompiledUnit& unit,
+                                        BinaryBuffer& out,
+                                        std::string* out_error = nullptr,
+                                        const std::string& entry_point_name = "main");
+        static bool write_pe_executable(const CompiledUnit& unit,
+                                        const std::vector<WinLibraryImport>& custom_imports,
+                                        BinaryBuffer& out,
+                                        std::string* out_error = nullptr,
+                                        const std::string& entry_point_name = "main");
+        static bool write_pe_executable_file(const CompiledUnit& unit,
+                                             const std::string& filename,
+                                             std::string* out_error = nullptr,
+                                             const std::string& entry_point_name = "main");
+        static bool write_pe_executable_file(const CompiledUnit& unit,
+                                             const std::vector<WinLibraryImport>& custom_imports,
+                                             const std::string& filename,
+                                             std::string* out_error = nullptr,
+                                             const std::string& entry_point_name = "main");
+
+        static bool inject_missing_win64_runtime(CompiledUnit& unit);
+
         static bool generate_import_table(const std::vector<WinLibraryImport>& imports,
                                           uint32_t idata_rva,
                                           BinaryBuffer& out_idata,
                                           std::unordered_map<std::string, uint32_t>& out_iat_offsets,
-                                          std::string* out_error = nullptr);
+                                          std::string* out_error = nullptr,
+                                          uint32_t* out_iat_rva = nullptr,
+                                          uint32_t* out_iat_size = nullptr);
         static std::vector<WinLibraryImport> get_default_windows_imports();
 
         static uint16_t coff_machine_for_arch(TargetArch arch);

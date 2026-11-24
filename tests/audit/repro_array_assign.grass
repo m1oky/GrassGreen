@@ -1,0 +1,10 @@
+!GrassGreen!
+// Repro: Array element assignment arr[idx] = val is unimplemented in ASTLowerer::parse_assignment
+// Fails with: "Lowering Error: Unexpected token in expression: ="
+
+int main() {
+    take arr = [];
+    arr[0] = 42;
+    gout << arr[0] << endl;
+    return 0;
+}

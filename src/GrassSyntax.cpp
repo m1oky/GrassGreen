@@ -54,16 +54,7 @@ vector<GrassToken> Lexer::tokenize() {
         int tok_line = line;
         int tok_col = get_col(pos);
 
-        // Многострочный комментарий ** ... ** или /* ... */
-        if (c == '*' && pos + 1 < src.size() && src[pos + 1] == '*') {
-            pos += 2;
-            while (pos + 1 < src.size() && !(src[pos] == '*' && src[pos + 1] == '*')) {
-                if (src[pos] == '\n') { line++; line_start_pos = pos + 1; }
-                pos++;
-            }
-            if (pos + 1 < src.size()) pos += 2;
-            continue;
-        }
+        // Многострочный комментарий /* ... */
         if (c == '/' && pos + 1 < src.size() && src[pos + 1] == '*') {
             pos += 2;
             while (pos + 1 < src.size() && !(src[pos] == '*' && src[pos + 1] == '/')) {
@@ -74,9 +65,8 @@ vector<GrassToken> Lexer::tokenize() {
             continue;
         }
 
-        // Однострочный комментарий * в начале строки или // (игнорируем, если перед ними двоеточие, как в http:// и https://)
-        if ((c == '*' && at_line_start) || 
-            (c == '/' && pos + 1 < src.size() && src[pos + 1] == '/' && !(pos > 0 && src[pos - 1] == ':'))) {
+        // Однострочный комментарий // (игнорируем, если перед ними двоеточие, как в http:// и https://)
+        if (c == '/' && pos + 1 < src.size() && src[pos + 1] == '/' && !(pos > 0 && src[pos - 1] == ':')) {
             while (pos < src.size() && src[pos] != '\n') pos++;
             continue;
         }
@@ -88,7 +78,13 @@ vector<GrassToken> Lexer::tokenize() {
             continue;
         }
         if (c == '@') {
+            size_t start = pos;
             while (pos < src.size() && src[pos] != '\n') pos++;
+            string dir = src.substr(start, pos - start);
+            while (!dir.empty() && (dir.back() == '\r' || dir.back() == ' ' || dir.back() == '\t')) dir.pop_back();
+            if (dir == "@strict") {
+                tokens.push_back(GrassToken(TOK_IDENT, "@strict", 0.0, tok_line, tok_col));
+            }
             continue;
         }
 
@@ -234,13 +230,27 @@ vector<GrassToken> Lexer::tokenize() {
                 pos++;
             }
             string ident = src.substr(start, pos - start);
-            tokens.push_back(GrassToken(TOK_IDENT, ident, 0.0, tok_line, tok_col));
+            if (ident == "namespace") {
+                tokens.push_back(GrassToken(TOK_NAMESPACE, ident, 0.0, tok_line, tok_col));
+            } else if (ident == "using") {
+                tokens.push_back(GrassToken(TOK_USING, ident, 0.0, tok_line, tok_col));
+            } else if (ident == "as") {
+                tokens.push_back(GrassToken(TOK_AS, ident, 0.0, tok_line, tok_col));
+            } else if (ident == "sizeof") {
+                tokens.push_back(GrassToken(TOK_SIZEOF, ident, 0.0, tok_line, tok_col));
+            } else if (ident == "nullptr" || ident == "null") {
+                tokens.push_back(GrassToken(TOK_NULLPTR, ident, 0.0, tok_line, tok_col));
+            } else {
+                tokens.push_back(GrassToken(TOK_IDENT, ident, 0.0, tok_line, tok_col));
+            }
             continue;
         }
 
         // Двухсимвольные операторы C++
         if (pos + 1 < src.size()) {
             string two = src.substr(pos, 2);
+            if (two == "::") { tokens.push_back(GrassToken(TOK_COLON_COLON, two, 0.0, tok_line, tok_col)); pos += 2; continue; }
+            if (two == "->") { tokens.push_back(GrassToken(TOK_ARROW, two, 0.0, tok_line, tok_col)); pos += 2; continue; }
             if (two == "==") { tokens.push_back(GrassToken(TOK_EQ, two, 0.0, tok_line, tok_col)); pos += 2; continue; }
             if (two == "!=") { tokens.push_back(GrassToken(TOK_NEQ, two, 0.0, tok_line, tok_col)); pos += 2; continue; }
             if (two == "<=") { tokens.push_back(GrassToken(TOK_LTE, two, 0.0, tok_line, tok_col)); pos += 2; continue; }
@@ -594,13 +604,27 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
 bool BytecodeCompiler::isTypeOrFuncKeyword(const string& s) {
     return s == "fun" || s == "take" || s == "void" || s == "func" || s == "alt" || s == "fn" ||
            s == "int" || s == "float" || s == "double" || s == "num" ||
-           s == "str" || s == "string" || s == "bool" || s == "auto" || s == "array" || s == "volatile";
+           s == "str" || s == "string" || s == "bool" || s == "auto" || s == "array" || s == "volatile" ||
+           s == "uint8" || s == "uint16" || s == "uint32" || s == "uint64" ||
+           s == "int8" || s == "int16" || s == "int32" || s == "int64" ||
+           s == "uint8_t" || s == "uint16_t" || s == "uint32_t" || s == "uint64_t" ||
+           s == "int8_t" || s == "int16_t" || s == "int32_t" || s == "int64_t" ||
+           s == "u8" || s == "u16" || s == "u32" || s == "u64" ||
+           s == "i8" || s == "i16" || s == "i32" || s == "i64" ||
+           s == "f32" || s == "f64" || s == "char" || s == "byte" || s == "size_t";
 }
 
 bool BytecodeCompiler::isVarKeyword(const string& s) {
     return s == "set" || s == "var" || s == "let" || s == "take" || s == "fany" || s == "invent" ||
            s == "int" || s == "float" || s == "double" || s == "num" ||
-           s == "str" || s == "string" || s == "bool" || s == "auto" || s == "array" || s == "volatile" || s == "void";
+           s == "str" || s == "string" || s == "bool" || s == "auto" || s == "array" || s == "volatile" || s == "void" ||
+           s == "uint8" || s == "uint16" || s == "uint32" || s == "uint64" ||
+           s == "int8" || s == "int16" || s == "int32" || s == "int64" ||
+           s == "uint8_t" || s == "uint16_t" || s == "uint32_t" || s == "uint64_t" ||
+           s == "int8_t" || s == "int16_t" || s == "int32_t" || s == "int64_t" ||
+           s == "u8" || s == "u16" || s == "u32" || s == "u64" ||
+           s == "i8" || s == "i16" || s == "i32" || s == "i64" ||
+           s == "f32" || s == "f64" || s == "char" || s == "byte" || s == "size_t";
 }
 
 void BytecodeCompiler::emitByte(uint8_t b) { code.push_back(b); }
@@ -631,6 +655,34 @@ void BytecodeCompiler::emitString(const string& s) {
 void BytecodeCompiler::emitUICmd(const string& cmd_line) {
     emitByte(OP_UI_CMD);
     emitString(cmd_line);
+}
+
+std::string BytecodeCompiler::resolveUserFunc(const std::string& name) const {
+    if (user_functions.count(name)) return name;
+    std::string mangled = name;
+    for (size_t p = 0; (p = mangled.find("::", p)) != std::string::npos; ) {
+        mangled.replace(p, 2, "__");
+    }
+    if (user_functions.count(mangled)) return mangled;
+    if (using_symbols_.count(name)) {
+        std::string sym = using_symbols_.at(name);
+        if (user_functions.count(sym)) return sym;
+        std::string sym_m = sym;
+        for (size_t p = 0; (p = sym_m.find("::", p)) != std::string::npos; ) {
+            sym_m.replace(p, 2, "__");
+        }
+        if (user_functions.count(sym_m)) return sym_m;
+    }
+    for (const auto& ns : using_namespaces_) {
+        std::string q = ns + "::" + name;
+        if (user_functions.count(q)) return q;
+        std::string qm = q;
+        for (size_t p = 0; (p = qm.find("::", p)) != std::string::npos; ) {
+            qm.replace(p, 2, "__");
+        }
+        if (user_functions.count(qm)) return qm;
+    }
+    return "";
 }
 
 void BytecodeCompiler::parseExpression() {
@@ -734,6 +786,8 @@ void BytecodeCompiler::parseUnary() {
     if (match(TOK_MINUS)) { parseUnary(); emitByte(OP_NEG); return; }
     if (match(TOK_NOT))   { parseUnary(); emitByte(OP_NOT); return; }
     if (match(TOK_TILDE)) { parseUnary(); emitByte(OP_BIT_NOT); return; }
+    if (match(TOK_STAR))  { parseUnary(); return; }
+    if (match(TOK_AMP))   { parseUnary(); return; }
     if (match(TOK_PLUS))  { parseUnary(); return; }
     parsePrimary();
 }
@@ -775,12 +829,37 @@ void BytecodeCompiler::parsePrimary() {
         emitU32(count);
         return;
     }
+    if (match(TOK_SIZEOF)) {
+        consume(TOK_LPAREN, "Ожидалась '(' после sizeof!");
+        if (peek().kind == TOK_IDENT && isTypeOrFuncKeyword(peek().text)) {
+            advance();
+            while (match(TOK_STAR)) {}
+        } else {
+            parseExpression();
+        }
+        consume(TOK_RPAREN, "Ожидалась ')' после sizeof!");
+        emitByte(OP_CONST_NUM);
+        emitDouble(8.0);
+        return;
+    }
+    if (peek().kind == TOK_NULLPTR) {
+        advance();
+        emitByte(OP_CONST_NUM);
+        emitDouble(0.0);
+        return;
+    }
     if (peek().kind == TOK_IDENT) {
         int tok_line = peek().line;
         string name = advance().text;
+        while (match(TOK_COLON_COLON)) {
+            if (peek().kind == TOK_IDENT) {
+                name += "::" + advance().text;
+            }
+        }
         if (name == "true")  { emitByte(OP_CONST_NUM); emitDouble(1.0); return; }
         if (name == "false") { emitByte(OP_CONST_NUM); emitDouble(0.0); return; }
         if (name == "endl")  { emitByte(OP_CONST_STR); emitString("\n"); return; }
+        if (name == "nullptr" || name == "null") { emitByte(OP_CONST_NUM); emitDouble(0.0); return; }
 
         // 16 цветов VGA для библиотеки !baremetal!
         if (name == "BLACK")         { emitByte(OP_CONST_NUM); emitDouble(0.0); return; }
@@ -867,8 +946,8 @@ void BytecodeCompiler::parsePrimary() {
             }
         }
 
-        // Точка как отдельный токен (с пробелами): obj . member
-        if (match(TOK_DOT)) {
+        // Точка или стрелка как отдельный токен (с пробелами): obj . member / ptr -> member
+        if (match(TOK_DOT) || match(TOK_ARROW)) {
             string member = advance().text;
             if (match(TOK_LPAREN)) {
                 if (member == "push") {
@@ -967,9 +1046,10 @@ void BytecodeCompiler::parsePrimary() {
             }
             consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
 
-            if (user_functions.count(name)) {
+            std::string resolved_fn = resolveUserFunc(name);
+            if (!resolved_fn.empty()) {
                 emitByte(OP_CALL_USER);
-                emitU32(user_functions[name].entry_ip);
+                emitU32(user_functions.at(resolved_fn).entry_ip);
                 return;
             }
             if (argc == 0 && func_table.count(name)) {
@@ -1939,21 +2019,36 @@ void BytecodeCompiler::parseStatement() {
         return;
     }
 
-    // 1. ОБЪЯВЛЕНИЕ ФУНКЦИЙ (int main() {}, take my_func() {}, void my_func() {})
-    if (peek().kind == TOK_IDENT && isTypeOrFuncKeyword(peek().text) &&
-        peek(1).kind == TOK_IDENT && peek(2).kind == TOK_LPAREN) {
+    // 1. ОБЪЯВЛЕНИЕ ФУНКЦИЙ (int main() {}, take my_func() {}, void my_func() {}, int64* get_ptr() {})
+    bool is_func_decl = false;
+    if (peek().kind == TOK_IDENT && isTypeOrFuncKeyword(peek().text)) {
+        size_t off = 1;
+        while (peek(off).kind == TOK_STAR) off++;
+        if (peek(off).kind == TOK_IDENT && peek(off + 1).kind == TOK_LPAREN) {
+            is_func_decl = true;
+        }
+    }
+    if (is_func_decl) {
         int fn_line = peek().line;
         requireLib("core", "!GrassGreen!", "объявление функции", fn_line);
 
         advance();
+        while (match(TOK_STAR)) {}
         string fn_name = advance().text;
+        while (match(TOK_COLON_COLON)) {
+            if (peek().kind == TOK_IDENT) fn_name += "::" + advance().text;
+        }
+        if (!current_ns_.empty() && fn_name.find("::") == string::npos) {
+            fn_name = current_ns_ + "::" + fn_name;
+        }
         vector<string> params;
 
         match(TOK_LPAREN);
         if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
             while (true) {
-                if (isTypeOrFuncKeyword(peek().text) && peek(1).kind == TOK_IDENT) {
+                if (isTypeOrFuncKeyword(peek().text)) {
                     advance();
+                    while (match(TOK_STAR)) {}
                 }
                 params.push_back(advance().text);
                 if (!match(TOK_COMMA)) break;
@@ -1968,6 +2063,12 @@ void BytecodeCompiler::parseStatement() {
         uint32_t entry_ip = (uint32_t)code.size();
         user_functions[fn_name] = { entry_ip, params };
         func_table[fn_name] = entry_ip;
+        string mangled_fn = fn_name;
+        for (size_t p = 0; (p = mangled_fn.find("::", p)) != string::npos; ) {
+            mangled_fn.replace(p, 2, "__");
+        }
+        user_functions[mangled_fn] = { entry_ip, params };
+        func_table[mangled_fn] = entry_ip;
 
         if (!params.empty()) {
             emitByte(OP_PARAM_PROLOGUE);
@@ -1993,8 +2094,41 @@ void BytecodeCompiler::parseStatement() {
         return;
     }
 
+    // Директива @strict
+    if (peek().kind == TOK_IDENT && peek().text == "@strict") {
+        advance();
+        return;
+    }
+
+    // Пространства имен namespace Name { ... }
+    if (peek().kind == TOK_NAMESPACE || matchIdent("namespace")) {
+        if (peek().kind == TOK_IDENT) advance();
+        while (match(TOK_COLON_COLON)) {
+            if (peek().kind == TOK_IDENT) advance();
+        }
+        if (match(TOK_LBRACE)) {
+            while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
+                parseStatement();
+            }
+            match(TOK_RBRACE);
+        }
+        match(TOK_SEMI);
+        return;
+    }
+
+    // Директива using
+    if (peek().kind == TOK_USING || matchIdent("using")) {
+        if (peek().kind == TOK_NAMESPACE || matchIdent("namespace")) advance();
+        if (peek().kind == TOK_IDENT) advance();
+        while (match(TOK_COLON_COLON)) {
+            if (peek().kind == TOK_IDENT) advance();
+        }
+        match(TOK_SEMI);
+        return;
+    }
+
     // Объявление структуры: struct Name { ... };
-    if (matchIdent("struct")) {
+    if (matchIdent("struct") || matchIdent("class")) {
         parseStructDefinition();
         return;
     }
@@ -2002,7 +2136,7 @@ void BytecodeCompiler::parseStatement() {
     // Разрешаем объявление глобальных переменных (take, int, string, void и т.д.) на верхнем уровне
     if (!inside_function && !is_special_file) {
         bool is_var_decl = (peek().kind == TOK_IDENT &&
-            (isVarKeyword(peek().text) || peek().text == "take" || peek().text == "volatile"));
+            (isVarKeyword(peek().text) || peek().text == "take" || peek().text == "volatile" || g_struct_registry.count(peek().text)));
         if (!is_var_decl) {
             reportError(peek().line, "Инструкция '" + peek().text + "' находится вне функции! Весь исполняемый код (кроме объявлений переменных через take/тип) должен быть внутри функций.");
             synchronize();
@@ -2601,21 +2735,26 @@ void BytecodeCompiler::parseStatement() {
         return;
     }
 
-    // Объявление экземпляра структуры: Player player; или Player player = ...;
-    if (peek().kind == TOK_IDENT && g_struct_registry.count(peek().text) && peek(1).kind == TOK_IDENT) {
-        string s_name = advance().text;
-        string v_name = advance().text;
-        var_struct_types[v_name] = s_name;
-        if (match(TOK_ASSIGN)) {
-            parseExpression();
-        } else {
-            emitByte(OP_NEW_STRUCT);
-            emitString(s_name);
+    // Объявление экземпляра структуры: Player player; или Player* player = ...;
+    if (peek().kind == TOK_IDENT && g_struct_registry.count(peek().text)) {
+        size_t off = 1;
+        while (peek(off).kind == TOK_STAR) off++;
+        if (peek(off).kind == TOK_IDENT) {
+            string s_name = advance().text;
+            while (match(TOK_STAR)) {}
+            string v_name = advance().text;
+            var_struct_types[v_name] = s_name;
+            if (match(TOK_ASSIGN)) {
+                parseExpression();
+            } else {
+                emitByte(OP_NEW_STRUCT);
+                emitString(s_name);
+            }
+            emitByte(OP_STORE_VAR);
+            emitString(v_name);
+            match(TOK_SEMI);
+            return;
         }
-        emitByte(OP_STORE_VAR);
-        emitString(v_name);
-        match(TOK_SEMI);
-        return;
     }
 
     // 6. ОБЪЯВЛЕНИЕ ПЕРЕМЕННЫХ: volatile, take, set, int, string, float, bool, array
@@ -2624,9 +2763,7 @@ void BytecodeCompiler::parseStatement() {
     }
     if (peek().kind == TOK_IDENT && (isVarKeyword(peek().text) || peek().text == "take")) {
         string decl_kw = advance().text;
-        if (peek().kind == TOK_STAR) {
-            advance();
-        }
+        while (match(TOK_STAR)) {}
         if (match(TOK_ASSIGN) && peek().kind == TOK_IDENT &&
             (peek(1).kind == TOK_SEMI || peek(1).kind == TOK_EOF)) {
             string var_name = advance().text;
@@ -2638,7 +2775,9 @@ void BytecodeCompiler::parseStatement() {
             return;
         }
 
-        while (peek().kind == TOK_IDENT) {
+        while (peek().kind == TOK_IDENT || peek().kind == TOK_STAR) {
+            while (match(TOK_STAR)) {}
+            if (peek().kind != TOK_IDENT) break;
             string var_name = advance().text;
             if (match(TOK_ASSIGN)) {
                 if (peek().kind == TOK_IDENT && g_struct_registry.count(peek().text) && peek(1).kind == TOK_LPAREN) {
@@ -2901,6 +3040,22 @@ void BytecodeCompiler::parseStatement() {
         }
     }
 
+    // Разыменование указателя при присваивании: *ptr = val; **ptr = val;
+    if (peek().kind == TOK_STAR) {
+        advance(); // consume '*'
+        while (match(TOK_STAR)) {}
+        if (peek().kind == TOK_IDENT) {
+            string ptr_name = advance().text;
+            if (match(TOK_ASSIGN)) {
+                parseExpression(); // value
+                match(TOK_SEMI);
+                emitByte(OP_STORE_VAR);
+                emitString(ptr_name);
+                return;
+            }
+        }
+    }
+
     // 11. ПРИСВАИВАНИЯ И ИНКРЕМЕНТЫ
     if (peek().kind == TOK_IDENT) {
         string ident_text = peek().text;
@@ -2932,12 +3087,12 @@ void BytecodeCompiler::parseStatement() {
             }
             return;
         }
-        if (peek(1).kind == TOK_DOT && peek(2).kind == TOK_IDENT &&
+        if ((peek(1).kind == TOK_DOT || peek(1).kind == TOK_ARROW) && peek(2).kind == TOK_IDENT &&
             (peek(3).kind == TOK_ASSIGN || peek(3).kind == TOK_PLUS_ASSIGN ||
              peek(3).kind == TOK_MINUS_ASSIGN || peek(3).kind == TOK_MUL_ASSIGN ||
              peek(3).kind == TOK_DIV_ASSIGN)) {
             string obj_name = advance().text;
-            advance(); // consume '.'
+            advance(); // consume '.' or '->'
             string field_name = advance().text;
             GrassTokenKind op = advance().kind;
             if (op == TOK_ASSIGN) {
@@ -3075,12 +3230,15 @@ void BytecodeCompiler::compileProgram() {
 
 void BytecodeCompiler::parseStructDefinition() {
     if (peek().kind != TOK_IDENT) {
-        reportError(peek().line, "Ожидалось имя структуры после 'struct'!");
+        reportError(peek().line, "Ожидалось имя структуры или класса!");
         return;
     }
     string sname = advance().text;
+    if (match(TOK_COLON)) {
+        if (peek().kind == TOK_IDENT) advance();
+    }
     if (!match(TOK_LBRACE)) {
-        reportError(peek().line, "Ожидалось '{' после имени структуры!");
+        reportError(peek().line, "Ожидалось '{' после имени типа!");
         return;
     }
 
@@ -3387,6 +3545,8 @@ bool GrassParser::isTypeName(const std::string& s) const {
     if (custom_types.count(s)) return true;
     return s == "int" || s == "float" || s == "double" || s == "string" ||
            s == "bool" || s == "void" || s == "char" || s == "take" ||
+           s == "uint8" || s == "uint16" || s == "uint32" || s == "uint64" ||
+           s == "int8" || s == "int16" || s == "int32" || s == "int64" ||
            s == "uint8_t" || s == "uint16_t" || s == "uint32_t" || s == "uint64_t" ||
            s == "int8_t" || s == "int16_t" || s == "int32_t" || s == "int64_t" ||
            s == "u8" || s == "u16" || s == "u32" || s == "u64" ||
@@ -3505,6 +3665,42 @@ std::unique_ptr<ExprAST> GrassParser::parseMultiplicative() {
 }
 
 std::unique_ptr<ExprAST> GrassParser::parseUnary() {
+    // Check for C-style cast: (Type)expr or (Type*)expr
+    if (check(TOK_LPAREN)) {
+        size_t off = 1;
+        if (peek(off).kind == TOK_IDENT && isTypeName(peek(off).text)) {
+            std::string tname = peek(off).text;
+            off++;
+            while (peek(off).kind == TOK_COLON_COLON) {
+                off++;
+                if (peek(off).kind == TOK_IDENT) {
+                    tname += "::" + peek(off).text;
+                    off++;
+                } else break;
+            }
+            int ptr_depth = 0;
+            while (peek(off).kind == TOK_STAR) {
+                ptr_depth++;
+                off++;
+            }
+            if (peek(off).kind == TOK_RPAREN) {
+                auto next_tok = peek(off + 1);
+                if (next_tok.kind == TOK_IDENT || next_tok.kind == TOK_NUMBER ||
+                    next_tok.kind == TOK_STRING || next_tok.kind == TOK_LPAREN ||
+                    next_tok.kind == TOK_STAR || next_tok.kind == TOK_AMP ||
+                    next_tok.kind == TOK_MINUS || next_tok.kind == TOK_NULLPTR) {
+                    auto loc = advance().loc(filename); // consume '('
+                    advance(); // consume type
+                    while (match(TOK_COLON_COLON)) advance();
+                    while (match(TOK_STAR)) {}
+                    match(TOK_RPAREN);
+                    auto operand = parseUnary();
+                    return std::make_unique<CastExprAST>(loc, tname, ptr_depth, std::move(operand), true);
+                }
+            }
+        }
+    }
+
     if (peek().kind == TOK_MINUS || peek().kind == TOK_NOT ||
         peek().kind == TOK_TILDE || peek().kind == TOK_STAR ||
         peek().kind == TOK_AMP || peek().kind == TOK_INC || peek().kind == TOK_DEC) {
@@ -3531,6 +3727,48 @@ std::unique_ptr<ExprAST> GrassParser::parsePostfix() {
                 reportError(peek().loc(filename), "Expected ']' after index expression", "Close array subscript with ']'");
             }
             expr = std::make_unique<IndexExprAST>(loc, std::move(expr), std::move(idx));
+        } else if (match(TOK_ARROW)) {
+            auto loc = peek(-1).loc(filename);
+            if (peek().kind == TOK_IDENT) {
+                std::string member = advance().text;
+                if (match(TOK_LPAREN)) {
+                    std::vector<std::unique_ptr<ExprAST>> args;
+                    if (!check(TOK_RPAREN) && !isAtEnd()) {
+                        do {
+                            args.push_back(parseExpression());
+                        } while (match(TOK_COMMA));
+                    }
+                    if (!match(TOK_RPAREN)) {
+                        reportError(peek().loc(filename), "Expected ')' after method arguments", "Close argument list with ')'");
+                    }
+                    auto mem_node = std::make_unique<MemberAccessExprAST>(loc, std::move(expr), member, true);
+                    mem_node->is_method_call = true;
+                    mem_node->method_args = std::move(args);
+                    expr = std::move(mem_node);
+                } else {
+                    expr = std::make_unique<MemberAccessExprAST>(loc, std::move(expr), member, true);
+                }
+            } else {
+                reportError(peek().loc(filename), "Expected identifier after '->'", "Provide member name");
+            }
+        } else if (match(TOK_AS)) {
+            auto loc = peek(-1).loc(filename);
+            std::string tname = "";
+            if (peek().kind == TOK_IDENT) {
+                tname = advance().text;
+                while (match(TOK_COLON_COLON)) {
+                    if (peek().kind == TOK_IDENT) {
+                        tname += "::" + advance().text;
+                    }
+                }
+            } else {
+                reportError(peek().loc(filename), "Expected type name after 'as'", "Specify target type");
+            }
+            int ptr_depth = 0;
+            while (match(TOK_STAR)) {
+                ptr_depth++;
+            }
+            expr = std::make_unique<CastExprAST>(loc, tname, ptr_depth, std::move(expr), false);
         } else if (match(TOK_DOT)) {
             auto loc = peek(-1).loc(filename);
             if (peek().kind == TOK_IDENT) {
@@ -3589,6 +3827,38 @@ std::unique_ptr<ExprAST> GrassParser::parsePrimary() {
         auto tok = advance();
         return std::make_unique<LiteralExprAST>(tok.loc(filename));
     }
+    if (peek().kind == TOK_NULLPTR) {
+        auto tok = advance();
+        return std::make_unique<LiteralExprAST>(tok.loc(filename), nullptr);
+    }
+    if (match(TOK_SIZEOF)) {
+        auto loc = peek(-1).loc(filename);
+        if (!match(TOK_LPAREN)) {
+            reportError(peek().loc(filename), "Expected '(' after sizeof", "Enclose sizeof operand in '(' and ')'");
+        }
+        if (peek().kind == TOK_IDENT && isTypeName(peek().text)) {
+            std::string tname = advance().text;
+            while (match(TOK_COLON_COLON)) {
+                if (peek().kind == TOK_IDENT) {
+                    tname += "::" + advance().text;
+                }
+            }
+            int ptr_depth = 0;
+            while (match(TOK_STAR)) {
+                ptr_depth++;
+            }
+            if (!match(TOK_RPAREN)) {
+                reportError(peek().loc(filename), "Expected ')' after type in sizeof", "Close with ')'");
+            }
+            return std::make_unique<SizeofExprAST>(loc, tname, ptr_depth);
+        } else {
+            auto expr = parseExpression();
+            if (!match(TOK_RPAREN)) {
+                reportError(peek().loc(filename), "Expected ')' after expression in sizeof", "Close with ')'");
+            }
+            return std::make_unique<SizeofExprAST>(loc, "", 0, std::move(expr));
+        }
+    }
     if (checkIdent("alloc")) {
         auto loc = advance().loc(filename);
         std::unique_ptr<ExprAST> sz = nullptr;
@@ -3613,6 +3883,15 @@ std::unique_ptr<ExprAST> GrassParser::parsePrimary() {
     }
     if (peek().kind == TOK_IDENT) {
         auto tok = advance();
+        std::string full_name = tok.text;
+        while (match(TOK_COLON_COLON)) {
+            if (peek().kind == TOK_IDENT) {
+                full_name += "::" + advance().text;
+            } else {
+                reportError(peek().loc(filename), "Expected identifier after '::'", "Provide identifier");
+                break;
+            }
+        }
         if (match(TOK_LPAREN)) {
             std::vector<std::unique_ptr<ExprAST>> args;
             if (!check(TOK_RPAREN) && !isAtEnd()) {
@@ -3621,11 +3900,11 @@ std::unique_ptr<ExprAST> GrassParser::parsePrimary() {
                 } while (match(TOK_COMMA));
             }
             if (!match(TOK_RPAREN)) {
-                reportError(peek().loc(filename), "Expected ')' after function arguments in call to '" + tok.text + "'", "Close call with ')'");
+                reportError(peek().loc(filename), "Expected ')' after function arguments in call to '" + full_name + "'", "Close call with ')'");
             }
-            return std::make_unique<CallExprAST>(tok.loc(filename), tok.text, std::move(args));
+            return std::make_unique<CallExprAST>(tok.loc(filename), full_name, std::move(args));
         }
-        return std::make_unique<VariableExprAST>(tok.loc(filename), tok.text);
+        return std::make_unique<VariableExprAST>(tok.loc(filename), full_name);
     }
     if (match(TOK_LBRACKET)) {
         auto loc = peek(-1).loc(filename);
@@ -4092,6 +4371,122 @@ std::unique_ptr<ModuleDeclAST> GrassParser::parseModule() {
     return mod;
 }
 
+std::unique_ptr<NamespaceDeclAST> GrassParser::parseNamespace() {
+    auto loc = advance().loc(filename); // consume 'namespace'
+    if (peek().kind != TOK_IDENT) {
+        reportError(peek().loc(filename), "Expected namespace name after 'namespace'", "Provide namespace identifier");
+        synchronize();
+        return nullptr;
+    }
+    std::string ns_name = advance().text;
+    while (match(TOK_COLON_COLON)) {
+        if (peek().kind == TOK_IDENT) {
+            ns_name += "::" + advance().text;
+        } else {
+            reportError(peek().loc(filename), "Expected identifier after '::'", "Provide identifier");
+            break;
+        }
+    }
+    if (!match(TOK_LBRACE)) {
+        reportError(peek().loc(filename), "Expected '{' after namespace name", "Open namespace body with '{'");
+        synchronize();
+        return nullptr;
+    }
+
+    std::vector<std::unique_ptr<DeclAST>> decls;
+    std::vector<std::unique_ptr<StmtAST>> stmts;
+
+    while (!check(TOK_RBRACE) && !isAtEnd()) {
+        if (match(TOK_SEMI)) continue;
+        if (peek().kind == TOK_NAMESPACE || checkIdent("namespace")) {
+            auto inner_ns = parseNamespace();
+            if (inner_ns) decls.push_back(std::move(inner_ns));
+        } else if (peek().kind == TOK_USING || checkIdent("using")) {
+            auto u = parseUsing();
+            if (u) decls.push_back(std::move(u));
+        } else if (checkIdent("struct")) {
+            auto st = parseStruct();
+            if (st) decls.push_back(std::move(st));
+        } else if (checkIdent("class")) {
+            auto cls = parseClass();
+            if (cls) decls.push_back(std::move(cls));
+        } else if (checkIdent("module")) {
+            auto mod = parseModule();
+            if (mod) decls.push_back(std::move(mod));
+        } else if (checkIdent("fn")) {
+            advance();
+            std::string fname = advance().text;
+            auto fn = parseFunction("auto", 0, fname);
+            if (fn) decls.push_back(std::move(fn));
+        } else {
+            bool is_type = isTypeName(peek().text);
+            if (!is_type && peek().kind == TOK_IDENT) {
+                if (peek(1).kind == TOK_IDENT) {
+                    is_type = true;
+                } else if (peek(1).kind == TOK_STAR) {
+                    size_t off = 2;
+                    while (peek(off).kind == TOK_STAR) off++;
+                    if (peek(off).kind == TOK_IDENT) is_type = true;
+                }
+            }
+            if (is_type) {
+                std::string type_name = advance().text;
+                int ptr_depth = 0;
+                while (match(TOK_STAR)) ptr_depth++;
+
+                if (peek().kind == TOK_IDENT && peek(1).kind == TOK_LPAREN) {
+                    std::string fname = advance().text;
+                    auto fn = parseFunction(type_name, ptr_depth, fname);
+                    if (fn) decls.push_back(std::move(fn));
+                } else if (peek().kind == TOK_IDENT) {
+                    auto stmt = parseVarDecl(type_name, ptr_depth, false);
+                    if (stmt) stmts.push_back(std::move(stmt));
+                } else {
+                    reportError(peek().loc(filename), "Expected identifier after type '" + type_name + "'", "Provide variable or function name");
+                    synchronize();
+                }
+            } else {
+                auto stmt = parseStatement();
+                if (stmt) stmts.push_back(std::move(stmt));
+            }
+        }
+    }
+
+    if (!match(TOK_RBRACE)) {
+        reportError(peek().loc(filename), "Expected '}' at end of namespace", "Close namespace with '}'");
+    }
+    match(TOK_SEMI);
+
+    return std::make_unique<NamespaceDeclAST>(loc, ns_name, std::move(decls), std::move(stmts));
+}
+
+std::unique_ptr<UsingDeclAST> GrassParser::parseUsing() {
+    auto loc = advance().loc(filename); // consume 'using'
+    bool is_ns = false;
+    if (peek().kind == TOK_NAMESPACE || checkIdent("namespace")) {
+        advance();
+        is_ns = true;
+    }
+    if (peek().kind != TOK_IDENT) {
+        reportError(peek().loc(filename), "Expected identifier after 'using'", "Specify namespace or symbol");
+        synchronize();
+        return nullptr;
+    }
+    std::string path = advance().text;
+    while (match(TOK_COLON_COLON)) {
+        if (peek().kind == TOK_IDENT) {
+            path += "::" + advance().text;
+        } else {
+            reportError(peek().loc(filename), "Expected identifier after '::'", "Provide identifier");
+            break;
+        }
+    }
+    if (!match(TOK_SEMI)) {
+        reportError(peek().loc(filename), "Expected ';' after using declaration", "Terminate with ';'");
+    }
+    return std::make_unique<UsingDeclAST>(loc, path, is_ns);
+}
+
 std::unique_ptr<ProgramAST> GrassParser::parseProgram() {
     auto program = std::make_unique<ProgramAST>(SourceLocation(filename, 1, 1));
 
@@ -4109,9 +4504,20 @@ std::unique_ptr<ProgramAST> GrassParser::parseProgram() {
             program->included_libs.push_back(advance().text);
             continue;
         }
+        if (peek().kind == TOK_IDENT && peek().text == "@strict") {
+            program->is_strict = true;
+            advance();
+            continue;
+        }
 
         try {
-            if (checkIdent("struct")) {
+            if (peek().kind == TOK_NAMESPACE || checkIdent("namespace")) {
+                auto ns = parseNamespace();
+                if (ns) program->declarations.push_back(std::move(ns));
+            } else if (peek().kind == TOK_USING || checkIdent("using")) {
+                auto u = parseUsing();
+                if (u) program->declarations.push_back(std::move(u));
+            } else if (checkIdent("struct")) {
                 auto st = parseStruct();
                 if (st) program->declarations.push_back(std::move(st));
             } else if (checkIdent("class")) {

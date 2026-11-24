@@ -1,0 +1,9 @@
+!GrassGreen!
+int f4(int a, int b, int c, int d) {
+    return a + b + c + d;
+}
+int main() {
+    take r = f4(1, 2, 3, 4);
+    gout << "r = " << r << endl;
+    return 0;
+}

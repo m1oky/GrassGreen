@@ -1,0 +1,7 @@
+!GrassGreen!
+int main() {
+    take a = 9223372036854775807;
+    take b = a + 1;
+    gout << b << endl;
+    return 0;
+}

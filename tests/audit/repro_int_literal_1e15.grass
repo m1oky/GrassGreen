@@ -1,0 +1,10 @@
+!GrassGreen!
+// Repro: Large integer literals (>= 1e15) converted to f64 in ASTLowerer:1515
+// Causes GPR codegen failure and loses 64-bit integer precision
+
+int main() {
+    take x = 9223372036854775807;
+    take y = x + 1;
+    gout << "y = " << y << endl;
+    return 0;
+}

@@ -9,6 +9,13 @@
 #include <iostream>
 #include <algorithm>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
 namespace fs = std::filesystem;
 
 namespace GrassImport {
@@ -82,10 +89,32 @@ namespace GrassImport {
         // 3. Стандартные папки модулей проекта
         candidates.push_back("modules/" + target);
         candidates.push_back("modules/" + target + ".grass");
+        candidates.push_back("stdlib/" + target);
+        candidates.push_back("stdlib/" + target + ".grass");
+        candidates.push_back("../stdlib/" + target);
+        candidates.push_back("../stdlib/" + target + ".grass");
+        candidates.push_back("../../stdlib/" + target);
+        candidates.push_back("../../stdlib/" + target + ".grass");
         candidates.push_back("examples/modules/" + target);
         candidates.push_back("examples/modules/" + target + ".grass");
         candidates.push_back("include/" + target);
         candidates.push_back("include/" + target + ".grass");
+
+#ifdef _WIN32
+        char exe_buf[MAX_PATH];
+        DWORD exe_len = GetModuleFileNameA(NULL, exe_buf, MAX_PATH);
+        if (exe_len > 0) {
+            fs::path exe_dir = fs::path(exe_buf).parent_path();
+            candidates.push_back((exe_dir / target).string());
+            candidates.push_back((exe_dir / (target + ".grass")).string());
+            candidates.push_back((exe_dir / "stdlib" / target).string());
+            candidates.push_back((exe_dir / "stdlib" / (target + ".grass")).string());
+            candidates.push_back((exe_dir / ".." / "stdlib" / target).string());
+            candidates.push_back((exe_dir / ".." / "stdlib" / (target + ".grass")).string());
+            candidates.push_back((exe_dir / ".." / target).string());
+            candidates.push_back((exe_dir / ".." / (target + ".grass")).string());
+        }
+#endif
 
         for (const auto& cand : candidates) {
             std::string norm = normalizePath(cand);
@@ -243,7 +272,48 @@ namespace GrassImport {
         std::string root_canon = getCanonicalKey(root_filepath);
         visited.insert(root_canon);
 
-        std::vector<GrassToken> resolved = resolveInternal(root_tokens, root_filepath, visited, stats, true);
+        // Auto-import stdlib modules when !GrassGreen! is present
+        bool has_grassgreen = false;
+        size_t lib_idx = 0;
+        for (size_t k = 0; k < root_tokens.size(); ++k) {
+            if (root_tokens[k].kind == TOK_LIB && root_tokens[k].text == "!GrassGreen!") {
+                has_grassgreen = true;
+                lib_idx = k;
+                break;
+            }
+        }
+
+        std::vector<GrassToken> tokens_to_resolve = root_tokens;
+        std::string lower_root = root_canon;
+        bool is_stdlib_file = (lower_root.find("stdlib/io.grass") != std::string::npos ||
+                               lower_root.find("stdlib/fsys.grass") != std::string::npos ||
+                               lower_root.find("stdlib/time.grass") != std::string::npos ||
+                               lower_root.find("stdlib/memory.grass") != std::string::npos ||
+                               lower_root.find("stdlib/algo.grass") != std::string::npos);
+
+        if (has_grassgreen && !is_stdlib_file) {
+            static const char* stdlib_mods[] = {
+                "stdlib/io.grass",
+                "stdlib/fsys.grass",
+                "stdlib/time.grass",
+                "stdlib/memory.grass",
+                "stdlib/algo.grass"
+            };
+            std::vector<GrassToken> auto_tokens;
+            for (const char* mod : stdlib_mods) {
+                std::string resolved = findModuleFile(root_filepath, mod);
+                if (!resolved.empty()) {
+                    auto_tokens.push_back(GrassToken(TOK_IDENT, "import", 0.0, 1));
+                    auto_tokens.push_back(GrassToken(TOK_STRING, mod, 0.0, 1));
+                    auto_tokens.push_back(GrassToken(TOK_SEMI, ";", 0.0, 1));
+                }
+            }
+            if (!auto_tokens.empty()) {
+                tokens_to_resolve.insert(tokens_to_resolve.begin() + lib_idx + 1, auto_tokens.begin(), auto_tokens.end());
+            }
+        }
+
+        std::vector<GrassToken> resolved = resolveInternal(tokens_to_resolve, root_filepath, visited, stats, true);
 
         // Гарантируем, что в конце результирующего потока ровно один TOK_EOF
         while (!resolved.empty() && resolved.back().kind == TOK_EOF) {

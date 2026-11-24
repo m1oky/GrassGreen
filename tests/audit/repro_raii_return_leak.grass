@@ -1,0 +1,20 @@
+!GrassGreen!
+// Repro: Early return and break bypass scope exit cleanups and destructors
+// In GrassNativeCodegen.cpp, return/break emit direct jumps without calling exit_scope()
+// Allocated memory and RAII destructors inside nested blocks are skipped
+
+int helper(int flag) {
+    {
+        take arr = [];
+        if (flag > 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int main() {
+    take r = helper(1);
+    gout << "res = " << r << endl;
+    return 0;
+}

@@ -1,0 +1,14 @@
+!GrassGreen!
+struct MathHelper {
+    int base;
+    int sum4(int a, int b, int c, int d) {
+        gout << a << " " << b << " " << c << " " << d << endl;
+        return a + b + c + d;
+    }
+}
+int main() {
+    MathHelper m;
+    take r = m.sum4(10, 20, 30, 40);
+    gout << "r = " << r << endl;
+    return 0;
+}

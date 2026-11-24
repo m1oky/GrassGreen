@@ -1,0 +1,3 @@
+!GrassGreen!
+struct Foo { int x; }
+int main() { Foo f; f.non_existent(); return 0; }

@@ -97,6 +97,8 @@ namespace grass::codegen {
         bool freestanding = false;
         bool verbose = false;
         bool lang_ru = false;
+        bool use_gcc = false;
+        std::string target = "";
     };
 
     struct NativeCodegenResult {
@@ -151,6 +153,10 @@ namespace grass::codegen {
 
         bool link_executable(const std::string& obj_path,
                              const std::string& exe_path,
+                             std::string& error);
+        bool link_executable(const std::string& obj_path,
+                             const std::string& exe_path,
+                             const CompiledUnit& unit,
                              std::string& error);
 
         static TargetArch parse_arch(const std::string& str);

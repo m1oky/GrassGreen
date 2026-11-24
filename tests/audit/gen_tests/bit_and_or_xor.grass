@@ -1,0 +1,8 @@
+!GrassGreen!
+int main() {
+    take a = 12 & 10;
+    take b = 12 | 10;
+    take c = 12 ^ 10;
+    gout << a << " " << b << " " << c << endl;
+    return 0;
+}

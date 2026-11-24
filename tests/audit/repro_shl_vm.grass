@@ -1,0 +1,11 @@
+!GrassGreen!
+// Repro: Missing OP_BIT_SHL and OP_BIT_SHR in GrassVM bytecode dispatch table
+// Opcode 0x1A and 0x1B fall through to do_unknown, leaving RHS on stack
+// 1 << 4 returns 4 in VM, but 16 in Native
+
+int main() {
+    take x = 1 << 4;
+    take y = 32 >> 2;
+    gout << "shl = " << x << " shr = " << y << endl;
+    return 0;
+}

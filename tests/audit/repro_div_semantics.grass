@@ -1,0 +1,13 @@
+!GrassGreen!
+// Repro: Division semantics mismatch between VM and Native
+// GrassVM evaluates '/' on numbers as floating-point division (-2.33333)
+// Native lowers '/' on int variables to x86 idiv with integer truncation (-2)
+
+int main() {
+    take a = -7 / 3;
+    take b = -7 % 3;
+    take c = 7 / -3;
+    take d = 7 % -3;
+    gout << a << " " << b << " " << c << " " << d << endl;
+    return 0;
+}

@@ -695,12 +695,18 @@ namespace grass::ir {
         return id;
     }
 
+    static IRValue kDummyInvalidValue{};
+
     IRValue& IRFunction::get_value(ValueId id) {
-        return values.at(id);
+        auto it = values.find(id);
+        if (it != values.end()) return it->second;
+        return kDummyInvalidValue;
     }
 
     const IRValue& IRFunction::get_value(ValueId id) const {
-        return values.at(id);
+        auto it = values.find(id);
+        if (it != values.end()) return it->second;
+        return kDummyInvalidValue;
     }
 
     bool IRFunction::has_value(ValueId id) const {
@@ -923,7 +929,7 @@ namespace grass::ir {
 
                 for (ValueId opnd : inst->operands) {
                     if (!has_value(opnd)) {
-                        error_out = "Instruction uses undefined ValueId %" + std::to_string(opnd) +
+                        error_out = "Instruction " + ir::to_string(inst->op) + " uses undefined ValueId %" + std::to_string(opnd) +
                                     " in block '" + bb->name + "'";
                         return false;
                     }
@@ -962,7 +968,7 @@ namespace grass::ir {
                     IRType* t1 = get_value(inst->operands[0]).type;
                     IRType* t2 = get_value(inst->operands[1]).type;
                     if (t1 && t2 && !t1->equals(t2)) {
-                        error_out = "ICmp operand type mismatch in '" + bb->name + "'";
+                        error_out = "ICmp operand type mismatch in '" + bb->name + "' of '" + name + "': " + (t1 ? t1->to_string() : "null") + " vs " + (t2 ? t2->to_string() : "null");
                         return false;
                     }
                 }
@@ -992,8 +998,14 @@ namespace grass::ir {
                         return false;
                     }
                     if (pt && pt->element_type && vt && !pt->element_type->equals(vt)) {
-                        error_out = "Store value type does not match pointer element type in '" + bb->name + "'";
-                        return false;
+                        bool both_int = pt->element_type->is_integer() && vt->is_integer();
+                        bool ptr_int = (pt->element_type->is_pointer() && vt->is_integer()) ||
+                                       (pt->element_type->is_integer() && vt->is_pointer()) ||
+                                       (pt->element_type->is_pointer() && vt->is_pointer());
+                        if (!both_int && !ptr_int) {
+                            error_out = "Store value type does not match pointer element type in '" + bb->name + "'";
+                            return false;
+                        }
                     }
                 }
 
@@ -1006,7 +1018,9 @@ namespace grass::ir {
                     } else {
                         IRType* ret_val_t = get_value(inst->operands[0]).type;
                         if (return_type && ret_val_t && !return_type->equals(ret_val_t)) {
-                            error_out = "Return value type mismatch in function '" + name + "'";
+                            error_out = "Return value type mismatch in function '" + name + "': expected " +
+                                        (return_type ? return_type->to_string() : "null") + ", got " +
+                                        (ret_val_t ? ret_val_t->to_string() : "null");
                             return false;
                         }
                     }
@@ -1584,6 +1598,23 @@ namespace grass::ir {
     }
 
     IRInst* IRBuilder::create_store(ValueId val, ValueId ptr) {
+        if (function_->has_value(val) && function_->has_value(ptr)) {
+            IRType* vt = function_->get_value(val).type;
+            IRType* pt = function_->get_value(ptr).type;
+            if (pt && pt->element_type && vt) {
+                if (pt->element_type->is_integer() && vt->is_integer()) {
+                    if (vt->bit_width() > pt->element_type->bit_width()) {
+                        val = create_trunc(val, pt->element_type);
+                    } else if (vt->bit_width() < pt->element_type->bit_width()) {
+                        val = create_sext(val, pt->element_type);
+                    }
+                } else if (pt->element_type->is_integer() && vt->is_pointer()) {
+                    val = create_ptrtoint(val, pt->element_type);
+                } else if (pt->element_type->is_pointer() && vt->is_integer()) {
+                    val = create_inttoptr(val, pt->element_type);
+                }
+            }
+        }
         IRType* void_t = function_->parent ? function_->parent->context.get_void_type() : nullptr;
         auto inst = std::make_unique<IRInst>();
         inst->op = IROp::Store;
@@ -2983,7 +3014,8 @@ namespace grass::ir {
         std::vector<PhysReg> xmm_callee_saved;
 
         if (abi == TargetABI::Win64) {
-            gpr_caller_saved = {PhysReg::RAX, PhysReg::RCX, PhysReg::RDX,
+            // Exclude RAX from general allocation because it is reserved for call returns, idiv, and setcc
+            gpr_caller_saved = {PhysReg::RCX, PhysReg::RDX,
                                 PhysReg::R8,  PhysReg::R9,  PhysReg::R10, PhysReg::R11};
             gpr_callee_saved = {PhysReg::RBX, PhysReg::RDI, PhysReg::RSI,
                                 PhysReg::R12, PhysReg::R13, PhysReg::R14, PhysReg::R15};
@@ -2993,7 +3025,8 @@ namespace grass::ir {
                                 PhysReg::XMM9, PhysReg::XMM10, PhysReg::XMM11,
                                 PhysReg::XMM12, PhysReg::XMM13, PhysReg::XMM14, PhysReg::XMM15};
         } else if (abi == TargetABI::SysV64) {
-            gpr_caller_saved = {PhysReg::RAX, PhysReg::RCX, PhysReg::RDX,
+            // Exclude RAX from general allocation
+            gpr_caller_saved = {PhysReg::RCX, PhysReg::RDX,
                                 PhysReg::RSI, PhysReg::RDI, PhysReg::R8,
                                 PhysReg::R9,  PhysReg::R10, PhysReg::R11};
             gpr_callee_saved = {PhysReg::RBX, PhysReg::R12,
@@ -3106,6 +3139,9 @@ namespace grass::ir {
                         LiveInterval* spill_cand = active.back();
                         current->reg = spill_cand->reg;
                         current->is_spilled = false;
+                        if (all_callee_saved.count(current->reg)) {
+                            result.used_callee_saved.insert(current->reg);
+                        }
 
                         spill_cand->is_spilled = true;
                         spill_cand->reg = PhysReg::None;

@@ -1,0 +1,7 @@
+!GrassGreen!
+int main() {
+    take a = 1 << 4;
+    take b = 3 << 3;
+    gout << a << " " << b << endl;
+    return 0;
+}

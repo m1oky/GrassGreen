@@ -1,0 +1,7 @@
+!GrassGreen!
+int main() {
+    take a = 2 + 3 * 4 - 5 * 2;
+    take b = (2 + 3) * (4 - 2);
+    gout << a << " " << b << endl;
+    return 0;
+}

@@ -1,0 +1,189 @@
+!GrassGreen!
+
+// =============================================================================
+// GrassGreen Standard Library: File System (Pure GrassGreen Native Runtime)
+// Direct OS File API Calls via kernel32.dll externs:
+// CreateFileA, ReadFile, WriteFile, CloseHandle, GetFileSizeEx, DeleteFileA
+// Zero C runtime dependencies.
+// =============================================================================
+
+// Win32 File Constants
+take fs_generic_read() {
+    return 2147483648; // 0x80000000
+}
+
+take fs_generic_write() {
+    return 1073741824; // 0x40000000
+}
+
+take fs_share_read() {
+    return 1;
+}
+
+take fs_share_write() {
+    return 2;
+}
+
+take fs_create_always() {
+    return 2;
+}
+
+take fs_open_existing() {
+    return 3;
+}
+
+take fs_open_always() {
+    return 4;
+}
+
+take fs_attribute_normal() {
+    return 128; // 0x80
+}
+
+take fs_invalid_handle() {
+    return -1;
+}
+
+// Open file for reading
+take fs_open_read(take path) {
+    if (path == 0) {
+        return -1;
+    }
+    take access = fs_generic_read();
+    take share = fs_share_read();
+    take disp = fs_open_existing();
+    take attr = fs_attribute_normal();
+    return CreateFileA(path, access, share, 0, disp, attr, 0);
+}
+
+// Open file for writing (truncating existing content)
+take fs_open_write(take path) {
+    if (path == 0) {
+        return -1;
+    }
+    take access = fs_generic_write();
+    take share = 0;
+    take disp = fs_create_always();
+    take attr = fs_attribute_normal();
+    return CreateFileA(path, access, share, 0, disp, attr, 0);
+}
+
+// Open file for appending (keeping existing content)
+take fs_open_append(take path) {
+    if (path == 0) {
+        return -1;
+    }
+    take access = fs_generic_write();
+    take share = 0;
+    take disp = fs_open_always();
+    take attr = fs_attribute_normal();
+    return CreateFileA(path, access, share, 0, disp, attr, 0);
+}
+
+// Close an open file handle
+take fs_close(take handle) {
+    if (handle == 0 || handle == -1) {
+        return 0;
+    }
+    return CloseHandle(handle);
+}
+
+// Query file size in bytes from an open file handle
+take fs_get_size(take handle) {
+    if (handle == 0 || handle == -1) {
+        return -1;
+    }
+    take size = 0;
+    take res = GetFileSizeEx(handle, &size);
+    if (res == 0) {
+        return -1;
+    }
+    return size;
+}
+
+// Query file size in bytes given a file path
+take fs_size(take path) {
+    take h = fs_open_read(path);
+    if (h == -1 || h == 0) {
+        return -1;
+    }
+    take sz = fs_get_size(h);
+    fs_close(h);
+    return sz;
+}
+
+// Read bytes from open file handle into memory buffer
+take fs_read(take handle, take buf, take max_bytes) {
+    if (handle == 0 || handle == -1 || buf == 0 || max_bytes <= 0) {
+        return -1;
+    }
+    take bytes_read = 0;
+    take res = ReadFile(handle, buf, max_bytes, &bytes_read, 0);
+    if (res == 0) {
+        return -1;
+    }
+    return bytes_read;
+}
+
+// Write bytes from memory buffer to open file handle
+take fs_write(take handle, take buf, take count) {
+    if (handle == 0 || handle == -1 || buf == 0 || count <= 0) {
+        return -1;
+    }
+    take written = 0;
+    take res = WriteFile(handle, buf, count, &written, 0);
+    if (res == 0) {
+        return -1;
+    }
+    return written;
+}
+
+// Delete file by path
+take fs_delete(take path) {
+    if (path == 0) {
+        return 0;
+    }
+    return DeleteFileA(path);
+}
+
+// Create an empty file
+take fs_create(take path) {
+    take h = fs_open_write(path);
+    if (h == -1 || h == 0) {
+        return 0;
+    }
+    fs_close(h);
+    return 1;
+}
+
+// Check if file exists
+take fs_exists(take path) {
+    take h = fs_open_read(path);
+    if (h == -1 || h == 0) {
+        return 0;
+    }
+    fs_close(h);
+    return 1;
+}
+
+// Write entire buffer into file
+take fs_write_all(take path, take buf, take count) {
+    take h = fs_open_write(path);
+    if (h == -1 || h == 0) {
+        return -1;
+    }
+    take written = fs_write(h, buf, count);
+    fs_close(h);
+    return written;
+}
+
+// Read up to max_bytes from file into buffer
+take fs_read_all(take path, take buf, take max_bytes) {
+    take h = fs_open_read(path);
+    if (h == -1 || h == 0) {
+        return -1;
+    }
+    take bytes_read = fs_read(h, buf, max_bytes);
+    fs_close(h);
+    return bytes_read;
+}

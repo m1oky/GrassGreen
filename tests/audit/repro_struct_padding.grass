@@ -1,0 +1,19 @@
+!GrassGreen!
+// Repro: Struct GEP stride hardcoded to 8 bytes in GrassNativeCodegen.cpp:2280
+// While GrassNativeOOP computes packed alignment (e.g. bool=1 byte, int=4/8 bytes),
+// Codegen uses byte_off = gep_field_index * 8, misaligning fields with C runtime layout
+
+struct MixedData {
+    bool flag1;
+    bool flag2;
+    int value;
+}
+
+int main() {
+    MixedData d;
+    d.flag1 = true;
+    d.flag2 = false;
+    d.value = 12345;
+    gout << "val = " << d.value << endl;
+    return 0;
+}

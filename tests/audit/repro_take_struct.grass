@@ -1,0 +1,18 @@
+!GrassGreen!
+// Repro: Declaring struct variable with idiomatic 'take' loses struct metadata in ASTLowerer
+// Causes method call to fail with: "Optimization Error: Instruction uses undefined ValueId %0"
+
+struct Calculator {
+    int factor;
+
+    int compute() {
+        return 42;
+    }
+}
+
+int main() {
+    take c = Calculator();
+    take res = c.compute();
+    gout << "res = " << res << endl;
+    return 0;
+}

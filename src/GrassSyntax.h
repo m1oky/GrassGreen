@@ -365,7 +365,14 @@ enum GrassTokenKind {
     TOK_AMP,
     TOK_PIPE,
     TOK_CARET,
-    TOK_TILDE
+    TOK_TILDE,
+    TOK_COLON_COLON,
+    TOK_ARROW,
+    TOK_NAMESPACE,
+    TOK_USING,
+    TOK_AS,
+    TOK_SIZEOF,
+    TOK_NULLPTR
 };
 
 struct SourceLocation {
@@ -478,6 +485,11 @@ class BytecodeCompiler {
     std::unordered_map<std::string, std::string> var_struct_types;
     std::string current_struct_context;
     std::vector<std::pair<size_t, std::string>> method_call_fixups;
+    std::string current_ns_;
+    std::vector<std::string> using_namespaces_;
+    std::unordered_map<std::string, std::string> using_symbols_;
+
+    std::string resolveUserFunc(const std::string& name) const;
 
     GrassToken& peek(int offset = 0);
     GrassToken advance();
@@ -551,6 +563,8 @@ enum class NodeKind : uint8_t {
     ArrayLiteralExpr,
     AllocExpr,
     FreeExpr,
+    CastExpr,
+    SizeofExpr,
 
     ExprStmt,
     VarDeclStmt,
@@ -568,6 +582,8 @@ enum class NodeKind : uint8_t {
     StructDecl,
     ClassDecl,
     ModuleDecl,
+    NamespaceDecl,
+    UsingDecl,
     Program
 };
 
@@ -587,7 +603,8 @@ enum class LiteralKind {
     Float,
     String,
     Bool,
-    Nil
+    Nil,
+    Nullptr
 };
 
 struct LiteralExprAST : public ExprAST {
@@ -606,6 +623,27 @@ struct LiteralExprAST : public ExprAST {
         : ExprAST(NodeKind::LiteralExpr, l), lit_kind(LiteralKind::Bool), bool_val(val), num_val(val ? 1.0 : 0.0) {}
     explicit LiteralExprAST(const SourceLocation& l)
         : ExprAST(NodeKind::LiteralExpr, l), lit_kind(LiteralKind::Nil) {}
+    LiteralExprAST(const SourceLocation& l, std::nullptr_t)
+        : ExprAST(NodeKind::LiteralExpr, l), lit_kind(LiteralKind::Nullptr), str_val("nullptr"), num_val(0.0) {}
+};
+
+struct CastExprAST : public ExprAST {
+    std::string target_type;
+    int target_pointer_depth = 0;
+    std::unique_ptr<ExprAST> expr;
+    bool is_c_style = false;
+
+    CastExprAST(const SourceLocation& l, const std::string& ttype, int ptr_depth, std::unique_ptr<ExprAST> e, bool c_style = false)
+        : ExprAST(NodeKind::CastExpr, l), target_type(ttype), target_pointer_depth(ptr_depth), expr(std::move(e)), is_c_style(c_style) {}
+};
+
+struct SizeofExprAST : public ExprAST {
+    std::string type_name;
+    int pointer_depth = 0;
+    std::unique_ptr<ExprAST> expr;
+
+    SizeofExprAST(const SourceLocation& l, const std::string& tname, int ptr_depth, std::unique_ptr<ExprAST> e = nullptr)
+        : ExprAST(NodeKind::SizeofExpr, l), type_name(tname), pointer_depth(ptr_depth), expr(std::move(e)) {}
 };
 
 struct VariableExprAST : public ExprAST {
@@ -860,11 +898,31 @@ struct ModuleDeclAST : public DeclAST {
         : DeclAST(NodeKind::ModuleDecl, l), name(n) {}
 };
 
+struct NamespaceDeclAST : public DeclAST {
+    std::string name;
+    std::vector<std::unique_ptr<DeclAST>> declarations;
+    std::vector<std::unique_ptr<StmtAST>> statements;
+
+    NamespaceDeclAST(const SourceLocation& l, const std::string& n,
+                     std::vector<std::unique_ptr<DeclAST>> d,
+                     std::vector<std::unique_ptr<StmtAST>> s = {})
+        : DeclAST(NodeKind::NamespaceDecl, l), name(n), declarations(std::move(d)), statements(std::move(s)) {}
+};
+
+struct UsingDeclAST : public DeclAST {
+    std::string path;
+    bool is_namespace = true;
+
+    UsingDeclAST(const SourceLocation& l, const std::string& p, bool ns)
+        : DeclAST(NodeKind::UsingDecl, l), path(p), is_namespace(ns) {}
+};
+
 struct ProgramAST : public ASTNode {
     std::vector<std::string> included_libs;
     std::vector<std::unique_ptr<DeclAST>> declarations;
     std::vector<std::unique_ptr<StmtAST>> statements;
     std::vector<SyntaxDiagnostic> diagnostics;
+    bool is_strict = false;
 
     explicit ProgramAST(const SourceLocation& l = SourceLocation()) : ASTNode(NodeKind::Program, l) {}
 };
@@ -926,6 +984,8 @@ private:
     std::unique_ptr<StructDeclAST> parseStruct();
     std::unique_ptr<ClassDeclAST> parseClass();
     std::unique_ptr<ModuleDeclAST> parseModule();
+    std::unique_ptr<NamespaceDeclAST> parseNamespace();
+    std::unique_ptr<UsingDeclAST> parseUsing();
 
     bool isTypeName(const std::string& s) const;
     static bool isVarKeyword(const std::string& s);

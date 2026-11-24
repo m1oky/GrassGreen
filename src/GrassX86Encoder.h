@@ -169,6 +169,13 @@ namespace grass::backend {
         void cpuid();
         void rdtsc();
 
+        // Bare-metal I/O and CPU control intrinsics
+        void in_al_dx();
+        void out_dx_al();
+        void cli();
+        void sti();
+        void hlt();
+
         // Integer arithmetic and logic
         void add_rr(Reg dst, Reg src);
         void add_ri(Reg dst, int32_t imm);

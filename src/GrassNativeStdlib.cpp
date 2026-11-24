@@ -11,8 +11,12 @@ namespace grass::native {
     GrassNativeStdlib::GrassNativeStdlib() = default;
 
     void GrassNativeStdlib::initialize(ir::IRContext& ctx) {
-        if (initialized_) return;
+        if (initialized_ && current_ctx_ == &ctx) return;
         initialized_ = true;
+        current_ctx_ = &ctx;
+        registry_.clear();
+        extern_registry_.clear();
+        module_map_.clear();
 
         populate_io(ctx);
         populate_fsys(ctx);
@@ -287,6 +291,14 @@ namespace grass::native {
         register_function({ "clip_get", "sys", ptr_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "msgbox", "sys", i64_t, { ptr_t, ptr_t }, { "title", "msg" }, false, false, false, "", backend::TargetABI::Win64 });
         register_function({ "system", "sys", i64_t, { ptr_t }, { "cmd" }, false, false, false, "", backend::TargetABI::Win64 });
+
+        // Bare-metal I/O and CPU intrinsics (available in Freestanding profile)
+        ir::IRType* void_t = ctx.get_void_type();
+        register_function({ "port_in8", "sys", i64_t, { i64_t }, { "port" }, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "port_out8", "sys", void_t, { i64_t, i64_t }, { "port", "val" }, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "cpu_cli", "sys", void_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "cpu_sti", "sys", void_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "cpu_hlt", "sys", void_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
     }
 
     void GrassNativeStdlib::populate_proc(ir::IRContext& ctx) {

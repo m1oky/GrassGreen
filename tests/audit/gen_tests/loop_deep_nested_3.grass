@@ -1,0 +1,19 @@
+!GrassGreen!
+int main() {
+    take c = 0;
+    take i = 0;
+    while (i < 3) {
+        take j = 0;
+        while (j < 3) {
+            take k = 0;
+            while (k < 3) {
+                c = c + 1;
+                k = k + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    gout << "c = " << c << endl;
+    return 0;
+}

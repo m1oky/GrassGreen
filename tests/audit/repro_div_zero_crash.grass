@@ -1,0 +1,12 @@
+!GrassGreen!
+// Repro: Integer division by zero triggers unhandled hardware exception #DE (0xC0000094)
+// Native backend emits raw x86 idiv without zero check
+// GrassVM returns 0.0, while native crashes
+
+int main() {
+    take a = 10;
+    take b = 0;
+    take c = a / b;
+    gout << "c = " << c << endl;
+    return 0;
+}

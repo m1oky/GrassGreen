@@ -98,6 +98,18 @@ namespace grass::backend {
         return reg_kind(r) <= 4;
     }
 
+    inline Reg reg_with_size(Reg r, uint8_t sz) {
+        if (!reg_is_gpr(r)) return r;
+        uint8_t idx = reg_raw_index(r);
+        switch (sz) {
+            case 1: return static_cast<Reg>(0x0000 | idx);
+            case 2: return static_cast<Reg>(0x0010 | idx);
+            case 4: return static_cast<Reg>(0x0020 | idx);
+            case 8: return static_cast<Reg>(0x0030 | idx);
+            default: return r;
+        }
+    }
+
     inline bool reg_is_xmm(Reg r) {
         return reg_kind(r) == 5;
     }

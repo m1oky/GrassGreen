@@ -1,0 +1,10 @@
+!GrassGreen!
+int f8(int a, int b, int c, int d, int e, int f, int g, int h) {
+    gout << a << " " << b << " " << c << " " << d << " " << e << " " << f << " " << g << " " << h << endl;
+    return a + b + c + d + e + f + g + h;
+}
+int main() {
+    take r = f8(10, 20, 30, 40, 50, 60, 70, 80);
+    gout << "r = " << r << endl;
+    return 0;
+}

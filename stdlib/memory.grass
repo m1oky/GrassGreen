@@ -1,0 +1,130 @@
+!GrassGreen!
+
+// =============================================================================
+// GrassGreen Standard Library: Memory Management (Pure GrassGreen Native Runtime)
+// Direct OS Heap API Wrappers via kernel32.dll externs:
+// GetProcessHeap, HeapAlloc, HeapFree, HeapReAlloc
+// Fast Linear Arena Allocator on raw memory pointers.
+// Zero C runtime dependencies.
+// =============================================================================
+
+// Win32 Heap Flags
+take heap_zero_memory_flag() {
+    return 8; // HEAP_ZERO_MEMORY
+}
+
+// Retrieve default process heap handle
+take heap_get_process_heap() {
+    return GetProcessHeap();
+}
+
+// Allocate block from process heap
+take heap_alloc(take size_bytes) {
+    if (size_bytes <= 0) {
+        size_bytes = 1;
+    }
+    take hHeap = heap_get_process_heap();
+    take flags = heap_zero_memory_flag();
+    return HeapAlloc(hHeap, flags, size_bytes);
+}
+
+// Free block back to process heap
+take heap_free(take ptr) {
+    if (ptr == 0) {
+        return 1;
+    }
+    take hHeap = heap_get_process_heap();
+    return HeapFree(hHeap, 0, ptr);
+}
+
+// Reallocate block on process heap with new size
+take heap_realloc(take ptr, take new_size_bytes) {
+    if (ptr == 0) {
+        return heap_alloc(new_size_bytes);
+    }
+    if (new_size_bytes <= 0) {
+        heap_free(ptr);
+        return 0;
+    }
+    take hHeap = heap_get_process_heap();
+    take flags = heap_zero_memory_flag();
+    return HeapReAlloc(hHeap, flags, ptr, new_size_bytes);
+}
+
+// Language-level raw allocation using compiler alloc primitive
+take mem_alloc(take size) {
+    return alloc(size);
+}
+
+// Language-level raw deallocation using compiler free primitive
+take mem_free(take ptr) {
+    free(ptr);
+    return 0;
+}
+
+// Fast Linear Arena Allocator on raw memory pointers
+class ArenaAllocator {
+    take buffer;
+    take capacity;
+    take offset;
+    take allocations_count;
+
+    take init(take cap_bytes) {
+        if (cap_bytes <= 0) {
+            cap_bytes = 65536; // 64 KB default
+        }
+        this.capacity = cap_bytes;
+        this.offset = 0;
+        this.allocations_count = 0;
+        this.buffer = heap_alloc(cap_bytes);
+        return this.buffer != 0;
+    }
+
+    take allocate(take size_bytes) {
+        if (this.buffer == 0 || size_bytes <= 0) {
+            return 0;
+        }
+        // 8-byte alignment calculation
+        take aligned = (size_bytes + 7) / 8 * 8;
+        if (this.offset + aligned > this.capacity) {
+            return 0; // Arena out of capacity
+        }
+        take result_ptr = this.buffer + this.offset;
+        this.offset = this.offset + aligned;
+        this.allocations_count = this.allocations_count + 1;
+        return result_ptr;
+    }
+
+    take reset() {
+        this.offset = 0;
+        this.allocations_count = 0;
+        return 1;
+    }
+
+    take used() {
+        return this.offset;
+    }
+
+    take remaining() {
+        return this.capacity - this.offset;
+    }
+
+    take total_capacity() {
+        return this.capacity;
+    }
+
+    take count() {
+        return this.allocations_count;
+    }
+
+    take destroy() {
+        if (this.buffer != 0) {
+            heap_free(this.buffer);
+            this.buffer = 0;
+        }
+        this.capacity = 0;
+        this.offset = 0;
+        this.allocations_count = 0;
+        return 1;
+    }
+}

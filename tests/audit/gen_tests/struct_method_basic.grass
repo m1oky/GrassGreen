@@ -1,0 +1,14 @@
+!GrassGreen!
+struct Box {
+    int w;
+    int h;
+    int area() {
+        return 42;
+    }
+}
+int main() {
+    Box b;
+    take a = b.area();
+    gout << "area = " << a << endl;
+    return 0;
+}

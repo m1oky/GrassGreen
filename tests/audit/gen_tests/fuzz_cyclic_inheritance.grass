@@ -1,0 +1,4 @@
+!GrassGreen!
+class A : B { int x; }
+class B : A { int y; }
+int main() { A a; a.unknown = 10; return 0; }

@@ -1,0 +1,156 @@
+!GrassGreen!
+
+// =============================================================================
+// GrassGreen Standard Library: Algorithms (algo.grass)
+// Low-level heapless algorithms designed for OS, Freestanding, and Bare-metal.
+// Zero dynamic allocations.
+// =============================================================================
+
+// Minimum of two values
+take min(take a, take b) {
+    if (a < b) {
+        return a;
+    }
+    return b;
+}
+
+// Maximum of two values
+take max(take a, take b) {
+    if (a > b) {
+        return a;
+    }
+    return b;
+}
+
+// Clamp value between min_val and max_val
+take clamp(take v, take min_val, take max_val) {
+    if (v < min_val) {
+        return min_val;
+    }
+    if (v > max_val) {
+        return max_val;
+    }
+    return v;
+}
+
+// Fill buffer or array with constant value
+take fill(take arr, take count, take val) {
+    for (take i = 0; i < count; i++) {
+        arr[i] = val;
+    }
+    return count;
+}
+
+// Copy count elements from src to dst
+take copy(take src, take dst, take count) {
+    for (take i = 0; i < count; i++) {
+        dst[i] = src[i];
+    }
+    return count;
+}
+
+// Reverse elements in array in-place
+take reverse(take arr, take count) {
+    if (count <= 1) {
+        return count;
+    }
+    take left = 0;
+    take right = count - 1;
+    while (left < right) {
+        take tmp = arr[left];
+        arr[left] = arr[right];
+        arr[right] = tmp;
+        left = left + 1;
+        right = right - 1;
+    }
+    return count;
+}
+
+// Linear search: returns index of target, or -1 if not found
+take find(take arr, take count, take target) {
+    for (take i = 0; i < count; i++) {
+        if (arr[i] == target) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// Binary search on sorted array: returns index of target, or -1 if not found
+take binary_search(take arr, take count, take target) {
+    if (count <= 0) {
+        return -1;
+    }
+    take left = 0;
+    take right = count - 1;
+    while (left <= right) {
+        take mid = left + (right - left) / 2;
+        take val = arr[mid];
+        if (val == target) {
+            return mid;
+        }
+        if (val < target) {
+            left = mid + 1;
+        } else {
+            right = mid - 1;
+        }
+    }
+    return -1;
+}
+
+// Lower bound on sorted array: returns first index where arr[i] >= target, or count if not found
+take lower_bound(take arr, take count, take target) {
+    take left = 0;
+    take right = count;
+    while (left < right) {
+        take mid = left + (right - left) / 2;
+        if (arr[mid] < target) {
+            left = mid + 1;
+        } else {
+            right = mid;
+        }
+    }
+    return left;
+}
+
+// In-place element swap helper for sorting
+take algo_swap(take arr, take i, take j) {
+    take tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
+    return 0;
+}
+
+// Partition helper for QuickSort
+take algo_partition(take arr, take low, take high) {
+    take pivot = arr[high];
+    take i = low - 1;
+    for (take j = low; j < high; j++) {
+        if (arr[j] <= pivot) {
+            i = i + 1;
+            algo_swap(arr, i, j);
+        }
+    }
+    algo_swap(arr, i + 1, high);
+    return i + 1;
+}
+
+// Recursive in-place QuickSort range
+take algo_qsort_range(take arr, take low, take high) {
+    if (low < high) {
+        take pi = algo_partition(arr, low, high);
+        if (pi > 0) {
+            algo_qsort_range(arr, low, pi - 1);
+        }
+        algo_qsort_range(arr, pi + 1, high);
+    }
+    return 0;
+}
+
+// In-place QuickSort for arrays without heap allocations
+take sort(take arr, take count) {
+    if (count > 1) {
+        algo_qsort_range(arr, 0, count - 1);
+    }
+    return 0;
+}

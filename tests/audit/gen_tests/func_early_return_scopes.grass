@@ -1,0 +1,16 @@
+!GrassGreen!
+int test_scopes(int x) {
+    if (x > 5) {
+        take a = 10;
+        if (x > 8) {
+            take b = 20;
+            return a + b;
+        }
+        return a;
+    }
+    return 0;
+}
+int main() {
+    gout << test_scopes(10) << " " << test_scopes(6) << " " << test_scopes(2) << endl;
+    return 0;
+}

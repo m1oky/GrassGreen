@@ -1,0 +1,18 @@
+!GrassGreen!
+// Repro: Sema infinite recursion / stack overflow on cyclic inheritance
+// checkClassDecl has no cycle detection, find_field/find_method recurses endlessly
+// Crashes grassc.exe with EXCEPTION_STACK_OVERFLOW (0xC00000FD)
+
+class A : B {
+    int x;
+}
+
+class B : A {
+    int y;
+}
+
+int main() {
+    A a;
+    a.unknown_field = 10;
+    return 0;
+}

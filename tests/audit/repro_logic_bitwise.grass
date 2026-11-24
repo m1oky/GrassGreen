@@ -1,0 +1,12 @@
+!GrassGreen!
+// Repro: Logical && and || lowered to bitwise AND / OR on integers in Native
+// ASTLowerer emits create_and / create_or without converting operands to i1
+// 2 && 1 evaluates to 0 in Native (2 & 1 == 0), but evaluates to 1 in VM
+// Also side-effects are not short-circuited
+
+int main() {
+    take a = 2 && 1;
+    take b = 2 || 0;
+    gout << a << " " << b << endl;
+    return 0;
+}

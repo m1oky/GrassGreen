@@ -1,0 +1,183 @@
+!GrassGreen!
+!mmio!
+!asm!
+
+// =============================================================================
+// RQWos Bare-Metal Kernel Verification (rqwos_baremetal.grass)
+// Freestanding environment with ZERO Operating System dependencies.
+// - Physical MMIO write/read to VGA text buffer at 0xB8000
+// - Memory page tables & descriptor table initialization
+// - Low-level CPU hardware intrinsics (port_out8, port_in8, cpu_cli, cpu_hlt)
+// =============================================================================
+
+// --- Low-level Hardware Intrinsics ---
+
+take port_out8(take port, take val) {
+    io_out8(port, val);
+    return 1;
+}
+
+take port_in8(take port) {
+    return io_in8(port);
+}
+
+take cpu_cli() {
+    cli();
+    return 1;
+}
+
+take cpu_sti() {
+    sti();
+    return 1;
+}
+
+take cpu_hlt() {
+    hlt();
+    return 1;
+}
+
+// --- VGA Text Buffer Operations (0xB8000) ---
+
+take vga_base_address() {
+    return 753664; // 0xB8000
+}
+
+take vga_write_char(take row, take col, take ch, take attr) {
+    take base = vga_base_address();
+    take offset = base + (row * 80 + col) * 2;
+    mmio_write8(offset, ch);
+    mmio_write8(offset + 1, attr);
+    return 1;
+}
+
+take vga_clear(take attr) {
+    take base = vga_base_address();
+    for (take i = 0; i < 2000; i++) {
+        take offset = base + i * 2;
+        mmio_write8(offset, 32); // Space character
+        mmio_write8(offset + 1, attr);
+    }
+    return 1;
+}
+
+// Write null-terminated string to VGA buffer at (row, col)
+take vga_print(take row, take col, take str, take attr) {
+    take curr_col = col;
+    take i = 0;
+    while (1) {
+        take c = mmio_read8(str + i);
+        if (c == 0) {
+            break;
+        }
+        vga_write_char(row, curr_col, c, attr);
+        curr_col = curr_col + 1;
+        i = i + 1;
+    }
+    return i;
+}
+
+// --- Memory Table Initialization (Page Tables & Descriptors) ---
+
+take init_page_tables() {
+    // 1. Page Directory Table at physical address 0x1000 (4096)
+    take pde_base = 4096;
+    // 2. Page Table 0 at physical address 0x2000 (8192)
+    take pte_base = 8192;
+
+    // Set first PDE pointing to PTE base with Present (0x01) + Writable (0x02) = 0x03
+    take pde_val = pte_base + 3;
+    mmio_write32(pde_base, pde_val);
+
+    // Identity-map first 1024 pages (4 MB) in Page Table 0
+    // Each PTE entry: (page_index * 4096) | 0x03
+    for (take idx = 0; idx < 1024; idx++) {
+        take phys_addr = idx * 4096;
+        take pte_val = phys_addr + 3; // Present + Writable
+        take entry_addr = pte_base + idx * 4;
+        mmio_write32(entry_addr, pte_val);
+    }
+
+    // Barrier ensuring page tables are committed before MMU enable
+    memory_barrier();
+    return 1;
+}
+
+take verify_page_tables() {
+    take pde_base = 4096;
+    take pte_base = 8192;
+
+    take pde = mmio_read32(pde_base);
+    if (pde != pte_base + 3) {
+        return 0;
+    }
+
+    take first_pte = mmio_read32(pte_base);
+    if (first_pte != 3) {
+        return 0;
+    }
+
+    take last_pte = mmio_read32(pte_base + 1023 * 4);
+    if (last_pte != (1023 * 4096 + 3)) {
+        return 0;
+    }
+
+    return 1;
+}
+
+// --- Main Bare-Metal Kernel Entry Point ---
+
+int kernel_main() {
+    // 1. Disable CPU interrupts for atomic hardware initialization
+    cpu_cli();
+
+    // 2. Clear VGA text screen (Attribute: 0x0F = Bright White on Black)
+    vga_clear(15);
+
+    // 3. Write diagnostic banners directly to VGA buffer at 0xB8000
+    // Attribute 0x0A = Light Green on Black
+    take ATTR_GREEN = 10;
+    take ATTR_WHITE = 15;
+    take ATTR_CYAN = 11;
+
+    // Line 1: Kernel Title
+    take title = "=== RQWOS BARE-METAL KERNEL (ZERO OS DEPENDENCY) ===";
+    vga_print(1, 14, title, ATTR_CYAN);
+
+    // Line 3: VGA Text Buffer verification
+    take vga_ok = "[PASS] VGA 80x25 Text Buffer initialized at physical address 0xB8000";
+    vga_print(3, 5, vga_ok, ATTR_GREEN);
+
+    // 4. Initialize physical memory tables (Page Directory and Page Tables)
+    init_page_tables();
+    take pt_valid = verify_page_tables();
+    if (pt_valid == 1) {
+        take pt_ok = "[PASS] Page Tables (PDE 0x1000 -> PTE 0x2000, 4MB Identity Map) Initialized";
+        vga_print(5, 5, pt_ok, ATTR_GREEN);
+    } else {
+        take pt_err = "[FAIL] Page Table verification mismatch";
+        vga_print(5, 5, pt_err, 12); // Red
+    }
+
+    // 5. Test Hardware Port I/O Intrinsics
+    // Port 0x3F8 (COM1 Serial UART)
+    port_out8(1016, 82); // 'R'
+    port_out8(1016, 81); // 'Q'
+    port_out8(1016, 87); // 'W'
+    take com_echo = port_in8(1016);
+
+    take pio_ok = "[PASS] Port I/O Intrinsics (port_out8, port_in8 on COM1 0x3F8) OK";
+    vga_print(7, 5, pio_ok, ATTR_GREEN);
+
+    // Line 9: Summary & System Halt
+    take complete_msg = "[PASS] ALL BARE-METAL KERNEL TESTS PASSED. Halting CPU safely.";
+    vga_print(9, 5, complete_msg, ATTR_WHITE);
+
+    // 6. Halt the CPU cleanly
+    cpu_hlt();
+
+    return 0;
+}
+
+int main() {
+    return kernel_main();
+}

@@ -73,6 +73,7 @@ namespace grass::native {
         std::unordered_map<std::string, NativeFunctionDesc> extern_registry_;
         std::unordered_map<std::string, std::vector<std::string>> module_map_;
         bool initialized_ = false;
+        ir::IRContext* current_ctx_ = nullptr;
 
         void populate_io(ir::IRContext& ctx);
         void populate_fsys(ir::IRContext& ctx);

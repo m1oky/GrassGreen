@@ -1054,6 +1054,26 @@ namespace grass::backend {
         emit_u8(0x31);
     }
 
+    void GrassX86Encoder::in_al_dx() {
+        emit_u8(0xEC);
+    }
+
+    void GrassX86Encoder::out_dx_al() {
+        emit_u8(0xEE);
+    }
+
+    void GrassX86Encoder::cli() {
+        emit_u8(0xFA);
+    }
+
+    void GrassX86Encoder::sti() {
+        emit_u8(0xFB);
+    }
+
+    void GrassX86Encoder::hlt() {
+        emit_u8(0xF4);
+    }
+
     // == Integer Arithmetic and Logic ==
 
     void GrassX86Encoder::emit_alu_rr(uint8_t alu_code, Reg dst, Reg src) {

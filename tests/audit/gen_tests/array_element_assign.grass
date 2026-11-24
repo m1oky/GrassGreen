@@ -1,0 +1,7 @@
+!GrassGreen!
+int main() {
+    take arr = [];
+    arr[0] = 55;
+    gout << arr[0] << endl;
+    return 0;
+}

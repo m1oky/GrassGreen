@@ -1,0 +1,14 @@
+!GrassGreen!
+struct Mixed {
+    bool flag1;
+    bool flag2;
+    int val;
+}
+int main() {
+    Mixed m;
+    m.flag1 = true;
+    m.flag2 = false;
+    m.val = 777;
+    gout << m.val << endl;
+    return 0;
+}

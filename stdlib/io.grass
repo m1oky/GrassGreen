@@ -1,0 +1,143 @@
+!GrassGreen!
+
+// =============================================================================
+// GrassGreen Standard Library: I/O (Pure GrassGreen Native Runtime)
+// Direct OS Console API Calls via kernel32.dll externs (GetStdHandle, WriteFile, ReadFile)
+// Zero C runtime dependencies.
+// =============================================================================
+
+// Standard handle identifiers for Windows console
+take io_stdin_id() {
+    return -10;
+}
+
+take io_stdout_id() {
+    return -11;
+}
+
+take io_stderr_id() {
+    return -12;
+}
+
+// Retrieve OS standard stream handles
+take io_get_std_handle(take nStdHandle) {
+    return GetStdHandle(nStdHandle);
+}
+
+take io_stdin() {
+    return GetStdHandle(-10);
+}
+
+take io_stdout() {
+    return GetStdHandle(-11);
+}
+
+take io_stderr() {
+    return GetStdHandle(-12);
+}
+
+// Compute string length using Win32 API lstrlenA
+take io_strlen(take str) {
+    if (str == 0) {
+        return 0;
+    }
+    return lstrlenA(str);
+}
+
+// Low-level buffer write to console handle
+take io_write_raw(take handle, take buf, take length) {
+    if (handle == 0 || buf == 0 || length <= 0) {
+        return 0;
+    }
+    take written = 0;
+    take res = WriteFile(handle, buf, length, &written, 0);
+    if (res == 0) {
+        return 0;
+    }
+    return written;
+}
+
+// Low-level buffer read from console handle
+take io_read_raw(take handle, take buf, take max_len) {
+    if (handle == 0 || buf == 0 || max_len <= 0) {
+        return 0;
+    }
+    take bytes_read = 0;
+    take res = ReadFile(handle, buf, max_len, &bytes_read, 0);
+    if (res == 0) {
+        return 0;
+    }
+    return bytes_read;
+}
+
+// Write string to standard output
+take io_print(take str) {
+    if (str == 0) {
+        return 0;
+    }
+    take hOut = io_stdout();
+    take len_val = io_strlen(str);
+    return io_write_raw(hOut, str, len_val);
+}
+
+// Write newline to standard output
+take io_print_newline() {
+    take hOut = io_stdout();
+    take newline = "\r\n";
+    return io_write_raw(hOut, newline, 2);
+}
+
+// Write string followed by newline to standard output
+take io_println(take str) {
+    take w1 = io_print(str);
+    take w2 = io_print_newline();
+    return w1 + w2;
+}
+
+// Print integer value to standard output without C-runtime sprintf
+take io_print_int(take val) {
+    take hOut = io_stdout();
+    if (val == 0) {
+        take zero = "0";
+        return io_write_raw(hOut, zero, 1);
+    }
+    take total_written = 0;
+    if (val < 0) {
+        take minus = "-";
+        total_written = total_written + io_write_raw(hOut, minus, 1);
+        val = 0 - val;
+    }
+
+    take digits = [];
+    while (val > 0) {
+        take rem = val % 10;
+        digits.push(rem);
+        val = val / 10;
+    }
+
+    take count = len(digits);
+    take idx = count - 1;
+    while (idx >= 0) {
+        take d = digits[idx];
+        take char_str = "0";
+        if (d == 1) { char_str = "1"; }
+        if (d == 2) { char_str = "2"; }
+        if (d == 3) { char_str = "3"; }
+        if (d == 4) { char_str = "4"; }
+        if (d == 5) { char_str = "5"; }
+        if (d == 6) { char_str = "6"; }
+        if (d == 7) { char_str = "7"; }
+        if (d == 8) { char_str = "8"; }
+        if (d == 9) { char_str = "9"; }
+
+        total_written = total_written + io_write_raw(hOut, char_str, 1);
+        idx = idx - 1;
+    }
+    return total_written;
+}
+
+// Read line from standard input into preallocated buffer
+take io_read_line(take buf, take max_len) {
+    take hIn = io_stdin();
+    return io_read_raw(hIn, buf, max_len);
+}

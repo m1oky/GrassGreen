@@ -1,0 +1,16 @@
+!GrassGreen!
+// Repro: 'class' keyword is rejected by BytecodeCompiler and ignored by ASTLowerer
+// BytecodeCompiler: "Class definition outside function is not supported in current VM bytecode compiler!"
+// ASTLowerer: ignores class declarations, leading to "Undeclared identifier"
+
+class Player {
+    int health;
+    int mana;
+}
+
+int main() {
+    Player p;
+    p.health = 100;
+    gout << "health = " << p.health << endl;
+    return 0;
+}
