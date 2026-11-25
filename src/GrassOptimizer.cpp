@@ -95,6 +95,8 @@ namespace GrassOptimizer {
                 case OP_SET_INDEX:
                 case OP_ARRAY_PUSH:
                 case OP_ARRAY_POP:
+                case OP_DEREF:
+                case OP_STORE_DEREF:
                 case OP_PARAM_PROLOGUE:
                 case OP_PARAM_EPILOGUE:
                     break;
@@ -139,6 +141,9 @@ namespace GrassOptimizer {
                 case OP_NEW_STRUCT:
                 case OP_GET_FIELD:
                 case OP_SET_FIELD:
+                case OP_ADDR_VAR:
+                case OP_ADDR_INDEX:
+                case OP_ADDR_FIELD:
                     inst.str_val = readStringAt(code, ip);
                     break;
 
@@ -381,6 +386,9 @@ namespace GrassOptimizer {
                 case OP_NEW_STRUCT:
                 case OP_GET_FIELD:
                 case OP_SET_FIELD:
+                case OP_ADDR_VAR:
+                case OP_ADDR_INDEX:
+                case OP_ADDR_FIELD:
                     current_offset += 4 + inst.str_val.size();
                     break;
                 case OP_CALL_BUILTIN:
@@ -473,6 +481,9 @@ namespace GrassOptimizer {
                 case OP_NEW_STRUCT:
                 case OP_GET_FIELD:
                 case OP_SET_FIELD:
+                case OP_ADDR_VAR:
+                case OP_ADDR_INDEX:
+                case OP_ADDR_FIELD:
                     emitString(inst.str_val);
                     break;
 

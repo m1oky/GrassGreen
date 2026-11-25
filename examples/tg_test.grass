@@ -22,7 +22,7 @@ int main() {
                 tg_send_btn(chat, "Привет! Выбери команду:", "Меню|Бросить кубик|Инлайн кнопки");
             }
             else if (msg == "Бросить кубик") {
-                tg_send_dice(chat, "🎲");
+                tg_send_dice(chat, "");
             }
             else if (msg == "Инлайн кнопки") {
                 tg_send_inline(chat, "Нажми на нужную кнопку:", "Огонь=fire|Ракета=rocket");

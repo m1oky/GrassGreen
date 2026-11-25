@@ -100,7 +100,7 @@ take net_create_sockaddr(take ip_addr, take port) {
 
 // Connect to remote address
 take net_connect(take sock, take sockaddr_ptr, take addr_len) {
-    if (sock == -1 || sock == 0 || sockaddr_ptr == 0) {
+    if (sock == -1 || sock == 0 || sockaddr_ptr == 0 || addr_len <= 0) {
         return -1;
     }
     return connect(sock, sockaddr_ptr, addr_len);
@@ -108,7 +108,7 @@ take net_connect(take sock, take sockaddr_ptr, take addr_len) {
 
 // Bind socket to local port
 take net_bind(take sock, take sockaddr_ptr, take addr_len) {
-    if (sock == -1 || sock == 0 || sockaddr_ptr == 0) {
+    if (sock == -1 || sock == 0 || sockaddr_ptr == 0 || addr_len <= 0) {
         return -1;
     }
     return bind(sock, sockaddr_ptr, addr_len);
@@ -116,7 +116,7 @@ take net_bind(take sock, take sockaddr_ptr, take addr_len) {
 
 // Listen for incoming connections
 take net_listen(take sock, take backlog) {
-    if (sock == -1 || sock == 0) {
+    if (sock == -1 || sock == 0 || backlog < 0) {
         return -1;
     }
     return listen(sock, backlog);

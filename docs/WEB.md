@@ -188,7 +188,7 @@ page-start
         card-start
             color(#22c55e)
             thick
-            h3 = ⚡ Быстродействие
+            h3 = Быстродействие
             color(#d4d4d8)
             p = Мгновенная компиляция исходного кода в чистый HTML5 и CSS3 без медленных сборщиков Webpack и Node.js.
         card-end
@@ -196,7 +196,7 @@ page-start
         card-start
             color(#38bdf8)
             thick
-            h3 = 💎 Стили и Flexbox/Grid
+            h3 = Стили и Flexbox/Grid
             color(#d4d4d8)
             p = Полноценная поддержка адаптивных сеток, расстояний gap, скруглений radius и эффекта матового стекла.
         card-end
@@ -204,7 +204,7 @@ page-start
         card-start
             color(#f59e0b)
             thick
-            h3 = 🔄 Реактивность
+            h3 = Реактивность
             color(#d4d4d8)
             p = Встроенный скриптовый движок script-start с таймерами every() и коллбэками on-click.
         card-end

@@ -23,7 +23,13 @@ take heap_alloc(take size_bytes) {
     if (size_bytes <= 0) {
         size_bytes = 1;
     }
+    if (size_bytes > 2147483647) {
+        return 0;
+    }
     take hHeap = heap_get_process_heap();
+    if (hHeap == 0 || hHeap == -1) {
+        return 0;
+    }
     take flags = heap_zero_memory_flag();
     return HeapAlloc(hHeap, flags, size_bytes);
 }
@@ -34,6 +40,9 @@ take heap_free(take ptr) {
         return 1;
     }
     take hHeap = heap_get_process_heap();
+    if (hHeap == 0 || hHeap == -1) {
+        return 0;
+    }
     return HeapFree(hHeap, 0, ptr);
 }
 
@@ -46,7 +55,13 @@ take heap_realloc(take ptr, take new_size_bytes) {
         heap_free(ptr);
         return 0;
     }
+    if (new_size_bytes > 2147483647) {
+        return 0;
+    }
     take hHeap = heap_get_process_heap();
+    if (hHeap == 0 || hHeap == -1) {
+        return 0;
+    }
     take flags = heap_zero_memory_flag();
     return HeapReAlloc(hHeap, flags, ptr, new_size_bytes);
 }
@@ -101,12 +116,15 @@ class ArenaAllocator {
     }
 
     take allocate(take size_bytes) {
-        if (this.buffer == 0 || size_bytes <= 0) {
+        if (this.buffer == 0 || size_bytes <= 0 || size_bytes > this.capacity) {
             return 0;
         }
-        // 8-byte alignment calculation
-        take aligned = (size_bytes + 7) / 8 * 8;
-        if (this.offset + aligned > this.capacity) {
+        // Overflow-safe 8-byte alignment check
+        if (size_bytes > this.capacity - 7) {
+            return 0;
+        }
+        take aligned = ((size_bytes + 7) / 8) * 8;
+        if (aligned > this.capacity - this.offset) {
             return 0; // Arena out of capacity
         }
         take result_ptr = this.buffer + this.offset;

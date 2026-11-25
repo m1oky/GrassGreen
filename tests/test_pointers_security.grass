@@ -1,0 +1,129 @@
+!GrassGreen!
+!memory!
+!io!
+
+void add_to_ptr(int* p, int v) {
+    *p = *p + v;
+}
+
+struct Guard {
+    int id;
+    int blk;
+    int* on_destroy;
+
+    void init(int rid, int* dtor_counter) {
+        this.id = rid;
+        this.blk = memory_alloc(32);
+        this.on_destroy = dtor_counter;
+    }
+
+    int bump(int delta) {
+        this.id = this.id + delta;
+        return this.id;
+    }
+
+    ~Guard() {
+        if (this.on_destroy != 0) {
+            add_to_ptr(this.on_destroy, 1);
+        }
+        if (this.blk != 0) {
+            memory_free_block(this.blk);
+            this.blk = 0;
+        }
+        gout << "~Guard(" << this.id << ")" << endl;
+    }
+}
+
+int* choose_ptr(int* a, int* b, int use_a) {
+    if (use_a != 0) {
+        return a;
+    }
+    return b;
+}
+
+void mutate_guard_via_ptr(Guard* g, int delta) {
+    g->bump(delta);
+}
+
+int main() {
+    gout << "=== 1. Typed & Double Pointers ===" << endl;
+    int xi = 10;
+    int* pxi = &xi;
+    *pxi = 25;
+    int** ppxi = &pxi;
+    **ppxi = 42;
+    gout << "xi=" << xi << " *pxi=" << *pxi << " **ppxi=" << **ppxi << endl;
+
+    take tv = 100;
+    take ptv = &tv;
+    *ptv = 123;
+    gout << "tv=" << tv << " *ptv=" << *ptv << endl;
+
+    float fx = 2.5;
+    float* pfx = &fx;
+    *pfx = 7.5;
+    gout << "fx=" << fx << " *pfx=" << *pfx << endl;
+
+    bool bx = false;
+    bool* pbx = &bx;
+    *pbx = true;
+    gout << "bx=" << bx << " *pbx=" << *pbx << endl;
+
+    char cx = 65;
+    char* pcx = &cx;
+    *pcx = 66;
+    gout << "cx=" << cx << " *pcx=" << *pcx << endl;
+
+    gout << "=== 2. Struct Pointer + RAII Safety ===" << endl;
+    int dtor_count = 0;
+    {
+        Guard g1;
+        g1.init(5, &dtor_count);
+        Guard* gp = &g1;
+        take gp2 = &g1;
+        gp->id = 10;
+        int r1 = gp->bump(3);
+        int r2 = gp2->bump(2);
+        mutate_guard_via_ptr(gp, 5);
+        gout << "g1.id=" << g1.id << " gp->id=" << gp->id << " r1=" << r1 << " r2=" << r2 << endl;
+    }
+    gout << "dtor_count=" << dtor_count << endl;
+
+    gout << "=== 3. Pointer Arithmetic, Indexing, Comparisons ===" << endl;
+    take arr = [10, 20, 30, 40];
+    take p0 = &arr[0];
+    take p2 = p0 + 2;
+    take p1 = p2 - 1;
+    p1[0] = 25;
+    *(p0 + 3) = 45;
+    int diff = p2 - p0;
+    bool is_null = (p0 == 0);
+    bool not_null = (p0 != nullptr);
+    int64* np = nullptr;
+    bool np_eq = (np == 0);
+    gout << "arr0=" << p0[0] << " arr1=" << arr[1] << " arr2=" << *p2 << " arr3=" << arr[3] << " diff=" << diff << " null=" << is_null << " nn=" << not_null << " np=" << np_eq << endl;
+
+    gout << "=== 4. Passing, Returning, Casting Pointers ===" << endl;
+    int av = 50;
+    int bv = 90;
+    add_to_ptr(&av, 7);
+    int* picked = choose_ptr(&av, &bv, 1);
+    *picked = *picked + 3;
+    void* rawp = (void*)&bv;
+    int* castp = (int*)rawp;
+    int* cast_as = rawp as int*;
+    *castp = 99;
+    gout << "av=" << av << " *picked=" << *picked << " *cast_as=" << *cast_as << endl;
+
+    gout << "=== 5. Security & Overflow Guards ===" << endl;
+    take neg_blk = memory_alloc(-16);
+    take big_blk = memory_alloc(200000000000000);
+    take bad_io = io_write_raw(-1, "x", 1);
+    int z = 0;
+    int safe_div = 100 / z;
+    int safe_mod = 100 % z;
+    float fz = 0.0;
+    float safe_fdiv = 9.0 / fz;
+    gout << "neg=" << neg_blk << " big=" << big_blk << " bad_io=" << bad_io << " sdiv=" << safe_div << " smod=" << safe_mod << " sfdiv=" << safe_fdiv << endl;
+    return 0;
+}

@@ -383,8 +383,28 @@ public:
             dispatch_table[OP_DEC_VAR]       = &&do_dec_var;
             dispatch_table[OP_THREAD_SPAWN]  = &&do_thread_spawn;
             dispatch_table[OP_ASYNC_SPAWN]   = &&do_async_spawn;
+            dispatch_table[OP_ADDR_VAR]      = &&do_addr_var;
+            dispatch_table[OP_DEREF]         = &&do_deref;
+            dispatch_table[OP_STORE_DEREF]   = &&do_store_deref;
+            dispatch_table[OP_ADDR_INDEX]    = &&do_addr_index;
+            dispatch_table[OP_ADDR_FIELD]    = &&do_addr_field;
             table_init = true;
         }
+
+        auto find_var_cell = [&](const string& name) -> GrassValue* {
+            for (int fi = (int)frames.size() - 1; fi >= 0; --fi) {
+                auto it = frames[fi].locals.find(name);
+                if (it != frames[fi].locals.end()) return &it->second;
+            }
+            if (shared_env) {
+                std::lock_guard<std::mutex> lk(shared_env->mtx);
+                auto sit = shared_env->vars.find(name);
+                if (sit != shared_env->vars.end()) return &sit->second;
+            }
+            auto vit = vars.find(name);
+            if (vit != vars.end()) return &vit->second;
+            return nullptr;
+        };
 
         #define DISPATCH_STEP() \
             do { \
@@ -407,7 +427,20 @@ public:
     do_add_const: {
         double c = readDouble();
         GrassValue a = pop();
-        if (a.isNumeric()) push(GrassValue::Num(a.toNumber() + c));
+        if (a.is_ptr()) {
+            GrassVMPtr* orig = a.asPtr();
+            int64_t off = (int64_t)c;
+            if (!orig) push(GrassValue::Num(0.0));
+            else {
+                GrassVMPtr* np = (GrassVMPtr*)g_vm_arena.alloc(sizeof(GrassVMPtr));
+                *np = *orig;
+                if (np->vec) np->vec_idx += off;
+                else if (np->raw) np->raw_off += off * (np->elem_size > 0 ? np->elem_size : 1);
+                else np->cell += off;
+                push(GrassValue::Ptr(np));
+            }
+        }
+        else if (a.isNumeric()) push(GrassValue::Num(a.toNumber() + c));
         else if (a.is_str()) push(GrassValue::Str(a.toString() + GrassValue::Num(c).toString()));
         else push(GrassValue::Num(a.toNumber() + c));
         DISPATCH_STEP();
@@ -416,7 +449,21 @@ public:
     do_sub_const: {
         double c = readDouble();
         GrassValue a = pop();
-        push(GrassValue::Num(a.toNumber() - c));
+        if (a.is_ptr()) {
+            GrassVMPtr* orig = a.asPtr();
+            int64_t off = (int64_t)c;
+            if (!orig) push(GrassValue::Num(0.0));
+            else {
+                GrassVMPtr* np = (GrassVMPtr*)g_vm_arena.alloc(sizeof(GrassVMPtr));
+                *np = *orig;
+                if (np->vec) np->vec_idx -= off;
+                else if (np->raw) np->raw_off -= off * (np->elem_size > 0 ? np->elem_size : 1);
+                else np->cell -= off;
+                push(GrassValue::Ptr(np));
+            }
+        } else {
+            push(GrassValue::Num(a.toNumber() - c));
+        }
         DISPATCH_STEP();
     }
 
@@ -667,7 +714,22 @@ public:
 
     do_add: {
         GrassValue b = pop(), a = pop();
-        if (a.is_str() && b.is_str()) push(GrassValue::Str(a.toString() + b.toString()));
+        if (a.is_ptr() || b.is_ptr()) {
+            GrassValue pv = a.is_ptr() ? a : b;
+            int64_t off = (int64_t)(a.is_ptr() ? b.toNumber() : a.toNumber());
+            GrassVMPtr* orig = pv.asPtr();
+            if (!orig) {
+                push(GrassValue::Num(0.0));
+            } else {
+                GrassVMPtr* np = (GrassVMPtr*)g_vm_arena.alloc(sizeof(GrassVMPtr));
+                *np = *orig;
+                if (np->vec) np->vec_idx += off;
+                else if (np->raw) np->raw_off += off * (np->elem_size > 0 ? np->elem_size : 1);
+                else np->cell += off;
+                push(GrassValue::Ptr(np));
+            }
+        }
+        else if (a.is_str() && b.is_str()) push(GrassValue::Str(a.toString() + b.toString()));
         else if (a.isNumeric() && b.isNumeric()) push(GrassValue::Num(a.toNumber() + b.toNumber()));
         else if (a.is_str() || b.is_str()) push(GrassValue::Str(a.toString() + b.toString()));
         else push(GrassValue::Num(a.toNumber() + b.toNumber()));
@@ -676,7 +738,37 @@ public:
 
     do_sub: {
         GrassValue b = pop(), a = pop();
-        push(GrassValue::Num(a.toNumber() - b.toNumber()));
+        if (a.is_ptr() && b.is_ptr()) {
+            GrassVMPtr* p1 = a.asPtr();
+            GrassVMPtr* p2 = b.asPtr();
+            int64_t diff = 0;
+            if (p1 && p2) {
+                if (p1->vec && p1->vec == p2->vec) {
+                    diff = p1->vec_idx - p2->vec_idx;
+                } else if (p1->raw && p1->raw == p2->raw) {
+                    int64_t es = p1->elem_size > 0 ? p1->elem_size : 1;
+                    diff = (p1->raw_off - p2->raw_off) / es;
+                } else if (p1->cell && p2->cell) {
+                    diff = (int64_t)(p1->cell - p2->cell);
+                }
+            }
+            push(GrassValue::Num((double)diff));
+        } else if (a.is_ptr()) {
+            GrassVMPtr* orig = a.asPtr();
+            int64_t off = (int64_t)b.toNumber();
+            if (!orig) {
+                push(GrassValue::Num(0.0));
+            } else {
+                GrassVMPtr* np = (GrassVMPtr*)g_vm_arena.alloc(sizeof(GrassVMPtr));
+                *np = *orig;
+                if (np->vec) np->vec_idx -= off;
+                else if (np->raw) np->raw_off -= off * (np->elem_size > 0 ? np->elem_size : 1);
+                else np->cell -= off;
+                push(GrassValue::Ptr(np));
+            }
+        } else {
+            push(GrassValue::Num(a.toNumber() - b.toNumber()));
+        }
         DISPATCH_STEP();
     }
 
@@ -762,7 +854,30 @@ public:
 
     do_cmp_eq: {
         GrassValue b = pop(), a = pop();
-        if (a.is_str() && b.is_str()) {
+        if (a.is_ptr() || b.is_ptr()) {
+            auto ptr_is_null = [](const GrassValue& v) -> bool {
+                if (v.is_nil()) return true;
+                if (v.is_num()) return v.toNumber() == 0.0;
+                if (v.is_ptr()) {
+                    GrassVMPtr* p = v.asPtr();
+                    return !p || (!p->cell && !p->vec && !p->raw && !p->struct_inst);
+                }
+                return false;
+            };
+            bool eq = false;
+            if (a.is_ptr() && b.is_ptr()) {
+                GrassVMPtr* p1 = a.asPtr();
+                GrassVMPtr* p2 = b.asPtr();
+                if (!p1 && !p2) eq = true;
+                else if (p1 && p2) {
+                    eq = (p1->cell == p2->cell && p1->vec == p2->vec && p1->vec_idx == p2->vec_idx &&
+                          p1->raw == p2->raw && p1->raw_off == p2->raw_off && p1->struct_inst == p2->struct_inst);
+                }
+            } else {
+                eq = ptr_is_null(a) && ptr_is_null(b);
+            }
+            push(GrassValue::Num(eq ? 1.0 : 0.0));
+        } else if (a.is_str() && b.is_str()) {
             const char* sa = a.asCStr();
             const char* sb = b.asCStr();
             push(GrassValue::Num((sa && sb && strcmp(sa, sb) == 0) ? 1.0 : 0.0));
@@ -774,7 +889,30 @@ public:
 
     do_cmp_neq: {
         GrassValue b = pop(), a = pop();
-        if (a.is_str() && b.is_str()) {
+        if (a.is_ptr() || b.is_ptr()) {
+            auto ptr_is_null = [](const GrassValue& v) -> bool {
+                if (v.is_nil()) return true;
+                if (v.is_num()) return v.toNumber() == 0.0;
+                if (v.is_ptr()) {
+                    GrassVMPtr* p = v.asPtr();
+                    return !p || (!p->cell && !p->vec && !p->raw && !p->struct_inst);
+                }
+                return false;
+            };
+            bool eq = false;
+            if (a.is_ptr() && b.is_ptr()) {
+                GrassVMPtr* p1 = a.asPtr();
+                GrassVMPtr* p2 = b.asPtr();
+                if (!p1 && !p2) eq = true;
+                else if (p1 && p2) {
+                    eq = (p1->cell == p2->cell && p1->vec == p2->vec && p1->vec_idx == p2->vec_idx &&
+                          p1->raw == p2->raw && p1->raw_off == p2->raw_off && p1->struct_inst == p2->struct_inst);
+                }
+            } else {
+                eq = ptr_is_null(a) && ptr_is_null(b);
+            }
+            push(GrassValue::Num(eq ? 0.0 : 1.0));
+        } else if (a.is_str() && b.is_str()) {
             const char* sa = a.asCStr();
             const char* sb = b.asCStr();
             push(GrassValue::Num((sa && sb && strcmp(sa, sb) != 0) ? 1.0 : 0.0));
@@ -1662,8 +1800,59 @@ public:
                     else if (fn == "memory_clean") { GrassMemory::clean(); push(GrassValue::Num(1.0)); }
                     else if (fn == "memory_free") { push(GrassValue::Str(GrassMemory::get_system_free())); }
                     else if (fn == "memory_alloc" && argc >= 1) {
-                        int block_id = GrassMemory::alloc_block((size_t)args[0].toNumber());
-                        push(GrassValue::Num((double)block_id));
+                        double req = args[0].toNumber();
+                        if (req <= 0.0 || req > 1073741824.0) {
+                            push(GrassValue::Num(0.0));
+                        } else {
+                            int block_id = GrassMemory::alloc_block((size_t)req);
+                            push(GrassValue::Num((double)block_id));
+                        }
+                    }
+                    else if (fn == "alloc" && argc >= 1) {
+                        double req = args[0].toNumber();
+                        if (req <= 0.0 || req > 2147483647.0) {
+                            push(GrassValue::Num(0.0));
+                        } else {
+                            size_t sz = (size_t)req;
+                            uint8_t* raw = (uint8_t*)g_vm_arena.alloc(sz);
+                            if (raw) memset(raw, 0, sz);
+                            GrassVMPtr* p = (GrassVMPtr*)g_vm_arena.alloc(sizeof(GrassVMPtr));
+                            new (p) GrassVMPtr();
+                            p->raw = raw;
+                            p->raw_size = raw ? sz : 0;
+                            p->elem_size = 1;
+                            p->is_scalar_u8 = true;
+                            p->scalar_kind = 1;
+                            push(raw ? GrassValue::Ptr(p) : GrassValue::Num(0.0));
+                        }
+                    }
+                    else if (fn == "free") {
+                        push(GrassValue::Num(0.0));
+                    }
+                    else if (fn == "realloc" && argc >= 2) {
+                        double req = args[1].toNumber();
+                        if (req <= 0.0 || req > 2147483647.0) {
+                            push(GrassValue::Num(0.0));
+                        } else {
+                            size_t nsz = (size_t)req;
+                            uint8_t* raw = (uint8_t*)g_vm_arena.alloc(nsz);
+                            if (raw) {
+                                memset(raw, 0, nsz);
+                                if (args[0].is_ptr() && args[0].asPtr() && args[0].asPtr()->raw) {
+                                    GrassVMPtr* op = args[0].asPtr();
+                                    size_t copy_sz = std::min(nsz, op->raw_size);
+                                    if (copy_sz > 0) memcpy(raw, op->raw, copy_sz);
+                                }
+                            }
+                            GrassVMPtr* p = (GrassVMPtr*)g_vm_arena.alloc(sizeof(GrassVMPtr));
+                            new (p) GrassVMPtr();
+                            p->raw = raw;
+                            p->raw_size = raw ? nsz : 0;
+                            p->elem_size = 1;
+                            p->is_scalar_u8 = true;
+                            p->scalar_kind = 1;
+                            push(raw ? GrassValue::Ptr(p) : GrassValue::Num(0.0));
+                        }
                     }
                     else if (fn == "memory_free_block" && argc >= 1) {
                         bool ok = GrassMemory::free_block((int)args[0].toNumber());
@@ -3075,7 +3264,24 @@ public:
     do_get_index: {
         GrassValue obj = pop();
         GrassValue idx = pop();
-        if (obj.is_array()) {
+        if (obj.is_ptr()) {
+            GrassVMPtr* p = obj.asPtr();
+            int64_t i = (int64_t)idx.toNumber();
+            if (p && p->vec) {
+                int64_t pos = p->vec_idx + i;
+                if (pos >= 0 && (size_t)pos < p->vec->size()) push((*p->vec)[pos]);
+                else push(GrassValue::Nil());
+            } else if (p && p->raw) {
+                int64_t es = p->elem_size > 0 ? p->elem_size : 1;
+                int64_t off = p->raw_off + i * es;
+                if (off >= 0 && (size_t)off < p->raw_size) push(GrassValue::Num((double)*(uint8_t*)(p->raw + off)));
+                else push(GrassValue::Num(0.0));
+            } else if (p && p->cell && i == 0) {
+                push(*p->cell);
+            } else {
+                push(GrassValue::Nil());
+            }
+        } else if (obj.is_array()) {
             GrassArray* arr = obj.asArray();
             long long i = (long long)idx.toNumber();
             if (arr && i >= 0 && (size_t)i < arr->elements.size()) {
@@ -3101,7 +3307,20 @@ public:
         GrassValue obj = pop();
         GrassValue val = pop();
         GrassValue idx = pop();
-        if (obj.is_array()) {
+        if (obj.is_ptr()) {
+            GrassVMPtr* p = obj.asPtr();
+            int64_t i = (int64_t)idx.toNumber();
+            if (p && p->vec) {
+                int64_t pos = p->vec_idx + i;
+                if (pos >= 0 && (size_t)pos < p->vec->size()) (*p->vec)[pos] = val;
+            } else if (p && p->raw) {
+                int64_t es = p->elem_size > 0 ? p->elem_size : 1;
+                int64_t off = p->raw_off + i * es;
+                if (off >= 0 && (size_t)off < p->raw_size) *(uint8_t*)(p->raw + off) = (uint8_t)val.toNumber();
+            } else if (p && p->cell && i == 0) {
+                *p->cell = val;
+            }
+        } else if (obj.is_array()) {
             GrassArray* arr = obj.asArray();
             long long i = (long long)idx.toNumber();
             if (arr && i >= 0) {
@@ -3178,8 +3397,15 @@ public:
         {
             string f_name = readString();
             GrassValue obj = pop();
+            GrassStructInstance* inst = nullptr;
             if (obj.is_struct()) {
-                GrassStructInstance* inst = obj.asStruct();
+                inst = obj.asStruct();
+            } else if (obj.is_ptr() && obj.asPtr()) {
+                GrassVMPtr* p = obj.asPtr();
+                if (p->struct_inst) inst = p->struct_inst;
+                else if (p->cell && p->cell->is_struct()) inst = p->cell->asStruct();
+            }
+            if (inst) {
                 if (inst && inst->def && inst->data) {
                     auto it = inst->def->field_indices.find(f_name);
                     if (it != inst->def->field_indices.end()) {
@@ -3234,8 +3460,15 @@ public:
             string f_name = readString();
             GrassValue obj = pop();
             GrassValue val = pop();
+            GrassStructInstance* inst = nullptr;
             if (obj.is_struct()) {
-                GrassStructInstance* inst = obj.asStruct();
+                inst = obj.asStruct();
+            } else if (obj.is_ptr() && obj.asPtr()) {
+                GrassVMPtr* p = obj.asPtr();
+                if (p->struct_inst) inst = p->struct_inst;
+                else if (p->cell && p->cell->is_struct()) inst = p->cell->asStruct();
+            }
+            if (inst) {
                 if (inst && inst->def && inst->data) {
                     auto it = inst->def->field_indices.find(f_name);
                     if (it != inst->def->field_indices.end()) {
@@ -3291,6 +3524,177 @@ public:
         uint8_t argc = readByte();
         int64_t tid = spawnThread(entry_ip, argc, true);
         push(GrassValue::Num((double)tid));
+        DISPATCH_STEP();
+    }
+
+    do_addr_var: {
+        {
+            string name = readString();
+            GrassValue* cell = find_var_cell(name);
+            GrassVMPtr* p = (GrassVMPtr*)g_vm_arena.alloc(sizeof(GrassVMPtr));
+            new (p) GrassVMPtr();
+            if (cell) {
+                p->cell = cell;
+                if (cell->is_struct()) p->struct_inst = cell->asStruct();
+            }
+            push(GrassValue::Ptr(p));
+        }
+        DISPATCH_STEP();
+    }
+
+    do_addr_index: {
+        {
+            string name = readString();
+            GrassValue idx = pop();
+            int64_t i = (int64_t)idx.toNumber();
+            GrassValue* cell = find_var_cell(name);
+            GrassVMPtr* p = (GrassVMPtr*)g_vm_arena.alloc(sizeof(GrassVMPtr));
+            new (p) GrassVMPtr();
+            if (cell && cell->is_array() && cell->asArray()) {
+                p->vec = &cell->asArray()->elements;
+                p->vec_idx = i;
+                p->elem_size = 8;
+            } else if (cell && cell->is_ptr() && cell->asPtr()) {
+                *p = *cell->asPtr();
+                if (p->vec) p->vec_idx += i;
+                else if (p->raw) p->raw_off += i * (p->elem_size > 0 ? p->elem_size : 1);
+                else p->cell += i;
+            } else if (cell && cell->is_str() && cell->asCStr()) {
+                const char* s = cell->asCStr();
+                p->raw = (uint8_t*)s;
+                p->raw_size = strlen(s);
+                p->raw_off = i;
+                p->elem_size = 1;
+                p->is_scalar_u8 = true;
+                p->scalar_kind = 1;
+            }
+            push(GrassValue::Ptr(p));
+        }
+        DISPATCH_STEP();
+    }
+
+    do_addr_field: {
+        {
+            string f_name = readString();
+            GrassValue obj = pop();
+            GrassStructInstance* inst = nullptr;
+            if (obj.is_struct()) {
+                inst = obj.asStruct();
+            } else if (obj.is_ptr() && obj.asPtr()) {
+                GrassVMPtr* op = obj.asPtr();
+                if (op->struct_inst) inst = op->struct_inst;
+                else if (op->cell && op->cell->is_struct()) inst = op->cell->asStruct();
+            }
+            GrassVMPtr* p = (GrassVMPtr*)g_vm_arena.alloc(sizeof(GrassVMPtr));
+            new (p) GrassVMPtr();
+            if (inst && inst->def && inst->data) {
+                auto it = inst->def->field_indices.find(f_name);
+                if (it != inst->def->field_indices.end()) {
+                    const GrassFieldDef& fd = inst->def->fields[it->second];
+                    uint8_t* ptr = inst->data + fd.offset;
+                    if (fd.type == GrassFieldType::VALUE) {
+                        p->cell = (GrassValue*)ptr;
+                        if (p->cell->is_struct()) p->struct_inst = p->cell->asStruct();
+                    } else {
+                        p->raw = ptr;
+                        p->raw_size = fd.size;
+                        p->elem_size = (int64_t)fd.size;
+                        p->is_scalar_u8 = (fd.type == GrassFieldType::U8);
+                        switch (fd.type) {
+                            case GrassFieldType::U8:     p->scalar_kind = 1; break;
+                            case GrassFieldType::U16:    p->scalar_kind = 2; break;
+                            case GrassFieldType::U32:    p->scalar_kind = 3; break;
+                            case GrassFieldType::INT:    p->scalar_kind = 4; break;
+                            case GrassFieldType::FLOAT:  p->scalar_kind = 5; break;
+                            case GrassFieldType::DOUBLE: p->scalar_kind = 6; break;
+                            case GrassFieldType::U64:    p->scalar_kind = 7; break;
+                            case GrassFieldType::BOOL:   p->scalar_kind = 8; break;
+                            case GrassFieldType::STRING: p->scalar_kind = 9; break;
+                            default: p->scalar_kind = 0; break;
+                        }
+                    }
+                }
+            }
+            push(GrassValue::Ptr(p));
+        }
+        DISPATCH_STEP();
+    }
+
+    do_deref: {
+        GrassValue v = pop();
+        if (v.is_ptr()) {
+            GrassVMPtr* p = v.asPtr();
+            if (!p) {
+                push(GrassValue::Num(0.0));
+            } else if (p->vec) {
+                if (p->vec_idx >= 0 && (size_t)p->vec_idx < p->vec->size()) {
+                    push((*p->vec)[p->vec_idx]);
+                } else {
+                    push(GrassValue::Nil());
+                }
+            } else if (p->cell) {
+                push(*p->cell);
+            } else if (p->raw && p->raw_off >= 0 && (size_t)p->raw_off < p->raw_size) {
+                uint8_t* rp = p->raw + p->raw_off;
+                switch (p->scalar_kind) {
+                    case 1: push(GrassValue::Num((double)*(uint8_t*)rp)); break;
+                    case 2: push(GrassValue::Num((double)*(uint16_t*)rp)); break;
+                    case 3: push(GrassValue::Num((double)*(uint32_t*)rp)); break;
+                    case 4: push(GrassValue::Num((double)*(int32_t*)rp)); break;
+                    case 5: push(GrassValue::Num((double)*(float*)rp)); break;
+                    case 6: push(GrassValue::Num(*(double*)rp)); break;
+                    case 7: push(GrassValue::Num((double)*(uint64_t*)rp)); break;
+                    case 8: push(GrassValue::Bool(*(uint8_t*)rp != 0)); break;
+                    case 9: {
+                        const char* s = *(const char**)rp;
+                        push(GrassValue::Str(s ? s : ""));
+                        break;
+                    }
+                    default: push(GrassValue::Num((double)*(uint8_t*)rp)); break;
+                }
+            } else {
+                push(GrassValue::Num(0.0));
+            }
+        } else if (v.is_str() && v.asCStr()) {
+            push(GrassValue::Num((double)(unsigned char)v.asCStr()[0]));
+        } else {
+            push(GrassValue::Num(0.0));
+        }
+        DISPATCH_STEP();
+    }
+
+    do_store_deref: {
+        GrassValue val = pop();
+        GrassValue addr = pop();
+        if (addr.is_ptr() && addr.asPtr()) {
+            GrassVMPtr* p = addr.asPtr();
+            if (p->vec) {
+                if (p->vec_idx >= 0 && (size_t)p->vec_idx < p->vec->size()) {
+                    (*p->vec)[p->vec_idx] = val;
+                }
+            } else if (p->cell) {
+                *p->cell = val;
+                if (val.is_struct()) p->struct_inst = val.asStruct();
+            } else if (p->raw && p->raw_off >= 0 && (size_t)p->raw_off < p->raw_size) {
+                uint8_t* rp = p->raw + p->raw_off;
+                switch (p->scalar_kind) {
+                    case 1: *(uint8_t*)rp  = (uint8_t)val.toNumber(); break;
+                    case 2: *(uint16_t*)rp = (uint16_t)val.toNumber(); break;
+                    case 3: *(uint32_t*)rp = (uint32_t)val.toNumber(); break;
+                    case 4: *(int32_t*)rp  = (int32_t)val.toNumber(); break;
+                    case 5: *(float*)rp    = (float)val.toNumber(); break;
+                    case 6: *(double*)rp   = val.toNumber(); break;
+                    case 7: *(uint64_t*)rp = (uint64_t)val.toNumber(); break;
+                    case 8: *(uint8_t*)rp  = val.isTruthy() ? 1 : 0; break;
+                    case 9: {
+                        string s = val.toString();
+                        *(const char**)rp = g_vm_arena.alloc_string(s.c_str(), s.size());
+                        break;
+                    }
+                    default: *(uint8_t*)rp = (uint8_t)val.toNumber(); break;
+                }
+            }
+        }
         DISPATCH_STEP();
     }
 
@@ -3993,6 +4397,11 @@ void DisassembleBytecode(const vector<uint8_t>& code, bool lang_ru) {
                 cout << "OP_ASYNC_SPAWN   -> " << entry << " (argc=" << (int)argc << ")\n";
                 break;
             }
+            case OP_ADDR_VAR:     cout << "OP_ADDR_VAR     \"" << readString() << "\"\n"; break;
+            case OP_DEREF:        cout << "OP_DEREF\n"; break;
+            case OP_STORE_DEREF:  cout << "OP_STORE_DEREF\n"; break;
+            case OP_ADDR_INDEX:   cout << "OP_ADDR_INDEX   \"" << readString() << "\"\n"; break;
+            case OP_ADDR_FIELD:   cout << "OP_ADDR_FIELD   \"" << readString() << "\"\n"; break;
             default:              cout << "OP_UNKNOWN_0x" << hex << (int)op << dec << "\n"; break;
         }
     }

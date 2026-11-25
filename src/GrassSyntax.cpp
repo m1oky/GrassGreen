@@ -882,13 +882,84 @@ void BytecodeCompiler::parseFactor() {
 }
 
 void BytecodeCompiler::parseUnary() {
+    // C-style pointer/type cast: (Type*)expr or (Type)expr
+    if (peek().kind == TOK_LPAREN && peek(1).kind == TOK_IDENT &&
+        (isTypeOrFuncKeyword(peek(1).text) || g_struct_registry.count(peek(1).text))) {
+        int off = 2;
+        while (peek(off).kind == TOK_COLON_COLON && peek(off + 1).kind == TOK_IDENT) off += 2;
+        while (peek(off).kind == TOK_STAR) off++;
+        if (peek(off).kind == TOK_RPAREN) {
+            auto nk = peek(off + 1).kind;
+            if (nk == TOK_IDENT || nk == TOK_NUMBER || nk == TOK_STRING ||
+                nk == TOK_LPAREN || nk == TOK_STAR || nk == TOK_AMP ||
+                nk == TOK_MINUS || nk == TOK_NULLPTR) {
+                advance(); // '('
+                advance(); // base type
+                while (match(TOK_COLON_COLON)) { if (peek().kind == TOK_IDENT) advance(); }
+                while (match(TOK_STAR)) {}
+                match(TOK_RPAREN);
+                parseUnary();
+                return;
+            }
+        }
+    }
     if (match(TOK_MINUS)) { parseUnary(); emitByte(OP_NEG); return; }
     if (match(TOK_NOT))   { parseUnary(); emitByte(OP_NOT); return; }
     if (match(TOK_TILDE)) { parseUnary(); emitByte(OP_BIT_NOT); return; }
-    if (match(TOK_STAR))  { parseUnary(); return; }
-    if (match(TOK_AMP))   { parseUnary(); return; }
+    if (match(TOK_STAR))  { parseUnary(); emitByte(OP_DEREF); return; }
+    if (match(TOK_AMP)) {
+        if (peek().kind == TOK_IDENT) {
+            int line = peek().line;
+            string name = advance().text;
+            size_t dot_pos = name.find('.');
+            if (dot_pos != string::npos) {
+                string obj_name = name.substr(0, dot_pos);
+                string fld_name = name.substr(dot_pos + 1);
+                emitByte(OP_LOAD_VAR); emitString(obj_name);
+                emitByte(OP_ADDR_FIELD); emitString(fld_name);
+                return;
+            }
+            if (match(TOK_LBRACKET)) {
+                parseExpression();
+                consume(TOK_RBRACKET, "Ожидалась закрывающая ']' в &arr[i]!");
+                emitByte(OP_ADDR_INDEX); emitString(name);
+                return;
+            }
+            if (match(TOK_DOT) || match(TOK_ARROW)) {
+                if (peek().kind != TOK_IDENT) {
+                    reportError(line, "Ожидалось имя поля после '.' или '->' в '&'!");
+                    emitByte(OP_CONST_NUM); emitDouble(0.0);
+                    return;
+                }
+                emitByte(OP_LOAD_VAR); emitString(name);
+                string fld = advance().text;
+                while (match(TOK_DOT) || match(TOK_ARROW)) {
+                    emitByte(OP_GET_FIELD); emitString(fld);
+                    if (peek().kind != TOK_IDENT) {
+                        reportError(line, "Ожидалось имя поля после '.' или '->'!");
+                        return;
+                    }
+                    fld = advance().text;
+                }
+                emitByte(OP_ADDR_FIELD); emitString(fld);
+                return;
+            }
+            emitByte(OP_ADDR_VAR); emitString(name);
+            return;
+        }
+        reportError(peek().line, "Оператор '&' применим только к переменной, полю или элементу массива!");
+        parseUnary();
+        return;
+    }
     if (match(TOK_PLUS))  { parseUnary(); return; }
     parsePrimary();
+    while (match(TOK_AS)) {
+        if (peek().kind == TOK_IDENT) {
+            advance();
+            while (match(TOK_COLON_COLON)) { if (peek().kind == TOK_IDENT) advance(); }
+            while (match(TOK_STAR)) {}
+        }
+    }
 }
 
 void BytecodeCompiler::parsePrimary() {
@@ -2179,7 +2250,8 @@ void BytecodeCompiler::parseStatement() {
         requireLib("core", "!GrassGreen!", "объявление функции", fn_line);
 
         string ret_type_tok = advance().text;
-        while (match(TOK_STAR)) {}
+        bool ret_is_ptr = false;
+        while (match(TOK_STAR)) ret_is_ptr = true;
         string fn_name = advance().text;
         while (match(TOK_COLON_COLON)) {
             if (peek().kind == TOK_IDENT) fn_name += "::" + advance().text;
@@ -2188,18 +2260,25 @@ void BytecodeCompiler::parseStatement() {
             fn_name = current_ns_ + "::" + fn_name;
         }
         if (g_struct_registry.count(ret_type_tok)) {
-            var_struct_types["__fn_ret_" + fn_name] = ret_type_tok;
+            if (ret_is_ptr) var_struct_types["__fn_ret_ptr_" + fn_name] = ret_type_tok;
+            else var_struct_types["__fn_ret_" + fn_name] = ret_type_tok;
         }
         vector<string> params;
+        vector<pair<string, string>> param_structs;
 
         match(TOK_LPAREN);
         if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
             while (true) {
+                string ptype;
                 if (isTypeOrFuncKeyword(peek().text) || g_struct_registry.count(peek().text)) {
-                    advance();
+                    ptype = advance().text;
                     while (match(TOK_STAR)) {}
                 }
-                params.push_back(advance().text);
+                string pname = advance().text;
+                params.push_back(pname);
+                if (!ptype.empty() && g_struct_registry.count(ptype)) {
+                    param_structs.push_back({pname, ptype});
+                }
                 if (!match(TOK_COMMA)) break;
             }
         }
@@ -2238,7 +2317,12 @@ void BytecodeCompiler::parseStatement() {
             vm_scopes_.clear();
             loop_scope_depths_.clear();
             continue_scope_depths_.clear();
+            pushVMScope();
+            for (const auto& ps : param_structs) {
+                registerVMVarType(ps.first, ps.second);
+            }
             parseBlock();
+            popVMScope(false);
             vm_scopes_ = std::move(saved_scopes);
             loop_scope_depths_ = std::move(saved_loop_depths);
             continue_scope_depths_ = std::move(saved_cont_depths);
@@ -2965,12 +3049,33 @@ void BytecodeCompiler::parseStatement() {
             if (peek().kind != TOK_IDENT) break;
             string var_name = advance().text;
             string inferred_struct;
+            bool borrowed_ptr = false;
             if (match(TOK_ASSIGN)) {
-                if (peek().kind == TOK_IDENT && g_struct_registry.count(peek().text) && peek(1).kind == TOK_LPAREN) {
+                int peek_off = 0;
+                if (peek(0).kind == TOK_LPAREN && peek(1).kind == TOK_IDENT &&
+                    (isTypeOrFuncKeyword(peek(1).text) || g_struct_registry.count(peek(1).text))) {
+                    int off = 2;
+                    while (peek(off).kind == TOK_COLON_COLON && peek(off + 1).kind == TOK_IDENT) off += 2;
+                    while (peek(off).kind == TOK_STAR) { borrowed_ptr = true; off++; }
+                    if (peek(off).kind == TOK_RPAREN) {
+                        if (g_struct_registry.count(peek(1).text) && borrowed_ptr) {
+                            inferred_struct = peek(1).text;
+                        }
+                        peek_off = off + 1;
+                    }
+                }
+                if (peek(peek_off).kind == TOK_AMP && peek(peek_off + 1).kind == TOK_IDENT &&
+                    var_struct_types.count(peek(peek_off + 1).text)) {
+                    inferred_struct = var_struct_types[peek(peek_off + 1).text];
+                    borrowed_ptr = true;
+                } else if (!borrowed_ptr && peek().kind == TOK_IDENT && g_struct_registry.count(peek().text) && peek(1).kind == TOK_LPAREN) {
                     inferred_struct = peek().text;
-                } else if (peek().kind == TOK_IDENT && peek(1).kind == TOK_LPAREN && var_struct_types.count("__fn_ret_" + peek().text)) {
+                } else if (!borrowed_ptr && peek().kind == TOK_IDENT && peek(1).kind == TOK_LPAREN && var_struct_types.count("__fn_ret_ptr_" + peek().text)) {
+                    inferred_struct = var_struct_types["__fn_ret_ptr_" + peek().text];
+                    borrowed_ptr = true;
+                } else if (!borrowed_ptr && peek().kind == TOK_IDENT && peek(1).kind == TOK_LPAREN && var_struct_types.count("__fn_ret_" + peek().text)) {
                     inferred_struct = var_struct_types["__fn_ret_" + peek().text];
-                } else if (peek().kind == TOK_IDENT && (peek(1).kind == TOK_SEMI || peek(1).kind == TOK_COMMA) && var_struct_types.count(peek().text)) {
+                } else if (!borrowed_ptr && peek().kind == TOK_IDENT && (peek(1).kind == TOK_SEMI || peek(1).kind == TOK_COMMA) && var_struct_types.count(peek().text)) {
                     inferred_struct = var_struct_types[peek().text];
                 }
                 parseExpression();
@@ -2985,7 +3090,9 @@ void BytecodeCompiler::parseStatement() {
             emitString(var_name);
             if (!inferred_struct.empty()) {
                 registerVMVarType(var_name, inferred_struct);
-                registerVMRAIIVar(var_name, inferred_struct);
+                if (!borrowed_ptr) {
+                    registerVMRAIIVar(var_name, inferred_struct);
+                }
             }
             if (!match(TOK_COMMA)) break;
         }
@@ -3254,17 +3361,46 @@ void BytecodeCompiler::parseStatement() {
         }
     }
 
-    // Разыменование указателя при присваивании: *ptr = val; **ptr = val;
+    // Разыменование указателя при присваивании: *ptr = val; **ptr = val; *(expr) = val;
     if (peek().kind == TOK_STAR) {
-        advance(); // consume '*'
-        while (match(TOK_STAR)) {}
-        if (peek().kind == TOK_IDENT) {
+        int stars = 0;
+        while (peek(stars).kind == TOK_STAR) stars++;
+        if (peek(stars).kind == TOK_IDENT && peek(stars + 1).kind == TOK_ASSIGN) {
+            for (int i = 0; i < stars; ++i) advance();
             string ptr_name = advance().text;
-            if (match(TOK_ASSIGN)) {
-                parseExpression(); // value
+            advance(); // '='
+            emitByte(OP_LOAD_VAR);
+            emitString(ptr_name);
+            for (int i = 1; i < stars; ++i) emitByte(OP_DEREF);
+            parseExpression(); // value
+            match(TOK_SEMI);
+            emitByte(OP_STORE_DEREF);
+            return;
+        }
+        if (stars == 1 && peek(1).kind == TOK_LPAREN) {
+            int depth = 0;
+            int off = 1;
+            bool found_assign = false;
+            while (peek(off).kind != TOK_EOF) {
+                if (peek(off).kind == TOK_LPAREN) depth++;
+                else if (peek(off).kind == TOK_RPAREN) {
+                    depth--;
+                    if (depth == 0) {
+                        found_assign = (peek(off + 1).kind == TOK_ASSIGN);
+                        break;
+                    }
+                }
+                off++;
+            }
+            if (found_assign) {
+                advance(); // '*'
+                advance(); // '('
+                parseExpression();
+                consume(TOK_RPAREN, "Ожидалась ')' в '*(expr) = val'!");
+                advance(); // '='
+                parseExpression();
                 match(TOK_SEMI);
-                emitByte(OP_STORE_VAR);
-                emitString(ptr_name);
+                emitByte(OP_STORE_DEREF);
                 return;
             }
         }
@@ -3682,7 +3818,7 @@ void BytecodeCompiler::parseStructDefinition() {
         string f_struct_name;
 
         if (is_field_ptr) {
-            ft = GrassFieldType::U64; f_size = 8; f_align = 8;
+            ft = GrassFieldType::VALUE; f_size = 8; f_align = 8;
         } else if (f_type == "u8" || f_type == "uint8" || f_type == "char" || f_type == "byte") {
             ft = GrassFieldType::U8; f_size = 1; f_align = 1;
         } else if (f_type == "bool") {
@@ -3972,14 +4108,22 @@ bool GrassParser::isVarKeyword(const std::string& s) {
 
 // Expressions
 std::unique_ptr<ExprAST> GrassParser::parseExpression() {
-    return parseLogicalOr();
+    if (parser_depth_ >= MAX_PARSER_DEPTH) {
+        reportError(peek().loc(filename), "Expression nesting depth exceeds safety limit", "Simplify nested expression");
+        return nullptr;
+    }
+    parser_depth_++;
+    auto res = parseLogicalOr();
+    parser_depth_--;
+    return res;
 }
 
 std::unique_ptr<ExprAST> GrassParser::parseLogicalOr() {
     auto expr = parseLogicalAnd();
-    while (match(TOK_OR)) {
+    while (expr && match(TOK_OR)) {
         auto loc = peek(-1).loc(filename);
         auto rhs = parseLogicalAnd();
+        if (!rhs) return nullptr;
         expr = std::make_unique<BinaryExprAST>(loc, TOK_OR, "||", std::move(expr), std::move(rhs));
     }
     return expr;
@@ -3987,9 +4131,10 @@ std::unique_ptr<ExprAST> GrassParser::parseLogicalOr() {
 
 std::unique_ptr<ExprAST> GrassParser::parseLogicalAnd() {
     auto expr = parseBitwiseOr();
-    while (match(TOK_AND)) {
+    while (expr && match(TOK_AND)) {
         auto loc = peek(-1).loc(filename);
         auto rhs = parseBitwiseOr();
+        if (!rhs) return nullptr;
         expr = std::make_unique<BinaryExprAST>(loc, TOK_AND, "&&", std::move(expr), std::move(rhs));
     }
     return expr;
@@ -3997,9 +4142,10 @@ std::unique_ptr<ExprAST> GrassParser::parseLogicalAnd() {
 
 std::unique_ptr<ExprAST> GrassParser::parseBitwiseOr() {
     auto expr = parseBitwiseXor();
-    while (match(TOK_PIPE)) {
+    while (expr && match(TOK_PIPE)) {
         auto loc = peek(-1).loc(filename);
         auto rhs = parseBitwiseXor();
+        if (!rhs) return nullptr;
         expr = std::make_unique<BinaryExprAST>(loc, TOK_PIPE, "|", std::move(expr), std::move(rhs));
     }
     return expr;
@@ -4007,9 +4153,10 @@ std::unique_ptr<ExprAST> GrassParser::parseBitwiseOr() {
 
 std::unique_ptr<ExprAST> GrassParser::parseBitwiseXor() {
     auto expr = parseBitwiseAnd();
-    while (match(TOK_CARET)) {
+    while (expr && match(TOK_CARET)) {
         auto loc = peek(-1).loc(filename);
         auto rhs = parseBitwiseAnd();
+        if (!rhs) return nullptr;
         expr = std::make_unique<BinaryExprAST>(loc, TOK_CARET, "^", std::move(expr), std::move(rhs));
     }
     return expr;
@@ -4017,9 +4164,10 @@ std::unique_ptr<ExprAST> GrassParser::parseBitwiseXor() {
 
 std::unique_ptr<ExprAST> GrassParser::parseBitwiseAnd() {
     auto expr = parseEquality();
-    while (match(TOK_AMP)) {
+    while (expr && match(TOK_AMP)) {
         auto loc = peek(-1).loc(filename);
         auto rhs = parseEquality();
+        if (!rhs) return nullptr;
         expr = std::make_unique<BinaryExprAST>(loc, TOK_AMP, "&", std::move(expr), std::move(rhs));
     }
     return expr;
@@ -4027,9 +4175,10 @@ std::unique_ptr<ExprAST> GrassParser::parseBitwiseAnd() {
 
 std::unique_ptr<ExprAST> GrassParser::parseEquality() {
     auto expr = parseRelational();
-    while (peek().kind == TOK_EQ || peek().kind == TOK_NEQ) {
+    while (expr && (peek().kind == TOK_EQ || peek().kind == TOK_NEQ)) {
         auto op_tok = advance();
         auto rhs = parseRelational();
+        if (!rhs) return nullptr;
         expr = std::make_unique<BinaryExprAST>(op_tok.loc(filename), op_tok.kind, op_tok.text, std::move(expr), std::move(rhs));
     }
     return expr;
@@ -4037,10 +4186,11 @@ std::unique_ptr<ExprAST> GrassParser::parseEquality() {
 
 std::unique_ptr<ExprAST> GrassParser::parseRelational() {
     auto expr = parseShift();
-    while (peek().kind == TOK_LT || peek().kind == TOK_GT ||
-           peek().kind == TOK_LTE || peek().kind == TOK_GTE) {
+    while (expr && (peek().kind == TOK_LT || peek().kind == TOK_GT ||
+                    peek().kind == TOK_LTE || peek().kind == TOK_GTE)) {
         auto op_tok = advance();
         auto rhs = parseShift();
+        if (!rhs) return nullptr;
         expr = std::make_unique<BinaryExprAST>(op_tok.loc(filename), op_tok.kind, op_tok.text, std::move(expr), std::move(rhs));
     }
     return expr;
@@ -4048,9 +4198,10 @@ std::unique_ptr<ExprAST> GrassParser::parseRelational() {
 
 std::unique_ptr<ExprAST> GrassParser::parseShift() {
     auto expr = parseAdditive();
-    while (peek().kind == TOK_SHL || peek().kind == TOK_SHR) {
+    while (expr && (peek().kind == TOK_SHL || peek().kind == TOK_SHR)) {
         auto op_tok = advance();
         auto rhs = parseAdditive();
+        if (!rhs) return nullptr;
         expr = std::make_unique<BinaryExprAST>(op_tok.loc(filename), op_tok.kind, op_tok.text, std::move(expr), std::move(rhs));
     }
     return expr;
@@ -4058,9 +4209,10 @@ std::unique_ptr<ExprAST> GrassParser::parseShift() {
 
 std::unique_ptr<ExprAST> GrassParser::parseAdditive() {
     auto expr = parseMultiplicative();
-    while (peek().kind == TOK_PLUS || peek().kind == TOK_MINUS) {
+    while (expr && (peek().kind == TOK_PLUS || peek().kind == TOK_MINUS)) {
         auto op_tok = advance();
         auto rhs = parseMultiplicative();
+        if (!rhs) return nullptr;
         expr = std::make_unique<BinaryExprAST>(op_tok.loc(filename), op_tok.kind, op_tok.text, std::move(expr), std::move(rhs));
     }
     return expr;
@@ -4068,15 +4220,20 @@ std::unique_ptr<ExprAST> GrassParser::parseAdditive() {
 
 std::unique_ptr<ExprAST> GrassParser::parseMultiplicative() {
     auto expr = parseUnary();
-    while (peek().kind == TOK_STAR || peek().kind == TOK_SLASH || peek().kind == TOK_MOD) {
+    while (expr && (peek().kind == TOK_STAR || peek().kind == TOK_SLASH || peek().kind == TOK_MOD)) {
         auto op_tok = advance();
         auto rhs = parseUnary();
+        if (!rhs) return nullptr;
         expr = std::make_unique<BinaryExprAST>(op_tok.loc(filename), op_tok.kind, op_tok.text, std::move(expr), std::move(rhs));
     }
     return expr;
 }
 
 std::unique_ptr<ExprAST> GrassParser::parseUnary() {
+    if (parser_depth_ >= MAX_PARSER_DEPTH) {
+        reportError(peek().loc(filename), "Unary nesting depth exceeds safety limit", "Simplify expression");
+        return nullptr;
+    }
     // Check for C-style cast: (Type)expr or (Type*)expr
     if (check(TOK_LPAREN)) {
         size_t off = 1;
@@ -4106,7 +4263,10 @@ std::unique_ptr<ExprAST> GrassParser::parseUnary() {
                     while (match(TOK_COLON_COLON)) advance();
                     while (match(TOK_STAR)) {}
                     match(TOK_RPAREN);
+                    parser_depth_++;
                     auto operand = parseUnary();
+                    parser_depth_--;
+                    if (!operand) return nullptr;
                     return std::make_unique<CastExprAST>(loc, tname, ptr_depth, std::move(operand), true);
                 }
             }
@@ -4117,7 +4277,10 @@ std::unique_ptr<ExprAST> GrassParser::parseUnary() {
         peek().kind == TOK_TILDE || peek().kind == TOK_STAR ||
         peek().kind == TOK_AMP || peek().kind == TOK_INC || peek().kind == TOK_DEC) {
         auto op_tok = advance();
+        parser_depth_++;
         auto operand = parseUnary();
+        parser_depth_--;
+        if (!operand) return nullptr;
         return std::make_unique<UnaryExprAST>(op_tok.loc(filename), op_tok.kind, op_tok.text, std::move(operand), true);
     }
     return parsePostfix();
@@ -4665,6 +4828,11 @@ std::unique_ptr<StructDeclAST> GrassParser::parseStruct() {
         }
         if (checkIdent("fn")) {
             advance();
+            if (peek().kind != TOK_IDENT) {
+                reportError(peek().loc(filename), "Expected method name after 'fn' in struct", "Provide method identifier");
+                synchronize();
+                continue;
+            }
             std::string fname = advance().text;
             auto fn = parseFunction("auto", 0, fname);
             fn->is_method = true;
@@ -4748,6 +4916,11 @@ std::unique_ptr<ClassDeclAST> GrassParser::parseClass() {
         }
         if (checkIdent("fn")) {
             advance();
+            if (peek().kind != TOK_IDENT) {
+                reportError(peek().loc(filename), "Expected method name after 'fn' in struct", "Provide method identifier");
+                synchronize();
+                continue;
+            }
             std::string fname = advance().text;
             auto fn = parseFunction("auto", 0, fname);
             fn->is_method = true;

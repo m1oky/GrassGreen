@@ -2528,25 +2528,38 @@ namespace grass::backend {
             append_function("_start", code, rels);
         }
 
-        // 2. grass_alloc and alloc: Win32 HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size)
+        // 2 & 3b. grass_alloc, alloc, memory_alloc: Win32 HeapAlloc with size <= 0 and integer-overflow bounds check
         if ((needed_symbols.count("grass_alloc") > 0 && defined_symbols.count("grass_alloc") == 0) ||
-            (needed_symbols.count("alloc") > 0 && defined_symbols.count("alloc") == 0)) {
-            std::vector<uint8_t> code = {
-                0x48, 0x83, 0xEC, 0x28,             // 0: sub rsp, 40
-                0x49, 0x89, 0xC8,                   // 4: mov r8, rcx (size)
-                0xE8, 0x00, 0x00, 0x00, 0x00,       // 7: call GetProcessHeap
-                0x48, 0x89, 0xC1,                   // 12: mov rcx, rax (hHeap)
-                0xBA, 0x08, 0x00, 0x00, 0x00,       // 15: mov edx, 8 (HEAP_ZERO_MEMORY)
-                0xE8, 0x00, 0x00, 0x00, 0x00,       // 20: call HeapAlloc
-                0x48, 0x83, 0xC4, 0x28,             // 25: add rsp, 40
-                0xC3                                // 29: ret
-            };
+            (needed_symbols.count("alloc") > 0 && defined_symbols.count("alloc") == 0) ||
+            (needed_symbols.count("memory_alloc") > 0 && defined_symbols.count("memory_alloc") == 0)) {
+            std::vector<uint8_t> code;
+            auto emit = [&](std::initializer_list<uint8_t> bytes) { code.insert(code.end(), bytes); };
+            emit({0x48, 0x85, 0xC9});                                     // test rcx, rcx
+            emit({0x7E, 0x00}); size_t jle_p = code.size() - 1;           // jle .ret_zero
+            emit({0x48, 0xB8, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x7F, 0x00, 0x00}); // mov rax, 0x00007FFFFFFF0000
+            emit({0x48, 0x39, 0xC1});                                     // cmp rcx, rax
+            emit({0x77, 0x00}); size_t ja_p = code.size() - 1;            // ja .ret_zero
+            emit({0x48, 0x83, 0xEC, 0x28});                               // sub rsp, 40
+            emit({0x49, 0x89, 0xC8});                                     // mov r8, rcx (size)
+            size_t rel_heap = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call GetProcessHeap
+            emit({0x48, 0x89, 0xC1});                                     // mov rcx, rax (hHeap)
+            emit({0xBA, 0x08, 0x00, 0x00, 0x00});                         // mov edx, 8 (HEAP_ZERO_MEMORY)
+            size_t rel_alloc = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call HeapAlloc
+            emit({0x48, 0x83, 0xC4, 0x28});                               // add rsp, 40
+            emit({0xC3});                                                 // ret
+            size_t ret_zero = code.size();
+            code[jle_p] = static_cast<uint8_t>(ret_zero - (jle_p + 1));
+            code[ja_p]  = static_cast<uint8_t>(ret_zero - (ja_p + 1));
+            emit({0x31, 0xC0, 0xC3});                                     // xor eax, eax; ret
             std::vector<RelocEntry> rels = {
-                { SectionKind::Text, 8, "GetProcessHeap", RelocType::Rel32, -4 },
-                { SectionKind::Text, 21, "HeapAlloc", RelocType::Rel32, -4 }
+                { SectionKind::Text, static_cast<uint32_t>(rel_heap), "GetProcessHeap", RelocType::Rel32, -4 },
+                { SectionKind::Text, static_cast<uint32_t>(rel_alloc), "HeapAlloc", RelocType::Rel32, -4 }
             };
-            if (needed_symbols.count("grass_alloc") > 0) append_function("grass_alloc", code, rels);
-            if (needed_symbols.count("alloc") > 0) append_function("alloc", code, rels);
+            if (needed_symbols.count("grass_alloc") > 0 && defined_symbols.count("grass_alloc") == 0) append_function("grass_alloc", code, rels);
+            if (needed_symbols.count("alloc") > 0 && defined_symbols.count("alloc") == 0) append_function("alloc", code, rels);
+            if (needed_symbols.count("memory_alloc") > 0 && defined_symbols.count("memory_alloc") == 0) append_function("memory_alloc", code, rels);
         }
 
         // 3. grass_free and free: Win32 HeapFree(GetProcessHeap(), 0, ptr)
@@ -2570,29 +2583,6 @@ namespace grass::backend {
             };
             if (needed_symbols.count("grass_free") > 0) append_function("grass_free", code, rels);
             if (needed_symbols.count("free") > 0) append_function("free", code, rels);
-        }
-
-        // 3b. memory_alloc: Win32 HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size) returning 0 if size <= 0
-        if (needed_symbols.count("memory_alloc") > 0 && defined_symbols.count("memory_alloc") == 0) {
-            std::vector<uint8_t> code = {
-                0x48, 0x85, 0xC9,                   // 0: test rcx, rcx
-                0x7F, 0x03,                         // 3: jg +3 (.do_alloc at 8)
-                0x31, 0xC0,                         // 5: xor eax, eax
-                0xC3,                               // 7: ret
-                0x48, 0x83, 0xEC, 0x28,             // 8: sub rsp, 40
-                0x49, 0x89, 0xC8,                   // 12: mov r8, rcx (size)
-                0xE8, 0x00, 0x00, 0x00, 0x00,       // 15: call GetProcessHeap
-                0x48, 0x89, 0xC1,                   // 20: mov rcx, rax (hHeap)
-                0xBA, 0x08, 0x00, 0x00, 0x00,       // 23: mov edx, 8 (HEAP_ZERO_MEMORY)
-                0xE8, 0x00, 0x00, 0x00, 0x00,       // 28: call HeapAlloc
-                0x48, 0x83, 0xC4, 0x28,             // 33: add rsp, 40
-                0xC3                                // 37: ret
-            };
-            std::vector<RelocEntry> rels = {
-                { SectionKind::Text, 16, "GetProcessHeap", RelocType::Rel32, -4 },
-                { SectionKind::Text, 29, "HeapAlloc", RelocType::Rel32, -4 }
-            };
-            append_function("memory_alloc", code, rels);
         }
 
         // 3c. memory_free_block: Win32 HeapFree(GetProcessHeap(), 0, ptr) returning 1/0
@@ -2621,28 +2611,38 @@ namespace grass::backend {
             append_function("memory_free_block", code, rels);
         }
 
-        // 4. grass_realloc and realloc: Win32 HeapReAlloc(GetProcessHeap(), 8, ptr, new_size)
+        // 4. grass_realloc and realloc: Win32 HeapReAlloc with size <= 0 / overflow validation
         if ((needed_symbols.count("grass_realloc") > 0 && defined_symbols.count("grass_realloc") == 0) ||
             (needed_symbols.count("realloc") > 0 && defined_symbols.count("realloc") == 0)) {
-            std::vector<uint8_t> code = {
-                0x48, 0x85, 0xC9,                   // 0: test rcx, rcx
-                0x75, 0x08,                         // 3: jnz +8 (.do_realloc at 13)
-                0x48, 0x89, 0xD1,                   // 5: mov rcx, rdx
-                0xE9, 0x00, 0x00, 0x00, 0x00,       // 8: jmp grass_alloc
-                0x48, 0x83, 0xEC, 0x28,             // 13: sub rsp, 40 (.do_realloc)
-                0x49, 0x89, 0xD1,                   // 17: mov r9, rdx (new_size)
-                0x49, 0x89, 0xC8,                   // 20: mov r8, rcx (ptr)
-                0xE8, 0x00, 0x00, 0x00, 0x00,       // 23: call GetProcessHeap
-                0x48, 0x89, 0xC1,                   // 28: mov rcx, rax (hHeap)
-                0xBA, 0x08, 0x00, 0x00, 0x00,       // 31: mov edx, 8 (HEAP_ZERO_MEMORY)
-                0xE8, 0x00, 0x00, 0x00, 0x00,       // 36: call HeapReAlloc
-                0x48, 0x83, 0xC4, 0x28,             // 41: add rsp, 40
-                0xC3                                // 45: ret
-            };
+            std::vector<uint8_t> code;
+            auto emit = [&](std::initializer_list<uint8_t> bytes) { code.insert(code.end(), bytes); };
+            emit({0x48, 0x85, 0xD2});                                     // test rdx, rdx (new_size)
+            emit({0x7F, 0x03});                                           // jg +3
+            emit({0x31, 0xC0, 0xC3});                                     // xor eax, eax; ret
+            emit({0x48, 0xB8, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x7F, 0x00, 0x00}); // mov rax, 0x00007FFFFFFF0000
+            emit({0x48, 0x39, 0xC2});                                     // cmp rdx, rax
+            emit({0x76, 0x03});                                           // jbe +3
+            emit({0x31, 0xC0, 0xC3});                                     // xor eax, eax; ret
+            emit({0x48, 0x85, 0xC9});                                     // test rcx, rcx
+            emit({0x75, 0x08});                                           // jnz +8 (.do_realloc)
+            emit({0x48, 0x89, 0xD1});                                     // mov rcx, rdx
+            size_t rel_alloc = code.size() + 1;
+            emit({0xE9, 0x00, 0x00, 0x00, 0x00});                         // jmp grass_alloc
+            emit({0x48, 0x83, 0xEC, 0x28});                               // sub rsp, 40
+            emit({0x49, 0x89, 0xD1});                                     // mov r9, rdx
+            emit({0x49, 0x89, 0xC8});                                     // mov r8, rcx
+            size_t rel_heap = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call GetProcessHeap
+            emit({0x48, 0x89, 0xC1});                                     // mov rcx, rax
+            emit({0xBA, 0x08, 0x00, 0x00, 0x00});                         // mov edx, 8
+            size_t rel_realloc = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call HeapReAlloc
+            emit({0x48, 0x83, 0xC4, 0x28});                               // add rsp, 40
+            emit({0xC3});                                                 // ret
             std::vector<RelocEntry> rels = {
-                { SectionKind::Text, 9, "grass_alloc", RelocType::Rel32, -4 },
-                { SectionKind::Text, 24, "GetProcessHeap", RelocType::Rel32, -4 },
-                { SectionKind::Text, 37, "HeapReAlloc", RelocType::Rel32, -4 }
+                { SectionKind::Text, static_cast<uint32_t>(rel_alloc), "grass_alloc", RelocType::Rel32, -4 },
+                { SectionKind::Text, static_cast<uint32_t>(rel_heap), "GetProcessHeap", RelocType::Rel32, -4 },
+                { SectionKind::Text, static_cast<uint32_t>(rel_realloc), "HeapReAlloc", RelocType::Rel32, -4 }
             };
             if (needed_symbols.count("grass_realloc") > 0) append_function("grass_realloc", code, rels);
             if (needed_symbols.count("realloc") > 0) append_function("realloc", code, rels);
@@ -2682,105 +2682,137 @@ namespace grass::backend {
             append_function("memset", code, rels);
         }
 
-        // 7. grass_print_newline: Win32 WriteFile(GetStdHandle(-11), "\r\n", 2)
+        // 7. grass_print_newline: Win32 WriteFile(GetStdHandle(-11), "\r\n", 2) with handle check
         if (needed_symbols.count("grass_print_newline") > 0 && defined_symbols.count("grass_print_newline") == 0) {
-            std::vector<uint8_t> code = {
-                0x48, 0x83, 0xEC, 0x38,             // 0: sub rsp, 56
-                0x66, 0xC7, 0x44, 0x24, 0x28, 0x0D, 0x0A, // 4: mov word ptr [rsp + 40], 0x0A0D
-                0xB9, 0xF5, 0xFF, 0xFF, 0xFF,       // 11: mov ecx, -11
-                0xE8, 0x00, 0x00, 0x00, 0x00,       // 16: call GetStdHandle
-                0x48, 0x89, 0xC1,                   // 21: mov rcx, rax
-                0x48, 0x8D, 0x54, 0x24, 0x28,       // 24: lea rdx, [rsp + 40]
-                0x41, 0xB8, 0x02, 0x00, 0x00, 0x00, // 29: mov r8d, 2
-                0x4C, 0x8D, 0x4C, 0x24, 0x30,       // 35: lea r9, [rsp + 48]
-                0x48, 0xC7, 0x44, 0x24, 0x20, 0x00, 0x00, 0x00, 0x00, // 40: mov qword ptr [rsp + 32], 0
-                0xE8, 0x00, 0x00, 0x00, 0x00,       // 49: call WriteFile
-                0x48, 0x83, 0xC4, 0x38,             // 54: add rsp, 56
-                0xC3                                // 58: ret
-            };
+            std::vector<uint8_t> code;
+            auto emit = [&](std::initializer_list<uint8_t> bytes) { code.insert(code.end(), bytes); };
+            emit({0x48, 0x83, 0xEC, 0x38});                               // sub rsp, 56
+            emit({0x66, 0xC7, 0x44, 0x24, 0x28, 0x0D, 0x0A});             // mov word ptr [rsp + 40], 0x0A0D
+            emit({0xB9, 0xF5, 0xFF, 0xFF, 0xFF});                         // mov ecx, -11
+            size_t rel_std = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call GetStdHandle
+            emit({0x48, 0x85, 0xC0});                                     // test rax, rax
+            emit({0x74, 0x00}); size_t jz_p = code.size() - 1;
+            emit({0x48, 0x83, 0xF8, 0xFF});                               // cmp rax, -1
+            emit({0x74, 0x00}); size_t je_p = code.size() - 1;
+            emit({0x48, 0x89, 0xC1});                                     // mov rcx, rax
+            emit({0x48, 0x8D, 0x54, 0x24, 0x28});                         // lea rdx, [rsp + 40]
+            emit({0x41, 0xB8, 0x02, 0x00, 0x00, 0x00});                   // mov r8d, 2
+            emit({0x4C, 0x8D, 0x4C, 0x24, 0x30});                         // lea r9, [rsp + 48]
+            emit({0x48, 0xC7, 0x44, 0x24, 0x20, 0x00, 0x00, 0x00, 0x00}); // mov qword ptr [rsp + 32], 0
+            size_t rel_wf = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call WriteFile
+            size_t done = code.size();
+            code[jz_p] = static_cast<uint8_t>(done - (jz_p + 1));
+            code[je_p] = static_cast<uint8_t>(done - (je_p + 1));
+            emit({0x48, 0x83, 0xC4, 0x38, 0xC3});                         // add rsp, 56; ret
             std::vector<RelocEntry> rels = {
-                { SectionKind::Text, 17, "GetStdHandle", RelocType::Rel32, -4 },
-                { SectionKind::Text, 50, "WriteFile", RelocType::Rel32, -4 }
+                { SectionKind::Text, static_cast<uint32_t>(rel_std), "GetStdHandle", RelocType::Rel32, -4 },
+                { SectionKind::Text, static_cast<uint32_t>(rel_wf), "WriteFile", RelocType::Rel32, -4 }
             };
             append_function("grass_print_newline", code, rels);
         }
 
-        // 8. grass_print_str: Win32 WriteFile(GetStdHandle(-11), s, lstrlenA(s))
+        // 8. grass_print_str: Win32 WriteFile(GetStdHandle(-11), s, lstrlenA(s)) with handle check
         if (needed_symbols.count("grass_print_str") > 0 && defined_symbols.count("grass_print_str") == 0) {
-            std::vector<uint8_t> code = {
-                0x48, 0x85, 0xC9,                   // 0: test rcx, rcx
-                0x74, 0x38,                         // 3: jz +56 (.ret at 61)
-                0x53,                               // 5: push rbx
-                0x48, 0x83, 0xEC, 0x30,             // 6: sub rsp, 48
-                0x48, 0x89, 0xCB,                   // 10: mov rbx, rcx
-                0xE8, 0x00, 0x00, 0x00, 0x00,       // 13: call lstrlenA
-                0x41, 0x89, 0xC0,                   // 18: mov r8d, eax
-                0xB9, 0xF5, 0xFF, 0xFF, 0xFF,       // 21: mov ecx, -11
-                0xE8, 0x00, 0x00, 0x00, 0x00,       // 26: call GetStdHandle
-                0x48, 0x89, 0xC1,                   // 31: mov rcx, rax
-                0x48, 0x89, 0xDA,                   // 34: mov rdx, rbx
-                0x4C, 0x8D, 0x4C, 0x24, 0x28,       // 37: lea r9, [rsp + 40]
-                0x48, 0xC7, 0x44, 0x24, 0x20, 0x00, 0x00, 0x00, 0x00, // 42: mov qword ptr [rsp + 32], 0
-                0xE8, 0x00, 0x00, 0x00, 0x00,       // 51: call WriteFile
-                0x48, 0x83, 0xC4, 0x30,             // 56: add rsp, 48
-                0x5B,                               // 60: pop rbx
-                0xC3                                // 61: ret
-            };
+            std::vector<uint8_t> code;
+            auto emit = [&](std::initializer_list<uint8_t> bytes) { code.insert(code.end(), bytes); };
+            emit({0x48, 0x85, 0xC9});                                     // test rcx, rcx
+            emit({0x74, 0x00}); size_t jz_null = code.size() - 1;
+            emit({0x53, 0x48, 0x83, 0xEC, 0x30});                         // push rbx; sub rsp, 48
+            emit({0x48, 0x89, 0xCB});                                     // mov rbx, rcx
+            size_t rel_len = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call lstrlenA
+            emit({0x41, 0x89, 0xC0});                                     // mov r8d, eax (Wait: saved across GetStdHandle? NO! Save in rdi or reload? Wait: preserve in rdi or push!)
+            // Fix: preserve string length across GetStdHandle in non-volatile rsi!
+            code.clear();
+            emit({0x48, 0x85, 0xC9});                                     // test rcx, rcx
+            jz_null = code.size() + 1;
+            emit({0x74, 0x00});
+            emit({0x53, 0x56, 0x48, 0x83, 0xEC, 0x38});                   // push rbx; push rsi; sub rsp, 56 (8+16+56=80 %16==0)
+            emit({0x48, 0x89, 0xCB});                                     // mov rbx, rcx
+            rel_len = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call lstrlenA
+            emit({0x89, 0xC6});                                           // mov esi, eax
+            emit({0xB9, 0xF5, 0xFF, 0xFF, 0xFF});                         // mov ecx, -11
+            size_t rel_std = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call GetStdHandle
+            emit({0x48, 0x85, 0xC0});                                     // test rax, rax
+            emit({0x74, 0x00}); size_t jz_h = code.size() - 1;
+            emit({0x48, 0x83, 0xF8, 0xFF});                               // cmp rax, -1
+            emit({0x74, 0x00}); size_t je_h = code.size() - 1;
+            emit({0x48, 0x89, 0xC1});                                     // mov rcx, rax
+            emit({0x48, 0x89, 0xDA});                                     // mov rdx, rbx
+            emit({0x41, 0x89, 0xF0});                                     // mov r8d, esi
+            emit({0x4C, 0x8D, 0x4C, 0x24, 0x28});                         // lea r9, [rsp + 40]
+            emit({0x48, 0xC7, 0x44, 0x24, 0x20, 0x00, 0x00, 0x00, 0x00}); // mov qword ptr [rsp + 32], 0
+            size_t rel_wf = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call WriteFile
+            size_t epilog = code.size();
+            code[jz_h] = static_cast<uint8_t>(epilog - (jz_h + 1));
+            code[je_h] = static_cast<uint8_t>(epilog - (je_h + 1));
+            emit({0x48, 0x83, 0xC4, 0x38, 0x5E, 0x5B});                   // add rsp, 56; pop rsi; pop rbx
+            size_t ret_done = code.size();
+            code[jz_null] = static_cast<uint8_t>(ret_done - (jz_null + 1));
+            emit({0xC3});                                                 // ret
             std::vector<RelocEntry> rels = {
-                { SectionKind::Text, 14, "lstrlenA", RelocType::Rel32, -4 },
-                { SectionKind::Text, 27, "GetStdHandle", RelocType::Rel32, -4 },
-                { SectionKind::Text, 52, "WriteFile", RelocType::Rel32, -4 }
+                { SectionKind::Text, static_cast<uint32_t>(rel_len), "lstrlenA", RelocType::Rel32, -4 },
+                { SectionKind::Text, static_cast<uint32_t>(rel_std), "GetStdHandle", RelocType::Rel32, -4 },
+                { SectionKind::Text, static_cast<uint32_t>(rel_wf), "WriteFile", RelocType::Rel32, -4 }
             };
             append_function("grass_print_str", code, rels);
         }
 
         // 9. grass_print_int: Win32 format integer + WriteFile
         if (needed_symbols.count("grass_print_int") > 0 && defined_symbols.count("grass_print_int") == 0) {
-            std::vector<uint8_t> code = {
-                0x53,                               // 0: push rbx
-                0x56,                               // 1: push rsi
-                0x57,                               // 2: push rdi
-                0x48, 0x83, 0xEC, 0x40,             // 3: sub rsp, 64
-                0x48, 0x89, 0xC8,                   // 7: mov rax, rcx
-                0x48, 0x8D, 0x7C, 0x24, 0x3F,       // 10: lea rdi, [rsp + 63]
-                0xC6, 0x07, 0x00,                   // 15: mov byte ptr [rdi], 0
-                0x31, 0xDB,                         // 18: xor ebx, ebx
-                0x48, 0x85, 0xC0,                   // 20: test rax, rax
-                0x79, 0x08,                         // 23: jns +8 (.pos at 33)
-                0xBB, 0x01, 0x00, 0x00, 0x00,       // 25: mov ebx, 1
-                0x48, 0xF7, 0xD8,                   // 30: neg rax
-                0x31, 0xD2,                         // 33: xor edx, edx (.pos / .loop)
-                0x48, 0xC7, 0xC1, 0x0A, 0x00, 0x00, 0x00, // 35: mov rcx, 10
-                0x48, 0xF7, 0xF1,                   // 42: div rcx
-                0x80, 0xC2, 0x30,                   // 45: add dl, 48
-                0x48, 0xFF, 0xCF,                   // 48: dec rdi
-                0x88, 0x17,                         // 51: mov [rdi], dl
-                0x48, 0x85, 0xC0,                   // 53: test rax, rax
-                0x75, 0xE7,                         // 56: jnz -25 (to 33)
-                0x85, 0xDB,                         // 58: test ebx, ebx
-                0x74, 0x06,                         // 60: jz +6 (.write at 68)
-                0x48, 0xFF, 0xCF,                   // 62: dec rdi
-                0xC6, 0x07, 0x2D,                   // 65: mov byte ptr [rdi], '-' (45)
-                0x48, 0x8D, 0x54, 0x24, 0x3F,       // 68: lea rdx, [rsp + 63] (.write)
-                0x48, 0x29, 0xFA,                   // 73: sub rdx, rdi
-                0x49, 0x89, 0xD0,                   // 76: mov r8, rdx
-                0xB9, 0xF5, 0xFF, 0xFF, 0xFF,       // 79: mov ecx, -11
-                0x48, 0x89, 0xFE,                   // 84: mov rsi, rdi
-                0xE8, 0x00, 0x00, 0x00, 0x00,       // 87: call GetStdHandle
-                0x48, 0x89, 0xC1,                   // 92: mov rcx, rax
-                0x48, 0x89, 0xF2,                   // 95: mov rdx, rsi
-                0x4C, 0x8D, 0x4C, 0x24, 0x28,       // 98: lea r9, [rsp + 40]
-                0x48, 0xC7, 0x44, 0x24, 0x20, 0x00, 0x00, 0x00, 0x00, // 103: mov qword ptr [rsp + 32], 0
-                0xE8, 0x00, 0x00, 0x00, 0x00,       // 112: call WriteFile
-                0x48, 0x83, 0xC4, 0x40,             // 117: add rsp, 64
-                0x5F,                               // 121: pop rdi
-                0x5E,                               // 122: pop rsi
-                0x5B,                               // 123: pop rbx
-                0xC3                                // 124: ret
-            };
+            std::vector<uint8_t> code;
+            auto emit = [&](std::initializer_list<uint8_t> b) { code.insert(code.end(), b); };
+            emit({0x53, 0x56, 0x57});                                     // push rbx; push rsi; push rdi
+            emit({0x48, 0x83, 0xEC, 0x50});                               // sub rsp, 80 (buffer [rsp+48..79], bytesWritten [rsp+40])
+            emit({0x48, 0x89, 0xC8});                                     // mov rax, rcx
+            emit({0x48, 0x8D, 0x7C, 0x24, 0x4F});                         // lea rdi, [rsp + 79]
+            emit({0xC6, 0x07, 0x00});                                     // mov byte ptr [rdi], 0
+            emit({0x31, 0xDB});                                           // xor ebx, ebx
+            emit({0x48, 0x85, 0xC0});                                     // test rax, rax
+            emit({0x79, 0x08});                                           // jns +8
+            emit({0xBB, 0x01, 0x00, 0x00, 0x00});                         // mov ebx, 1
+            emit({0x48, 0xF7, 0xD8});                                     // neg rax
+            emit({0x31, 0xD2});                                           // xor edx, edx
+            emit({0x48, 0xC7, 0xC1, 0x0A, 0x00, 0x00, 0x00});             // mov rcx, 10
+            emit({0x48, 0xF7, 0xF1});                                     // div rcx
+            emit({0x80, 0xC2, 0x30});                                     // add dl, 48
+            emit({0x48, 0xFF, 0xCF});                                     // dec rdi
+            emit({0x88, 0x17});                                           // mov [rdi], dl
+            emit({0x48, 0x85, 0xC0});                                     // test rax, rax
+            emit({0x75, 0xE7});                                           // jnz -25
+            emit({0x85, 0xDB});                                           // test ebx, ebx
+            emit({0x74, 0x06});                                           // jz +6
+            emit({0x48, 0xFF, 0xCF});                                     // dec rdi
+            emit({0xC6, 0x07, 0x2D});                                     // mov byte ptr [rdi], '-'
+            emit({0x48, 0x8D, 0x54, 0x24, 0x4F});                         // lea rdx, [rsp + 79]
+            emit({0x48, 0x29, 0xFA});                                     // sub rdx, rdi
+            emit({0x49, 0x89, 0xD0});                                     // mov r8, rdx
+            emit({0xB9, 0xF5, 0xFF, 0xFF, 0xFF});                         // mov ecx, -11
+            emit({0x48, 0x89, 0xFE});                                     // mov rsi, rdi
+            size_t rel_std = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call GetStdHandle
+            emit({0x48, 0x85, 0xC0});                                     // test rax, rax
+            emit({0x74, 0x00}); size_t jz_h = code.size() - 1;
+            emit({0x48, 0x83, 0xF8, 0xFF});                               // cmp rax, -1
+            emit({0x74, 0x00}); size_t je_h = code.size() - 1;
+            emit({0x48, 0x89, 0xC1});                                     // mov rcx, rax
+            emit({0x48, 0x89, 0xF2});                                     // mov rdx, rsi
+            emit({0x4C, 0x8D, 0x4C, 0x24, 0x28});                         // lea r9, [rsp + 40]
+            emit({0x48, 0xC7, 0x44, 0x24, 0x20, 0x00, 0x00, 0x00, 0x00}); // mov qword ptr [rsp + 32], 0
+            size_t rel_wf = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call WriteFile
+            size_t epilog = code.size();
+            code[jz_h] = static_cast<uint8_t>(epilog - (jz_h + 1));
+            code[je_h] = static_cast<uint8_t>(epilog - (je_h + 1));
+            emit({0x48, 0x83, 0xC4, 0x50, 0x5F, 0x5E, 0x5B, 0xC3});       // add rsp, 80; pop rdi; pop rsi; pop rbx; ret
             std::vector<RelocEntry> rels = {
-                { SectionKind::Text, 88, "GetStdHandle", RelocType::Rel32, -4 },
-                { SectionKind::Text, 113, "WriteFile", RelocType::Rel32, -4 }
+                { SectionKind::Text, static_cast<uint32_t>(rel_std), "GetStdHandle", RelocType::Rel32, -4 },
+                { SectionKind::Text, static_cast<uint32_t>(rel_wf), "WriteFile", RelocType::Rel32, -4 }
             };
             append_function("grass_print_int", code, rels);
         }
@@ -2899,55 +2931,77 @@ namespace grass::backend {
             append_function("grass_print_double", code, rels);
         }
 
-        // 13. grass_read_int: Win32 ReadFile(GetStdHandle(-10)) and parse integer
+        // 13. grass_read_int: Win32 ReadFile(GetStdHandle(-10)) with aligned stack, handle checks, and null-termination
         if (needed_symbols.count("grass_read_int") > 0 && defined_symbols.count("grass_read_int") == 0) {
-            std::vector<uint8_t> code = {
-                0x56,                               // 0: push rsi
-                0x48, 0x83, 0xEC, 0x40,             // 1: sub rsp, 64
-                0xB9, 0xF6, 0xFF, 0xFF, 0xFF,       // 5: mov ecx, -10
-                0xE8, 0x00, 0x00, 0x00, 0x00,       // 10: call GetStdHandle
-                0x48, 0x89, 0xC1,                   // 15: mov rcx, rax
-                0x48, 0x8D, 0x54, 0x24, 0x20,       // 18: lea rdx, [rsp + 32]
-                0x41, 0xB8, 0x1F, 0x00, 0x00, 0x00, // 23: mov r8d, 31
-                0x4C, 0x8D, 0x4C, 0x24, 0x18,       // 29: lea r9, [rsp + 24]
-                0x48, 0xC7, 0x44, 0x24, 0x14, 0x00, 0x00, 0x00, 0x00, // 35: mov qword ptr [rsp + 20], 0
-                0xE8, 0x00, 0x00, 0x00, 0x00,       // 44: call ReadFile
-                0x31, 0xC0,                         // 49: xor eax, eax
-                0x45, 0x31, 0xC0,                   // 51: xor r8d, r8d
-                0x31, 0xC9,                         // 54: xor ecx, ecx
-                0x48, 0x8D, 0x74, 0x24, 0x20,       // 56: lea rsi, [rsp + 32]
-                0x0F, 0xB6, 0x14, 0x0E,             // 60: movzbl (%rsi,%rcx,1),%edx
-                0x48, 0xFF, 0xC1,                   // 64: inc rcx
-                0x80, 0xFA, 0x20,                   // 67: cmp dl, 32
-                0x74, 0xF4,                         // 70: je 60
-                0x80, 0xFA, 0x09,                   // 72: cmp dl, 9
-                0x74, 0xEF,                         // 75: je 60
-                0x80, 0xFA, 0x2D,                   // 77: cmp dl, 45 ('-')
-                0x75, 0x0D,                         // 80: jne +13
-                0x41, 0xB8, 0x01, 0x00, 0x00, 0x00, // 82: mov r8d, 1
-                0x0F, 0xB6, 0x14, 0x0E,             // 88: movzbl (%rsi,%rcx,1),%edx
-                0x48, 0xFF, 0xC1,                   // 92: inc rcx
-                0x80, 0xFA, 0x30,                   // 95: cmp dl, '0'
-                0x72, 0x1C,                         // 98: jb +28 (.done at 128)
-                0x80, 0xFA, 0x39,                   // 100: cmp dl, '9'
-                0x77, 0x17,                         // 103: ja +23 (.done at 128)
-                0x80, 0xEA, 0x30,                   // 105: sub dl, '0'
-                0x48, 0x0F, 0xB6, 0xD2,             // 108: movzbq rdx, dl
-                0x48, 0x6B, 0xC0, 0x0A,             // 112: imul rax, 10
-                0x48, 0x01, 0xD0,                   // 116: add rax, rdx
-                0x0F, 0xB6, 0x14, 0x0E,             // 119: movzbl (%rsi,%rcx,1),%edx
-                0x48, 0xFF, 0xC1,                   // 123: inc rcx
-                0xEB, 0xDF,                         // 126: jmp 95
-                0x45, 0x85, 0xC0,                   // 128: test r8d, r8d (.done)
-                0x74, 0x03,                         // 131: jz +3
-                0x48, 0xF7, 0xD8,                   // 133: neg rax
-                0x48, 0x83, 0xC4, 0x40,             // 136: add rsp, 64
-                0x5E,                               // 140: pop rsi
-                0xC3                                // 141: ret
-            };
+            std::vector<uint8_t> code;
+            auto emit = [&](std::initializer_list<uint8_t> bytes) { code.insert(code.end(), bytes); };
+            emit({0x56});                                                 // push rsi (entry RSP%16==8 -> now 0)
+            emit({0x48, 0x83, 0xEC, 0x50});                               // sub rsp, 80 (0x50): [0..31] shadow, [32] overlapped, [40] bytesRead, [48..79] buf
+            emit({0xB9, 0xF6, 0xFF, 0xFF, 0xFF});                         // mov ecx, -10
+            size_t rel_std = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call GetStdHandle
+            emit({0x48, 0x85, 0xC0});                                     // test rax, rax
+            emit({0x74, 0x00}); size_t jz_h = code.size() - 1;
+            emit({0x48, 0x83, 0xF8, 0xFF});                               // cmp rax, -1
+            emit({0x74, 0x00}); size_t je_h = code.size() - 1;
+            emit({0x48, 0x89, 0xC1});                                     // mov rcx, rax
+            emit({0x48, 0x8D, 0x54, 0x24, 0x30});                         // lea rdx, [rsp + 48]
+            emit({0x41, 0xB8, 0x1F, 0x00, 0x00, 0x00});                   // mov r8d, 31
+            emit({0x4C, 0x8D, 0x4C, 0x24, 0x28});                         // lea r9, [rsp + 40]
+            emit({0x48, 0xC7, 0x44, 0x24, 0x20, 0x00, 0x00, 0x00, 0x00}); // mov qword ptr [rsp + 32], 0
+            size_t rel_rf = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call ReadFile
+            emit({0x85, 0xC0});                                           // test eax, eax
+            emit({0x74, 0x00}); size_t jz_rf = code.size() - 1;
+            emit({0x8B, 0x4C, 0x24, 0x28});                               // mov ecx, dword ptr [rsp + 40]
+            emit({0x83, 0xF9, 0x1F});                                     // cmp ecx, 31
+            emit({0x76, 0x05});                                           // jbe +5
+            emit({0xB9, 0x1F, 0x00, 0x00, 0x00});                         // mov ecx, 31
+            emit({0xC6, 0x44, 0x0C, 0x30, 0x00});                         // mov byte ptr [rsp + rcx + 48], 0
+            emit({0x31, 0xC0});                                           // xor eax, eax
+            emit({0x45, 0x31, 0xC0});                                     // xor r8d, r8d
+            emit({0x31, 0xC9});                                           // xor ecx, ecx
+            emit({0x48, 0x8D, 0x74, 0x24, 0x30});                         // lea rsi, [rsp + 48]
+            size_t loop_ws = code.size();
+            emit({0x0F, 0xB6, 0x14, 0x0E});                               // movzx edx, byte ptr [rsi + rcx]
+            emit({0x48, 0xFF, 0xC1});                                     // inc rcx
+            emit({0x80, 0xFA, 0x20});                                     // cmp dl, ' '
+            emit({0x74, static_cast<uint8_t>(static_cast<int8_t>(loop_ws - (code.size() + 2)))});
+            emit({0x80, 0xFA, 0x09});                                     // cmp dl, '\t'
+            emit({0x74, static_cast<uint8_t>(static_cast<int8_t>(loop_ws - (code.size() + 2)))});
+            emit({0x80, 0xFA, 0x2D});                                     // cmp dl, '-'
+            emit({0x75, 0x0D});                                           // jne +13
+            emit({0x41, 0xB8, 0x01, 0x00, 0x00, 0x00});                   // mov r8d, 1
+            emit({0x0F, 0xB6, 0x14, 0x0E});                               // movzx edx, byte ptr [rsi + rcx]
+            emit({0x48, 0xFF, 0xC1});                                     // inc rcx
+            size_t loop_dig = code.size();
+            emit({0x80, 0xFA, 0x30});                                     // cmp dl, '0'
+            emit({0x72, 0x00}); size_t jb_done = code.size() - 1;
+            emit({0x80, 0xFA, 0x39});                                     // cmp dl, '9'
+            emit({0x77, 0x00}); size_t ja_done = code.size() - 1;
+            emit({0x80, 0xEA, 0x30});                                     // sub dl, '0'
+            emit({0x48, 0x0F, 0xB6, 0xD2});                               // movzx rdx, dl
+            emit({0x48, 0x6B, 0xC0, 0x0A});                               // imul rax, 10
+            emit({0x48, 0x01, 0xD0});                                     // add rax, rdx
+            emit({0x0F, 0xB6, 0x14, 0x0E});                               // movzx edx, byte ptr [rsi + rcx]
+            emit({0x48, 0xFF, 0xC1});                                     // inc rcx
+            emit({0xEB, static_cast<uint8_t>(static_cast<int8_t>(loop_dig - (code.size() + 2)))});
+            size_t done_digits = code.size();
+            code[jb_done] = static_cast<uint8_t>(done_digits - (jb_done + 1));
+            code[ja_done] = static_cast<uint8_t>(done_digits - (ja_done + 1));
+            emit({0x45, 0x85, 0xC0});                                     // test r8d, r8d
+            emit({0x74, 0x03});                                           // jz +3
+            emit({0x48, 0xF7, 0xD8});                                     // neg rax
+            emit({0xEB, 0x02});                                           // jmp +2 (.epilog)
+            size_t fail_lbl = code.size();
+            code[jz_h]  = static_cast<uint8_t>(fail_lbl - (jz_h + 1));
+            code[je_h]  = static_cast<uint8_t>(fail_lbl - (je_h + 1));
+            code[jz_rf] = static_cast<uint8_t>(fail_lbl - (jz_rf + 1));
+            emit({0x31, 0xC0});                                           // xor eax, eax
+            emit({0x48, 0x83, 0xC4, 0x50, 0x5E, 0xC3});                   // add rsp, 80; pop rsi; ret
             std::vector<RelocEntry> rels = {
-                { SectionKind::Text, 11, "GetStdHandle", RelocType::Rel32, -4 },
-                { SectionKind::Text, 45, "ReadFile", RelocType::Rel32, -4 }
+                { SectionKind::Text, static_cast<uint32_t>(rel_std), "GetStdHandle", RelocType::Rel32, -4 },
+                { SectionKind::Text, static_cast<uint32_t>(rel_rf), "ReadFile", RelocType::Rel32, -4 }
             };
             append_function("grass_read_int", code, rels);
         }
@@ -2981,42 +3035,53 @@ namespace grass::backend {
         }
 
         if (needed_symbols.count("grass_array_push") > 0 && defined_symbols.count("grass_array_push") == 0) {
-            std::vector<uint8_t> code = {
-                0x48, 0x85, 0xC9,                   // 0: test rcx, rcx
-                0x74, 0x64,                         // 3: jz +100 (.ret at 105)
-                0x49, 0xBA, 0x4E, 0x47, 0x52, 0x47, 0x59, 0x52, 0x52, 0x41, // 5: mov r10, 0x415252594752474E
-                0x4C, 0x39, 0x11,                   // 15: cmp [rcx], r10
-                0x75, 0x55,                         // 18: jne +85 (.ret at 105)
-                0x53,                               // 20: push rbx
-                0x56,                               // 21: push rsi
-                0x48, 0x83, 0xEC, 0x28,             // 22: sub rsp, 40
-                0x48, 0x89, 0xCB,                   // 26: mov rbx, rcx
-                0x48, 0x89, 0xD6,                   // 29: mov rsi, rdx
-                0x48, 0x8B, 0x43, 0x10,             // 32: mov rax, [rbx + 16]
-                0x48, 0x3B, 0x43, 0x18,             // 36: cmp rax, [rbx + 24]
-                0x72, 0x29,                         // 40: jb +41 (.push_store at 83)
-                0x48, 0x8B, 0x43, 0x18,             // 42: mov rax, [rbx + 24]
-                0x48, 0xD1, 0xE0,                   // 46: shl rax, 1
-                0x48, 0x85, 0xC0,                   // 49: test rax, rax
-                0x75, 0x05,                         // 52: jnz +5 (.cap_ok at 59)
-                0xB8, 0x08, 0x00, 0x00, 0x00,       // 54: mov eax, 8
-                0x48, 0x89, 0x43, 0x18,             // 59: mov [rbx + 24], rax (.cap_ok)
-                0x48, 0xC1, 0xE0, 0x03,             // 63: shl rax, 3
-                0x48, 0x89, 0xC2,                   // 67: mov rdx, rax
-                0x48, 0x8B, 0x4B, 0x08,             // 70: mov rcx, [rbx + 8]
-                0xE8, 0x00, 0x00, 0x00, 0x00,       // 74: call grass_realloc
-                0x48, 0x89, 0x43, 0x08,             // 79: mov [rbx + 8], rax
-                0x48, 0x8B, 0x4B, 0x08,             // 83: mov rcx, [rbx + 8] (.push_store)
-                0x48, 0x8B, 0x53, 0x10,             // 87: mov rdx, [rbx + 16]
-                0x48, 0x89, 0x34, 0xD1,             // 91: mov [rcx + rdx * 8], rsi
-                0x48, 0xFF, 0x43, 0x10,             // 95: inc qword ptr [rbx + 16]
-                0x48, 0x83, 0xC4, 0x28,             // 99: add rsp, 40
-                0x5E,                               // 103: pop rsi
-                0x5B,                               // 104: pop rbx
-                0xC3                                // 105: ret (.ret)
-            };
+            std::vector<uint8_t> code;
+            auto emit = [&](std::initializer_list<uint8_t> bytes) { code.insert(code.end(), bytes); };
+            emit({0x48, 0x85, 0xC9});                                     // test rcx, rcx
+            emit({0x74, 0x00}); size_t jz_null = code.size() - 1;
+            emit({0x49, 0xBA, 0x4E, 0x47, 0x52, 0x47, 0x59, 0x52, 0x52, 0x41}); // mov r10, magic
+            emit({0x4C, 0x39, 0x11});                                     // cmp [rcx], r10
+            emit({0x75, 0x00}); size_t jne_mag = code.size() - 1;
+            emit({0x53, 0x56, 0x48, 0x83, 0xEC, 0x28});                   // push rbx; push rsi; sub rsp, 40
+            emit({0x48, 0x89, 0xCB});                                     // mov rbx, rcx
+            emit({0x48, 0x89, 0xD6});                                     // mov rsi, rdx
+            emit({0x48, 0x8B, 0x43, 0x10});                               // mov rax, [rbx + 16] (len)
+            emit({0x48, 0x3B, 0x43, 0x18});                               // cmp rax, [rbx + 24] (cap)
+            emit({0x72, 0x00}); size_t jb_store = code.size() - 1;
+            emit({0x48, 0x8B, 0x43, 0x18});                               // mov rax, [rbx + 24]
+            emit({0x48, 0xD1, 0xE0});                                     // shl rax, 1
+            emit({0x48, 0x85, 0xC0});                                     // test rax, rax
+            emit({0x7F, 0x05});                                           // jg +5
+            emit({0xB8, 0x08, 0x00, 0x00, 0x00});                         // mov eax, 8
+            emit({0x48, 0xC1, 0xE0, 0x03});                               // shl rax, 3 (bytes = new_cap * 8)
+            emit({0x48, 0x89, 0xC2});                                     // mov rdx, rax
+            emit({0x48, 0x8B, 0x4B, 0x08});                               // mov rcx, [rbx + 8]
+            size_t rel_realloc = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call grass_realloc
+            emit({0x48, 0x85, 0xC0});                                     // test rax, rax
+            emit({0x74, 0x00}); size_t jz_oom = code.size() - 1;
+            emit({0x48, 0x89, 0x43, 0x08});                               // mov [rbx + 8], rax
+            emit({0x48, 0x8B, 0x43, 0x18});                               // reload old cap
+            emit({0x48, 0xD1, 0xE0});                                     // shl rax, 1
+            emit({0x48, 0x85, 0xC0});                                     // test rax, rax
+            emit({0x7F, 0x05});                                           // jg +5
+            emit({0xB8, 0x08, 0x00, 0x00, 0x00});                         // mov eax, 8
+            emit({0x48, 0x89, 0x43, 0x18});                               // mov [rbx + 24], rax
+            size_t push_store = code.size();
+            code[jb_store] = static_cast<uint8_t>(push_store - (jb_store + 1));
+            emit({0x48, 0x8B, 0x4B, 0x08});                               // mov rcx, [rbx + 8]
+            emit({0x48, 0x8B, 0x53, 0x10});                               // mov rdx, [rbx + 16]
+            emit({0x48, 0x89, 0x34, 0xD1});                               // mov [rcx + rdx * 8], rsi
+            emit({0x48, 0xFF, 0x43, 0x10});                               // inc qword ptr [rbx + 16]
+            size_t epilog = code.size();
+            code[jz_oom] = static_cast<uint8_t>(epilog - (jz_oom + 1));
+            emit({0x48, 0x83, 0xC4, 0x28, 0x5E, 0x5B});                   // add rsp, 40; pop rsi; pop rbx
+            size_t ret_done = code.size();
+            code[jz_null] = static_cast<uint8_t>(ret_done - (jz_null + 1));
+            code[jne_mag] = static_cast<uint8_t>(ret_done - (jne_mag + 1));
+            emit({0xC3});
             std::vector<RelocEntry> rels = {
-                { SectionKind::Text, 75, "grass_realloc", RelocType::Rel32, -4 }
+                { SectionKind::Text, static_cast<uint32_t>(rel_realloc), "grass_realloc", RelocType::Rel32, -4 }
             };
             append_function("grass_array_push", code, rels);
         }
@@ -3374,31 +3439,44 @@ namespace grass::backend {
                 "  #0  in <native code>\r\n"
                 "================================================================================\r\n\r\n");
 
-            std::vector<uint8_t> veh_code = {
-                0x48, 0x85, 0xC9,                   // 0: test rcx, rcx
-                0x74, 0x3A,                         // 3: jz .pass (at 63)
-                0x48, 0x8B, 0x01,                   // 5: mov rax, [rcx]
-                0x48, 0x85, 0xC0,                   // 8: test rax, rax
-                0x74, 0x32,                         // 11: jz .pass (at 63)
-                0x48, 0x83, 0xEC, 0x38,             // 13: sub rsp, 56
-                0xB9, 0xF4, 0xFF, 0xFF, 0xFF,       // 17: mov ecx, -12 (STD_ERROR_HANDLE)
-                0xE8, 0x00, 0x00, 0x00, 0x00,       // 22: call GetStdHandle
-                0x48, 0x89, 0xC1,                   // 27: mov rcx, rax
-                0x48, 0x8D, 0x15, 0x00, 0x00, 0x00, 0x00, // 30: lea rdx, [rip + __grass_crash_msg]
-                0x41, 0xB8, 0xDA, 0x00, 0x00, 0x00, // 37: mov r8d, 218
-                0x4C, 0x8D, 0x4C, 0x24, 0x28,       // 43: lea r9, [rsp + 40]
-                0x48, 0xC7, 0x44, 0x24, 0x20, 0x00, 0x00, 0x00, 0x00, // 48: mov qword ptr [rsp + 32], 0
-                0xE8, 0x00, 0x00, 0x00, 0x00,       // 57: call WriteFile
-                0xB9, 0x01, 0x00, 0x00, 0x00,       // 62: mov ecx, 1
-                0xE8, 0x00, 0x00, 0x00, 0x00,       // 67: call ExitProcess
-                0x31, 0xC0,                         // 72: xor eax, eax (.pass)
-                0xC3                                // 74: ret
-            };
+            std::vector<uint8_t> veh_code;
+            auto vemit = [&](std::initializer_list<uint8_t> b) { veh_code.insert(veh_code.end(), b); };
+            vemit({0x48, 0x85, 0xC9});                                     // test rcx, rcx
+            vemit({0x74, 0x00}); size_t jz_p1 = veh_code.size() - 1;
+            vemit({0x48, 0x8B, 0x01});                                     // mov rax, [rcx]
+            vemit({0x48, 0x85, 0xC0});                                     // test rax, rax
+            vemit({0x74, 0x00}); size_t jz_p2 = veh_code.size() - 1;
+            vemit({0x48, 0x83, 0xEC, 0x38});                               // sub rsp, 56
+            vemit({0xB9, 0xF4, 0xFF, 0xFF, 0xFF});                         // mov ecx, -12 (STD_ERROR_HANDLE)
+            size_t rel_std = veh_code.size() + 1;
+            vemit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call GetStdHandle
+            vemit({0x48, 0x85, 0xC0});                                     // test rax, rax
+            vemit({0x74, 0x00}); size_t jz_h = veh_code.size() - 1;
+            vemit({0x48, 0x83, 0xF8, 0xFF});                               // cmp rax, -1
+            vemit({0x74, 0x00}); size_t je_h = veh_code.size() - 1;
+            vemit({0x48, 0x89, 0xC1});                                     // mov rcx, rax
+            size_t rel_msg = veh_code.size() + 3;
+            vemit({0x48, 0x8D, 0x15, 0x00, 0x00, 0x00, 0x00});             // lea rdx, [rip + __grass_crash_msg]
+            vemit({0x41, 0xB8, 0xDA, 0x00, 0x00, 0x00});                   // mov r8d, 218
+            vemit({0x4C, 0x8D, 0x4C, 0x24, 0x28});                         // lea r9, [rsp + 40]
+            vemit({0x48, 0xC7, 0x44, 0x24, 0x20, 0x00, 0x00, 0x00, 0x00}); // mov qword ptr [rsp + 32], 0
+            size_t rel_wf = veh_code.size() + 1;
+            vemit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call WriteFile
+            size_t do_exit = veh_code.size();
+            veh_code[jz_h] = static_cast<uint8_t>(do_exit - (jz_h + 1));
+            veh_code[je_h] = static_cast<uint8_t>(do_exit - (je_h + 1));
+            vemit({0xB9, 0x01, 0x00, 0x00, 0x00});                         // mov ecx, 1
+            size_t rel_exit = veh_code.size() + 1;
+            vemit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call ExitProcess
+            size_t pass_lbl = veh_code.size();
+            veh_code[jz_p1] = static_cast<uint8_t>(pass_lbl - (jz_p1 + 1));
+            veh_code[jz_p2] = static_cast<uint8_t>(pass_lbl - (jz_p2 + 1));
+            vemit({0x31, 0xC0, 0xC3});                                     // xor eax, eax; ret
             std::vector<RelocEntry> veh_rels = {
-                { SectionKind::Text, 23, "GetStdHandle", RelocType::Rel32, -4 },
-                { SectionKind::Text, 33, "__grass_crash_msg", RelocType::Rel32, -4 },
-                { SectionKind::Text, 58, "WriteFile", RelocType::Rel32, -4 },
-                { SectionKind::Text, 68, "ExitProcess", RelocType::Rel32, -4 }
+                { SectionKind::Text, static_cast<uint32_t>(rel_std), "GetStdHandle", RelocType::Rel32, -4 },
+                { SectionKind::Text, static_cast<uint32_t>(rel_msg), "__grass_crash_msg", RelocType::Rel32, -4 },
+                { SectionKind::Text, static_cast<uint32_t>(rel_wf), "WriteFile", RelocType::Rel32, -4 },
+                { SectionKind::Text, static_cast<uint32_t>(rel_exit), "ExitProcess", RelocType::Rel32, -4 }
             };
             append_function("__grass_veh_handler", veh_code, veh_rels);
 

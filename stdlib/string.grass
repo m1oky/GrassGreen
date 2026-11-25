@@ -60,7 +60,7 @@ take strcpy(take dst, take src) {
 
 // Append src string to end of dst buffer
 take str_cat(take dst, take src) {
-    if (dst == 0 || src == 0) {
+    if (dst == 0 || src == 0 || dst == src) {
         return dst;
     }
     return lstrcatA(dst, src);
@@ -76,6 +76,9 @@ take str_dup(take str) {
         return 0;
     }
     take len = str_len(str);
+    if (len < 0 || len > 2147483646) {
+        return 0;
+    }
     take buf = alloc(len + 1);
     if (buf == 0) {
         return 0;
@@ -125,19 +128,33 @@ take str_to_int(take str) {
 take int_to_str(take val) {
     if (val == 0) {
         take zero = alloc(2);
+        if (zero == 0) {
+            return 0;
+        }
         zero[0] = 48; // '0'
         zero[1] = 0;
         return zero;
     }
     take buf = alloc(32);
+    if (buf == 0) {
+        return 0;
+    }
     take is_neg = 0;
     if (val < 0) {
         is_neg = 1;
+        if (val == -9223372036854775807 - 1) {
+            free(buf);
+            return str_dup("-9223372036854775808");
+        }
         val = 0 - val;
     }
     take temp = alloc(32);
+    if (temp == 0) {
+        free(buf);
+        return 0;
+    }
     take pos = 0;
-    while (val > 0) {
+    while (val > 0 && pos < 30) {
         take rem = val % 10;
         temp[pos] = rem + 48;
         val = val / 10;
@@ -149,7 +166,7 @@ take int_to_str(take val) {
         out_pos = out_pos + 1;
     }
     take k = pos - 1;
-    while (k >= 0) {
+    while (k >= 0 && out_pos < 31) {
         buf[out_pos] = temp[k];
         out_pos = out_pos + 1;
         k = k - 1;
@@ -161,15 +178,16 @@ take int_to_str(take val) {
 
 // Substring extraction into newly allocated heap buffer
 take str_substr(take str, take start_idx, take sub_len) {
-    if (str == 0 || sub_len <= 0) {
+    if (str == 0 || start_idx < 0 || sub_len <= 0) {
         return 0;
     }
     take total_len = str_len(str);
-    if (start_idx >= total_len) {
+    if (total_len <= 0 || start_idx >= total_len) {
         return 0;
     }
-    if (start_idx + sub_len > total_len) {
-        sub_len = total_len - start_idx;
+    take avail = total_len - start_idx;
+    if (sub_len > avail) {
+        sub_len = avail;
     }
     take buf = alloc(sub_len + 1);
     if (buf == 0) {

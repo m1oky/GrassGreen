@@ -79,6 +79,11 @@ enum OpCode : uint8_t {
     OP_NEW_STRUCT    = 0x85,
     OP_GET_FIELD     = 0x86,
     OP_SET_FIELD     = 0x87,
+    OP_ADDR_VAR      = 0x88,
+    OP_DEREF         = 0x89,
+    OP_STORE_DEREF   = 0x8A,
+    OP_ADDR_INDEX    = 0x8B,
+    OP_ADDR_FIELD    = 0x8C,
 
     // ── Фьюз-инструкции и оптимизации (Bytecode Optimizer) ──
     OP_ADD_CONST     = 0x90,
@@ -112,11 +117,13 @@ enum OpCode : uint8_t {
 struct GrassArray;
 struct GrassStructDef;
 struct GrassStructInstance;
+struct GrassVMPtr;
 
 struct GrassValue {
     uint64_t bits;
 
     // ── Константы NaN-boxing ──
+    static constexpr uint64_t TAG_PTR    = 0x7FFA000000000000ULL;
     static constexpr uint64_t QNAN       = 0x7FFC000000000000ULL;
     static constexpr uint64_t TAG_STRUCT = 0x7FFB000000000000ULL;
     static constexpr uint64_t TAG_NIL    = 0x7FFC000000000000ULL;
@@ -129,6 +136,11 @@ struct GrassValue {
     GrassValue() : bits(TAG_NIL) {}
 
     // ── Фабрики ──
+    static GrassValue Ptr(GrassVMPtr* p) {
+        GrassValue g;
+        g.bits = TAG_PTR | ((uint64_t)(uintptr_t)p & PTR_MASK);
+        return g;
+    }
     static GrassValue Num(double v) {
         GrassValue g;
         std::memcpy(&g.bits, &v, 8);
@@ -168,6 +180,7 @@ struct GrassValue {
 
     // ── Инспекция типа ──
     bool is_nil()    const { return bits == TAG_NIL; }
+    bool is_ptr()    const { return (bits & 0xFFFF000000000000ULL) == TAG_PTR; }
     bool is_str()    const { return (bits & 0xFFFF000000000000ULL) == TAG_STR; }
     bool is_string() const { return is_str(); }
     bool is_bool()   const { return (bits & 0xFFFF000000000000ULL) == TAG_BOOL; }
@@ -175,7 +188,7 @@ struct GrassValue {
     bool is_struct() const { return (bits & 0xFFFF000000000000ULL) == TAG_STRUCT; }
     bool is_num()    const {
         uint64_t t = bits & 0xFFFF000000000000ULL;
-        return t != TAG_NIL && t != TAG_BOOL && t != TAG_STR && t != TAG_ARRAY && t != TAG_STRUCT;
+        return t != TAG_PTR && t != TAG_NIL && t != TAG_BOOL && t != TAG_STR && t != TAG_ARRAY && t != TAG_STRUCT;
     }
     bool isNumeric() const {
         if (is_num()) return true;
@@ -207,6 +220,10 @@ struct GrassValue {
         return (GrassStructInstance*)(uintptr_t)(bits & PTR_MASK);
     }
 
+    GrassVMPtr* asPtr() const {
+        return (GrassVMPtr*)(uintptr_t)(bits & PTR_MASK);
+    }
+
     double toNumber() const {
         if (is_str()) {
             const char* s = asCStr();
@@ -218,6 +235,7 @@ struct GrassValue {
             return (end != s) ? v : 0.0;
         }
         if (is_bool()) return (bits & 1) ? 1.0 : 0.0;
+        if (is_ptr()) return (double)(uintptr_t)asPtr();
         if (is_nil() || is_array() || is_struct()) return 0.0;
         double d;
         std::memcpy(&d, &bits, 8);
@@ -226,6 +244,19 @@ struct GrassValue {
 
     std::string toString() const;
     bool isTruthy() const;
+};
+
+struct GrassVMPtr {
+    GrassValue* cell = nullptr;
+    std::vector<GrassValue>* vec = nullptr;
+    int64_t vec_idx = 0;
+    uint8_t* raw = nullptr;
+    size_t raw_size = 0;
+    int64_t raw_off = 0;
+    GrassStructInstance* struct_inst = nullptr;
+    int64_t elem_size = 8;
+    bool is_scalar_u8 = false;
+    uint8_t scalar_kind = 0; // 0=raw/byte, 1=U8, 2=U16, 3=U32, 4=INT, 5=FLOAT, 6=DOUBLE, 7=U64, 8=BOOL, 9=STRING
 };
 
 // ── Определение структур и массивов GrassGreen 4.0 ──
@@ -288,6 +319,13 @@ inline std::string GrassValue::toString() const {
         res += "]";
         return res;
     }
+    if (is_ptr()) {
+        GrassVMPtr* p = asPtr();
+        if (!p) return "0x0";
+        std::ostringstream ss;
+        ss << "0x" << std::hex << (uintptr_t)p;
+        return ss.str();
+    }
     if (is_struct()) {
         GrassStructInstance* st = asStruct();
         if (!st || !st->def) return "{struct}";
@@ -305,6 +343,7 @@ inline std::string GrassValue::toString() const {
 
 inline bool GrassValue::isTruthy() const {
     if (is_nil())  return false;
+    if (is_ptr())  return asPtr() != nullptr;
     if (is_bool()) return (bits & 1) != 0;
     if (is_array()) {
         GrassArray* arr = asArray();
@@ -967,7 +1006,9 @@ private:
     std::vector<SyntaxDiagnostic> diagnostics;
     std::unordered_set<std::string> custom_types;
     int error_count = 0;
+    int parser_depth_ = 0;
     static constexpr int MAX_ERRORS = 100;
+    static constexpr int MAX_PARSER_DEPTH = 512;
 
     const GrassToken& peek(int offset = 0) const;
     GrassToken advance();

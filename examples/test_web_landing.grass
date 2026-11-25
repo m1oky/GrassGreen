@@ -49,7 +49,7 @@ page-start
         card-start
             color(#22c55e)
             thick
-            h3 = ⚡ Реактивность
+            h3 = Реактивность
             color(#d4d4d8)
             p = Поддержка декларативных таймеров every() и коллбэков on-click без сторонних фреймворков.
         card-end
@@ -57,7 +57,7 @@ page-start
         card-start
             color(#38bdf8)
             thick
-            h3 = 💎 Стили и Glassmorphism
+            h3 = Стили и Glassmorphism
             color(#d4d4d8)
             p = Встроенный блюр, неоновые тени, адаптивный Flexbox и Grid-раскладка из коробки.
         card-end
@@ -65,7 +65,7 @@ page-start
         card-start
             color(#f59e0b)
             thick
-            h3 = 🔒 Безопасность и скорость
+            h3 = Безопасность и скорость
             color(#d4d4d8)
             p = Компиляция в чистый оптимизированный HTML5 + CSS3 с быстрой доставкой по сети.
         card-end

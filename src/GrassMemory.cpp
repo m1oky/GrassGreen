@@ -91,8 +91,13 @@ namespace GrassMemory {
     }
 
     int alloc_block(size_t bytes) {
-        if (bytes == 0) return 0;
+        // Guard against 0, negative-to-unsigned wraparound, and excessive (>1 GB) allocations
+        if (bytes == 0 || bytes > (1ULL << 30)) return 0;
         int id = g_next_block_id++;
+        if (id <= 0) {
+            g_next_block_id = 1;
+            id = g_next_block_id++;
+        }
         try {
             g_allocated_blocks[id].resize(bytes, 0);
             if (g_auto_mode) separ();

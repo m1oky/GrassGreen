@@ -278,10 +278,9 @@ namespace GrassHAL {
     static std::mutex g_exec_pool_mtx;
 
     void* alloc_executable_memory(size_t size) {
+        if (size == 0 || size > (64ULL << 20)) return nullptr;
         std::lock_guard<std::mutex> lock(g_exec_pool_mtx);
         #if defined(_WIN32)
-        // На хост-системе Windows всегда используем VirtualAlloc с PAGE_EXECUTE_READWRITE
-        // для предотвращения аппаратного падения DEP/NX (0xC0000005)
         return VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
         #elif defined(__linux__) || defined(__APPLE__)
         void* p = mmap(nullptr, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -297,6 +296,20 @@ namespace GrassHAL {
             return nullptr;
         }
         return nullptr;
+        #endif
+    }
+
+    bool protect_executable_memory(void* ptr, size_t size) {
+        if (!ptr || size == 0) return false;
+        std::lock_guard<std::mutex> lock(g_exec_pool_mtx);
+        #if defined(_WIN32)
+        DWORD old_prot = 0;
+        return VirtualProtect(ptr, size, PAGE_EXECUTE_READ, &old_prot) != 0;
+        #elif defined(__linux__) || defined(__APPLE__)
+        return mprotect(ptr, size, PROT_READ | PROT_EXEC) == 0;
+        #else
+        (void)size;
+        return true;
         #endif
     }
 

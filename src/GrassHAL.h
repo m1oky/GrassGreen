@@ -72,6 +72,7 @@ namespace GrassHAL {
 
     // ── 7. Исполняемая память JIT (Freestanding / Bare-Metal) ──
     void* alloc_executable_memory(size_t size);
+    bool protect_executable_memory(void* ptr, size_t size);
     void free_executable_memory(void* ptr, size_t size);
 
     extern Framebuffer g_software_fb;

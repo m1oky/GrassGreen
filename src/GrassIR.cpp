@@ -2355,7 +2355,7 @@ namespace grass::ir {
                                 progress = true;
                                 changed = true;
                                 continue;
-                            } else if (inst->op == IROp::IntToPtr || inst->op == IROp::PtrToInt || inst->op == IROp::Bitcast) {
+                            } else if (inst->op == IROp::PtrToInt || (inst->op == IROp::Bitcast && inst->type && inst->type->is_integer())) {
                                 inst->op = IROp::ConstInt;
                                 inst->int_imm = c1;
                                 inst->operands.clear();
@@ -3004,7 +3004,11 @@ namespace grass::ir {
 
             for (BasicBlock* b : linear_blocks) {
                 for (auto& inst : b->instructions) {
-                    if (inst->op == IROp::Call) {
+                    if (inst->op == IROp::Call ||
+                        inst->op == IROp::SDiv || inst->op == IROp::SRem ||
+                        inst->op == IROp::UDiv || inst->op == IROp::URem ||
+                        inst->op == IROp::Shl  || inst->op == IROp::AShr ||
+                        inst->op == IROp::LShr) {
                         int call_idx = inst_indices[inst.get()];
                         if (call_idx > li.start && call_idx < li.end) {
                             li.crosses_call = true;
@@ -3031,25 +3035,21 @@ namespace grass::ir {
         std::vector<PhysReg> xmm_callee_saved;
 
         if (abi == TargetABI::Win64) {
-            // Exclude RAX from general allocation because it is reserved for call returns, idiv, and setcc
-            gpr_caller_saved = {PhysReg::RCX, PhysReg::RDX,
-                                PhysReg::R8,  PhysReg::R9,  PhysReg::R10, PhysReg::R11};
+            // Exclude RAX and codegen scratch registers (R9, R10, R11, XMM0..XMM3) from general allocation
+            gpr_caller_saved = {PhysReg::RCX, PhysReg::RDX, PhysReg::R8};
             gpr_callee_saved = {PhysReg::RBX, PhysReg::RDI, PhysReg::RSI,
                                 PhysReg::R12, PhysReg::R13, PhysReg::R14, PhysReg::R15};
-            xmm_caller_saved = {PhysReg::XMM0, PhysReg::XMM1, PhysReg::XMM2,
-                                PhysReg::XMM3, PhysReg::XMM4, PhysReg::XMM5};
+            xmm_caller_saved = {PhysReg::XMM4, PhysReg::XMM5};
             xmm_callee_saved = {PhysReg::XMM6, PhysReg::XMM7, PhysReg::XMM8,
                                 PhysReg::XMM9, PhysReg::XMM10, PhysReg::XMM11,
                                 PhysReg::XMM12, PhysReg::XMM13, PhysReg::XMM14, PhysReg::XMM15};
         } else if (abi == TargetABI::SysV64) {
-            // Exclude RAX from general allocation
+            // Exclude RAX and codegen scratch registers (R9, R10, R11, XMM0..XMM3)
             gpr_caller_saved = {PhysReg::RCX, PhysReg::RDX,
-                                PhysReg::RSI, PhysReg::RDI, PhysReg::R8,
-                                PhysReg::R9,  PhysReg::R10, PhysReg::R11};
+                                PhysReg::RSI, PhysReg::RDI, PhysReg::R8};
             gpr_callee_saved = {PhysReg::RBX, PhysReg::R12,
                                 PhysReg::R13, PhysReg::R14, PhysReg::R15};
-            xmm_caller_saved = {PhysReg::XMM0, PhysReg::XMM1, PhysReg::XMM2, PhysReg::XMM3,
-                                PhysReg::XMM4, PhysReg::XMM5, PhysReg::XMM6, PhysReg::XMM7,
+            xmm_caller_saved = {PhysReg::XMM4, PhysReg::XMM5, PhysReg::XMM6, PhysReg::XMM7,
                                 PhysReg::XMM8, PhysReg::XMM9, PhysReg::XMM10, PhysReg::XMM11,
                                 PhysReg::XMM12, PhysReg::XMM13, PhysReg::XMM14, PhysReg::XMM15};
         } else {

@@ -185,8 +185,11 @@ void grass_array_push(void* ptr, int64_t val) {
     GrassDynArray* arr = (GrassDynArray*)ptr;
     if (!arr) return;
     if (arr->size >= arr->capacity) {
-        arr->capacity *= 2;
-        arr->data = (int64_t*)realloc(arr->data, arr->capacity * sizeof(int64_t));
+        size_t new_cap = arr->capacity ? arr->capacity * 2 : 8;
+        int64_t* new_data = (int64_t*)realloc(arr->data, new_cap * sizeof(int64_t));
+        if (!new_data) return;
+        arr->capacity = new_cap;
+        arr->data = new_data;
     }
     arr->data[arr->size++] = val;
 }
@@ -209,7 +212,7 @@ int64_t grass_array_len(void* ptr) {
 }
 
 int64_t memory_alloc(int64_t size) {
-    if (size <= 0) return 0;
+    if (size <= 0 || (uint64_t)size > 0x7FFFFFFF0000ULL) return 0;
     void* p = calloc(1, (size_t)size);
     return (int64_t)(uintptr_t)p;
 }
@@ -425,6 +428,7 @@ int64_t memory_free_block(int64_t block_addr) {
         bool in_stream_io_ = false;
         std::string last_struct_name_;
         std::string current_dtor_struct_;
+        bool last_expr_is_borrowed_ptr_ = false;
 
         std::vector<std::string> namespace_stack_;
         std::vector<std::string> using_namespaces_;
@@ -1143,7 +1147,13 @@ int64_t memory_free_block(int64_t block_addr) {
 
         bool parse_function(std::string& error) {
             std::string ret_type_name = advance().text;
-            ir::IRType* ret_type = parse_type_name(ret_type_name);
+            ir::IRType* ret_type = nullptr;
+            if (oop_mgr_ && oop_mgr_->has_class(ret_type_name)) {
+                const auto* cd = oop_mgr_->get_class(ret_type_name);
+                ret_type = (cd && cd->ir_struct_type) ? cd->ir_struct_type : ctx_.get_i64_type();
+            } else {
+                ret_type = parse_type_name(ret_type_name);
+            }
             while (match(TOK_STAR)) {
                 ret_type = ctx_.get_ptr_type(ret_type);
             }
@@ -1170,11 +1180,14 @@ int64_t memory_free_block(int64_t block_addr) {
                 while (true) {
                     ir::IRType* ptype = ctx_.get_i64_type();
                     std::string struct_name = "";
-                    if (peek().kind == TOK_IDENT && peek(1).kind == TOK_IDENT) {
+                    if (peek().kind == TOK_IDENT &&
+                        (peek(1).kind == TOK_IDENT || peek(1).kind == TOK_STAR || (oop_mgr_ && oop_mgr_->has_class(peek().text)))) {
                         std::string tname = advance().text;
                         if (oop_mgr_ && oop_mgr_->has_class(tname)) {
                             struct_name = tname;
-                            ptype = ctx_.get_ptr_type();
+                            const auto* cd = oop_mgr_->get_class(tname);
+                            ptype = (cd && cd->ir_struct_type) ? ctx_.get_ptr_type(cd->ir_struct_type) : ctx_.get_ptr_type();
+                            (void)match(TOK_STAR); // Guard and Guard* both pass ptr(Guard) in native ABI
                         } else {
                             ptype = parse_type_name(tname);
                         }
@@ -1438,6 +1451,7 @@ int64_t memory_free_block(int64_t block_addr) {
                             return false;
                         }
                         last_struct_name_.clear();
+                        last_expr_is_borrowed_ptr_ = false;
                         ir::ValueId init_val = parse_expression(error);
                         if (!init_val) {
                             if (error.empty()) error = "Failed to evaluate initializer for variable '" + var_name + "'";
@@ -1454,12 +1468,14 @@ int64_t memory_free_block(int64_t block_addr) {
                         } else if (cur_vtype->is_pointer() && !last_struct_name_.empty() && oop_mgr_ && oop_mgr_->has_class(last_struct_name_)) {
                             struct_name = last_struct_name_;
                         }
-                        bool raii = has_raii_dtor(struct_name, false);
+                        bool is_ptr_or_borrowed = cur_vtype->is_pointer() || last_expr_is_borrowed_ptr_;
+                        bool raii = has_raii_dtor(struct_name, is_ptr_or_borrowed);
                         ir::ValueId alloca_id = builder_.create_alloca(cur_vtype, 1, 0, var_name);
                         declare_var(var_name, alloca_id, cur_vtype, struct_name, raii);
                         builder_.create_store(init_val, alloca_id);
                     } else if (match(TOK_ASSIGN)) {
                         last_struct_name_.clear();
+                        last_expr_is_borrowed_ptr_ = false;
                         ir::ValueId init_val = parse_expression(error);
                         if (!init_val) {
                             if (error.empty()) error = "Failed to evaluate initializer for variable '" + var_name + "'";
@@ -1476,7 +1492,8 @@ int64_t memory_free_block(int64_t block_addr) {
                                 struct_name = last_struct_name_;
                             }
                         }
-                        bool raii = has_raii_dtor(struct_name, cur_explicit_ptr);
+                        bool is_ptr_or_borrowed = cur_explicit_ptr || (cur_vtype && cur_vtype->is_pointer()) || last_expr_is_borrowed_ptr_;
+                        bool raii = has_raii_dtor(struct_name, is_ptr_or_borrowed);
                         ir::ValueId alloca_id = builder_.create_alloca(cur_vtype, 1, 0, var_name);
                         declare_var(var_name, alloca_id, cur_vtype, struct_name, raii);
                         ir::IRType* init_t = builder_.get_function()->get_value(init_val).type;
@@ -1760,29 +1777,86 @@ int64_t memory_free_block(int64_t block_addr) {
         }
 
         ir::ValueId parse_assignment(std::string& error) {
-            // Check for pointer dereference assignment: *ptr = expr or **ptr = expr
+            // Check for pointer dereference assignment: *ptr = expr, **ptr = expr, *(expr) = expr, *ptr += expr
             if (peek().kind == TOK_STAR) {
                 size_t look = 0;
                 while (peek(look).kind == TOK_STAR) look++;
-                if (peek(look).kind == TOK_IDENT && peek(look + 1).kind == TOK_ASSIGN) {
-                    advance(); // consume '*'
+                bool is_ident_deref = (peek(look).kind == TOK_IDENT &&
+                    (peek(look + 1).kind == TOK_ASSIGN || peek(look + 1).kind == TOK_PLUS_ASSIGN ||
+                     peek(look + 1).kind == TOK_MINUS_ASSIGN || peek(look + 1).kind == TOK_MUL_ASSIGN ||
+                     peek(look + 1).kind == TOK_DIV_ASSIGN));
+                bool is_paren_deref = (peek(look).kind == TOK_LPAREN);
+                size_t paren_close = pos_ + look;
+                if (is_paren_deref) {
+                    paren_close++;
+                    int pdepth = 1;
+                    while (paren_close < tokens_.size() && pdepth > 0) {
+                        if (tokens_[paren_close].kind == TOK_LPAREN) pdepth++;
+                        else if (tokens_[paren_close].kind == TOK_RPAREN) pdepth--;
+                        paren_close++;
+                    }
+                    is_paren_deref = (pdepth == 0 && paren_close < tokens_.size() &&
+                        (tokens_[paren_close].kind == TOK_ASSIGN || tokens_[paren_close].kind == TOK_PLUS_ASSIGN ||
+                         tokens_[paren_close].kind == TOK_MINUS_ASSIGN || tokens_[paren_close].kind == TOK_MUL_ASSIGN ||
+                         tokens_[paren_close].kind == TOK_DIV_ASSIGN));
+                }
+
+                if (is_ident_deref || is_paren_deref) {
+                    advance(); // consume first '*'
                     int deref_count = 1;
                     while (match(TOK_STAR)) deref_count++;
-                    std::string ptr_name = advance().text;
-                    const VarBinding* ptr_var = lookup_var(ptr_name);
-                    if (!ptr_var) {
-                        error = "Undeclared pointer variable: " + ptr_name;
-                        return 0;
+
+                    ir::ValueId target_addr = 0;
+                    if (is_ident_deref) {
+                        std::string ptr_name = advance().text;
+                        const VarBinding* ptr_var = lookup_var(ptr_name);
+                        if (!ptr_var) {
+                            error = "Undeclared pointer variable: " + ptr_name;
+                            return 0;
+                        }
+                        target_addr = builder_.create_load(ptr_var->alloca_id, ptr_name + "_val");
+                    } else {
+                        match(TOK_LPAREN);
+                        target_addr = parse_expression(error);
+                        if (!target_addr || !consume(TOK_RPAREN, "Expected ')' in dereference assignment", error)) return 0;
                     }
-                    ir::ValueId target_addr = builder_.create_load(ptr_var->alloca_id, ptr_name + "_val");
                     for (int d = 1; d < deref_count; ++d) {
-                        target_addr = builder_.create_load(target_addr, ptr_name + "_deref");
+                        target_addr = builder_.create_load(target_addr, "deref_addr");
                     }
-                    match(TOK_ASSIGN);
+
+                    GrassTokenKind op = advance().kind;
                     ir::ValueId rhs = parse_assignment(error);
                     if (!rhs) return 0;
-                    builder_.create_store(rhs, target_addr);
-                    return rhs;
+
+                    ir::IRType* ptr_t = builder_.get_function()->has_value(target_addr)
+                        ? builder_.get_function()->get_value(target_addr).type : nullptr;
+                    ir::IRType* elem_t = (ptr_t && ptr_t->is_pointer() && ptr_t->element_type && !ptr_t->element_type->is_void())
+                        ? ptr_t->element_type : nullptr;
+
+                    if (op == TOK_ASSIGN) {
+                        if (elem_t) rhs = coerce_type(rhs, elem_t);
+                        builder_.create_store(rhs, target_addr);
+                        return rhs;
+                    } else {
+                        ir::ValueId cur = builder_.create_load(target_addr, "deref_cur");
+                        match_types(cur, rhs);
+                        ir::IRType* lt = builder_.get_function()->get_value(cur).type;
+                        ir::ValueId computed = 0;
+                        if (lt && lt->is_floating_point()) {
+                            if (op == TOK_PLUS_ASSIGN) computed = builder_.create_fadd(cur, rhs);
+                            else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_fsub(cur, rhs);
+                            else if (op == TOK_MUL_ASSIGN) computed = builder_.create_fmul(cur, rhs);
+                            else computed = builder_.create_fdiv(cur, rhs);
+                        } else {
+                            if (op == TOK_PLUS_ASSIGN) computed = builder_.create_add(cur, rhs);
+                            else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_sub(cur, rhs);
+                            else if (op == TOK_MUL_ASSIGN) computed = builder_.create_mul(cur, rhs);
+                            else computed = builder_.create_sdiv(cur, rhs);
+                        }
+                        if (elem_t) computed = coerce_type(computed, elem_t);
+                        builder_.create_store(computed, target_addr);
+                        return computed;
+                    }
                 }
             }
 
@@ -1882,7 +1956,7 @@ int64_t memory_free_block(int64_t block_addr) {
                 }
             }
 
-            // Check for array element assignment: arr[idx] = expr
+            // Check for array / pointer element assignment: ptr[idx] = expr or arr[idx] = expr
             if (peek().kind == TOK_IDENT && peek(1).kind == TOK_LBRACKET) {
                 size_t look = pos_ + 2;
                 int depth = 1;
@@ -1908,18 +1982,50 @@ int64_t memory_free_block(int64_t block_addr) {
                         return 0;
                     }
                     ir::ValueId arr_ptr = builder_.create_load(var->alloca_id, arr_name + "_ptr");
-                    if (op == TOK_ASSIGN) {
-                        builder_.create_call("grass_array_set", ctx_.get_void_type(), { arr_ptr, idx, rhs });
-                        return rhs;
+                    bool is_typed_ptr = (var->type && var->type->is_pointer() &&
+                                         var->type->element_type && !var->type->element_type->is_void());
+                    if (is_typed_ptr) {
+                        ir::IRType* elem_t = var->type->element_type;
+                        ir::ValueId idx64 = coerce_type(idx, ctx_.get_i64_type());
+                        ir::ValueId elem_ptr = builder_.create_gep(arr_ptr, { idx64 }, elem_t, arr_name + "_elem_ptr");
+                        if (op == TOK_ASSIGN) {
+                            rhs = coerce_type(rhs, elem_t);
+                            builder_.create_store(rhs, elem_ptr);
+                            return rhs;
+                        } else {
+                            ir::ValueId cur = builder_.create_load(elem_ptr, arr_name + "_elem");
+                            match_types(cur, rhs);
+                            ir::IRType* lt = builder_.get_function()->get_value(cur).type;
+                            ir::ValueId computed = 0;
+                            if (lt && lt->is_floating_point()) {
+                                if (op == TOK_PLUS_ASSIGN) computed = builder_.create_fadd(cur, rhs);
+                                else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_fsub(cur, rhs);
+                                else if (op == TOK_MUL_ASSIGN) computed = builder_.create_fmul(cur, rhs);
+                                else computed = builder_.create_fdiv(cur, rhs);
+                            } else {
+                                if (op == TOK_PLUS_ASSIGN) computed = builder_.create_add(cur, rhs);
+                                else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_sub(cur, rhs);
+                                else if (op == TOK_MUL_ASSIGN) computed = builder_.create_mul(cur, rhs);
+                                else computed = builder_.create_sdiv(cur, rhs);
+                            }
+                            computed = coerce_type(computed, elem_t);
+                            builder_.create_store(computed, elem_ptr);
+                            return computed;
+                        }
                     } else {
-                        ir::ValueId cur = builder_.create_call("grass_array_get", ctx_.get_i64_type(), { arr_ptr, idx });
-                        ir::ValueId computed = 0;
-                        if (op == TOK_PLUS_ASSIGN) computed = builder_.create_add(cur, rhs);
-                        else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_sub(cur, rhs);
-                        else if (op == TOK_MUL_ASSIGN) computed = builder_.create_mul(cur, rhs);
-                        else if (op == TOK_DIV_ASSIGN) computed = builder_.create_sdiv(cur, rhs);
-                        builder_.create_call("grass_array_set", ctx_.get_void_type(), { arr_ptr, idx, computed });
-                        return computed;
+                        if (op == TOK_ASSIGN) {
+                            builder_.create_call("grass_array_set", ctx_.get_void_type(), { arr_ptr, idx, rhs });
+                            return rhs;
+                        } else {
+                            ir::ValueId cur = builder_.create_call("grass_array_get", ctx_.get_i64_type(), { arr_ptr, idx });
+                            ir::ValueId computed = 0;
+                            if (op == TOK_PLUS_ASSIGN) computed = builder_.create_add(cur, rhs);
+                            else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_sub(cur, rhs);
+                            else if (op == TOK_MUL_ASSIGN) computed = builder_.create_mul(cur, rhs);
+                            else if (op == TOK_DIV_ASSIGN) computed = builder_.create_sdiv(cur, rhs);
+                            builder_.create_call("grass_array_set", ctx_.get_void_type(), { arr_ptr, idx, computed });
+                            return computed;
+                        }
                     }
                 }
             }
@@ -2049,7 +2155,15 @@ int64_t memory_free_block(int64_t block_addr) {
                 GrassTokenKind op = advance().kind;
                 ir::ValueId rhs = parse_relational(error);
                 if (!rhs) return 0;
-                match_types(lhs, rhs);
+                ir::IRType* t1 = builder_.get_function()->has_value(lhs) ? builder_.get_function()->get_value(lhs).type : nullptr;
+                ir::IRType* t2 = builder_.get_function()->has_value(rhs) ? builder_.get_function()->get_value(rhs).type : nullptr;
+                if (t1 && t2 && ((t1->is_pointer() && t2->is_integer()) || (t1->is_integer() && t2->is_pointer()))) {
+                    ir::IRType* i64_t = ctx_.get_i64_type();
+                    lhs = coerce_type(lhs, i64_t);
+                    rhs = coerce_type(rhs, i64_t);
+                } else {
+                    match_types(lhs, rhs);
+                }
                 ir::IRType* lt = builder_.get_function()->get_value(lhs).type;
                 if (lt && lt->is_floating_point()) {
                     if (op == TOK_EQ) lhs = builder_.create_fcmp(ir::FCmpCond::OEQ, lhs, rhs);
@@ -2071,7 +2185,15 @@ int64_t memory_free_block(int64_t block_addr) {
                 GrassTokenKind op = advance().kind;
                 ir::ValueId rhs = parse_shift(error);
                 if (!rhs) return 0;
-                match_types(lhs, rhs);
+                ir::IRType* t1 = builder_.get_function()->has_value(lhs) ? builder_.get_function()->get_value(lhs).type : nullptr;
+                ir::IRType* t2 = builder_.get_function()->has_value(rhs) ? builder_.get_function()->get_value(rhs).type : nullptr;
+                if (t1 && t2 && ((t1->is_pointer() && t2->is_integer()) || (t1->is_integer() && t2->is_pointer()))) {
+                    ir::IRType* i64_t = ctx_.get_i64_type();
+                    lhs = coerce_type(lhs, i64_t);
+                    rhs = coerce_type(rhs, i64_t);
+                } else {
+                    match_types(lhs, rhs);
+                }
                 ir::IRType* lt = builder_.get_function()->get_value(lhs).type;
                 if (lt && lt->is_floating_point()) {
                     if (op == TOK_LT) lhs = builder_.create_fcmp(ir::FCmpCond::OLT, lhs, rhs);
@@ -2124,14 +2246,17 @@ int64_t memory_free_block(int64_t block_addr) {
                         elem_sz = lt->element_type->size();
                         if (elem_sz <= 0) elem_sz = 1;
                     }
-                    ir::ValueId scaled_rhs = rhs;
+                    ir::IRType* i64_t = ctx_.get_i64_type();
+                    ir::ValueId scaled_rhs = coerce_type(rhs, i64_t);
                     if (elem_sz != 1) {
-                        ir::ValueId sz_val = builder_.create_const_int(ctx_.get_i64_type(), elem_sz);
-                        rhs = coerce_type(rhs, ctx_.get_i64_type());
-                        scaled_rhs = builder_.create_mul(rhs, sz_val);
+                        ir::ValueId sz_val = builder_.create_const_int(i64_t, elem_sz);
+                        scaled_rhs = builder_.create_mul(scaled_rhs, sz_val);
                     }
-                    if (op == TOK_PLUS) lhs = builder_.create_add(lhs, scaled_rhs);
-                    else lhs = builder_.create_sub(lhs, scaled_rhs);
+                    ir::ValueId ptr_i64 = coerce_type(lhs, i64_t);
+                    ir::ValueId res_i64 = (op == TOK_PLUS)
+                        ? builder_.create_add(ptr_i64, scaled_rhs)
+                        : builder_.create_sub(ptr_i64, scaled_rhs);
+                    lhs = builder_.create_inttoptr(res_i64, lt);
                     continue;
                 }
                 // n + ptr
@@ -2141,13 +2266,15 @@ int64_t memory_free_block(int64_t block_addr) {
                         elem_sz = rt->element_type->size();
                         if (elem_sz <= 0) elem_sz = 1;
                     }
-                    ir::ValueId scaled_lhs = lhs;
+                    ir::IRType* i64_t = ctx_.get_i64_type();
+                    ir::ValueId scaled_lhs = coerce_type(lhs, i64_t);
                     if (elem_sz != 1) {
-                        ir::ValueId sz_val = builder_.create_const_int(ctx_.get_i64_type(), elem_sz);
-                        lhs = coerce_type(lhs, ctx_.get_i64_type());
-                        scaled_lhs = builder_.create_mul(lhs, sz_val);
+                        ir::ValueId sz_val = builder_.create_const_int(i64_t, elem_sz);
+                        scaled_lhs = builder_.create_mul(scaled_lhs, sz_val);
                     }
-                    lhs = builder_.create_add(scaled_lhs, rhs);
+                    ir::ValueId ptr_i64 = coerce_type(rhs, i64_t);
+                    ir::ValueId res_i64 = builder_.create_add(scaled_lhs, ptr_i64);
+                    lhs = builder_.create_inttoptr(res_i64, rt);
                     continue;
                 }
                 // ptr1 - ptr2: (ptr1 - ptr2) / sizeof(T)
@@ -2157,9 +2284,12 @@ int64_t memory_free_block(int64_t block_addr) {
                         elem_sz = lt->element_type->size();
                         if (elem_sz <= 0) elem_sz = 1;
                     }
-                    ir::ValueId diff = builder_.create_sub(lhs, rhs);
+                    ir::IRType* i64_t = ctx_.get_i64_type();
+                    ir::ValueId p1_i64 = coerce_type(lhs, i64_t);
+                    ir::ValueId p2_i64 = coerce_type(rhs, i64_t);
+                    ir::ValueId diff = builder_.create_sub(p1_i64, p2_i64);
                     if (elem_sz != 1) {
-                        ir::ValueId sz_val = builder_.create_const_int(ctx_.get_i64_type(), elem_sz);
+                        ir::ValueId sz_val = builder_.create_const_int(i64_t, elem_sz);
                         lhs = builder_.create_sdiv(diff, sz_val);
                     } else {
                         lhs = diff;
@@ -2204,35 +2334,75 @@ int64_t memory_free_block(int64_t block_addr) {
         }
 
         ir::ValueId parse_unary(std::string& error) {
-            // Address-of operator &var, &arr[i], &obj.field
+            // Address-of operator &var, &arr[i], &obj.field, &ptr->field, &outer.inner.field
             if (match(TOK_AMP)) {
-                if (peek().kind == TOK_IDENT) {
-                    std::string id = advance().text;
-                    if (match(TOK_LBRACKET)) {
-                        ir::ValueId idx = parse_expression(error);
-                        consume(TOK_RBRACKET, "Expected ']'", error);
-                        const VarBinding* var = lookup_var(id);
-                        if (!var) { error = "Undeclared array: " + id; return 0; }
-                        ir::ValueId arr_ptr = builder_.create_load(var->alloca_id, id + "_ptr");
-                        return builder_.create_gep(arr_ptr, { idx }, nullptr, id + "_elem_addr");
-                    } else if (match(TOK_DOT)) {
-                        std::string field_name = advance().text;
-                        const VarBinding* var = lookup_var(id);
-                        if (!var) { error = "Undeclared object: " + id; return 0; }
-                        ir::ValueId inst_ptr = var->alloca_id;
-                        if (var->type && var->type->is_pointer()) {
-                            inst_ptr = builder_.create_load(var->alloca_id, id + "_ptr");
-                        }
-                        if (oop_mgr_) {
-                            return oop_mgr_->emit_field_gep(builder_, inst_ptr, var->struct_type_name, field_name);
-                        }
-                        return inst_ptr;
-                    } else {
-                        const VarBinding* var = lookup_var(id);
-                        if (!var) { error = "Undeclared variable: " + id; return 0; }
-                        return var->alloca_id;
-                    }
+                if (peek().kind != TOK_IDENT) {
+                    error = "Line " + std::to_string(peek().line) + ": Cannot take address of non-lvalue expression!";
+                    return 0;
                 }
+                std::string id = advance().text;
+                const VarBinding* var = lookup_var(id);
+                if (!var) { error = "Undeclared variable: " + id; return 0; }
+                last_expr_is_borrowed_ptr_ = true;
+
+                if (match(TOK_LBRACKET)) {
+                    ir::ValueId idx = parse_expression(error);
+                    if (!idx || !consume(TOK_RBRACKET, "Expected ']'", error)) return 0;
+                    ir::ValueId arr_ptr = builder_.create_load(var->alloca_id, id + "_ptr");
+                    ir::ValueId idx64 = coerce_type(idx, ctx_.get_i64_type());
+                    bool is_typed_ptr = (var->type && var->type->is_pointer() &&
+                                         var->type->element_type && !var->type->element_type->is_void());
+                    if (is_typed_ptr) {
+                        return builder_.create_gep(arr_ptr, { idx64 }, var->type->element_type, id + "_elem_addr");
+                    }
+                    // Dynamic GrassDynArray header has data pointer at offset +8 (index 1 of i64*)
+                    ir::ValueId hdr_i64 = coerce_type(arr_ptr, ctx_.get_ptr_type(ctx_.get_i64_type()));
+                    ir::ValueId data_slot = builder_.create_gep(hdr_i64, { builder_.create_const_i64(1) }, ctx_.get_i64_type());
+                    ir::ValueId data_i64 = builder_.create_load(data_slot, id + "_data");
+                    ir::ValueId data_ptr = coerce_type(data_i64, ctx_.get_ptr_type(ctx_.get_i64_type()));
+                    return builder_.create_gep(data_ptr, { idx64 }, ctx_.get_i64_type(), id + "_elem_addr");
+                }
+
+                if (peek().kind == TOK_DOT || peek().kind == TOK_ARROW) {
+                    ir::ValueId inst_ptr = var->alloca_id;
+                    if (var->type && var->type->is_pointer()) {
+                        inst_ptr = builder_.create_load(var->alloca_id, id + "_ptr");
+                    }
+                    std::string sname = var->struct_type_name;
+                    while (match(TOK_DOT) || match(TOK_ARROW)) {
+                        if (peek().kind != TOK_IDENT) {
+                            error = "Expected field name after '.' or '->' in address-of!";
+                            return 0;
+                        }
+                        std::string field_name = advance().text;
+                        if (!oop_mgr_ || sname.empty()) break;
+                        const auto* cd = oop_mgr_->get_class(sname);
+                        const auto* fld = cd ? cd->find_field(field_name) : nullptr;
+                        ir::ValueId fptr = oop_mgr_->emit_field_gep(builder_, inst_ptr, sname, field_name, field_name + "_addr");
+                        if (peek().kind != TOK_DOT && peek().kind != TOK_ARROW) {
+                            last_struct_name_.clear();
+                            if (fld && fld->type && fld->type->is_struct()) last_struct_name_ = fld->type->struct_name;
+                            return fptr;
+                        }
+                        if (fld && fld->type && fld->type->is_struct()) {
+                            inst_ptr = fptr;
+                            sname = fld->type->struct_name;
+                        } else if (fld && fld->type && fld->type->is_pointer() && fld->type->element_type && fld->type->element_type->is_struct()) {
+                            inst_ptr = builder_.create_load(fptr, field_name + "_ptr");
+                            sname = fld->type->element_type->struct_name;
+                        } else {
+                            return fptr;
+                        }
+                    }
+                    return inst_ptr;
+                }
+
+                if (!var->struct_type_name.empty() && var->type && var->type->is_struct()) {
+                    last_struct_name_ = var->struct_type_name;
+                } else {
+                    last_struct_name_.clear();
+                }
+                return var->alloca_id;
             }
 
             // Dereference operator *ptr
@@ -2242,6 +2412,9 @@ int64_t memory_free_block(int64_t block_addr) {
                 ir::IRType* pt = builder_.get_function()->get_value(ptr_val).type;
                 if (pt && pt->is_pointer() && pt->element_type && pt->element_type->is_struct()) {
                     last_struct_name_ = pt->element_type->struct_name;
+                } else if (pt && pt->is_pointer() && pt->element_type && pt->element_type->is_pointer() &&
+                           pt->element_type->element_type && pt->element_type->element_type->is_struct()) {
+                    last_struct_name_ = pt->element_type->element_type->struct_name;
                 }
                 return builder_.create_load(ptr_val, "deref");
             }
@@ -2264,12 +2437,19 @@ int64_t memory_free_block(int64_t block_addr) {
                             next_k == TOK_LPAREN || next_k == TOK_STAR || next_k == TOK_AMP ||
                             next_k == TOK_MINUS || next_k == TOK_NULLPTR) {
                             advance(); // consume '('
-                            ir::IRType* tgt_t = parse_type_name(advance().text);
-                            while (match(TOK_COLON_COLON)) advance();
+                            advance(); // consume base type identifier
+                            while (match(TOK_COLON_COLON)) {
+                                if (peek().kind == TOK_IDENT) advance();
+                            }
+                            ir::IRType* tgt_t = parse_type_name(tname);
                             while (match(TOK_STAR)) tgt_t = ctx_.get_ptr_type(tgt_t);
                             match(TOK_RPAREN);
                             ir::ValueId val = parse_unary(error);
                             if (!val) return 0;
+                            if (tgt_t && tgt_t->is_pointer() && tgt_t->element_type && tgt_t->element_type->is_struct()) {
+                                last_struct_name_ = tgt_t->element_type->struct_name;
+                                last_expr_is_borrowed_ptr_ = true;
+                            }
                             return coerce_type(val, tgt_t);
                         }
                     }
@@ -2486,12 +2666,30 @@ int64_t memory_free_block(int64_t block_addr) {
                     base = coerce_type(base, tgt_t);
                     continue;
                 }
-                // Array subscript: base[idx]
+                // Array or pointer subscript: base[idx]
                 if (match(TOK_LBRACKET)) {
                     ir::ValueId idx = parse_expression(error);
                     if (!idx) return 0;
                     consume(TOK_RBRACKET, "Expected ']' closing array index!", error);
-                    base = builder_.create_call("grass_array_get", ctx_.get_i64_type(), { base, idx });
+                    ir::IRType* base_t = builder_.get_function()->has_value(base)
+                        ? builder_.get_function()->get_value(base).type : nullptr;
+                    if (base_t && base_t->is_pointer() && base_t->element_type && !base_t->element_type->is_void()) {
+                        ir::IRType* elem_t = base_t->element_type;
+                        ir::ValueId idx64 = coerce_type(idx, ctx_.get_i64_type());
+                        ir::ValueId elem_ptr = builder_.create_gep(base, { idx64 }, elem_t, "ptr_idx_gep");
+                        if (elem_t->is_struct()) {
+                            last_struct_name_ = elem_t->struct_name;
+                            base = elem_ptr;
+                        } else if (elem_t->is_pointer() && elem_t->element_type && elem_t->element_type->is_struct()) {
+                            last_struct_name_ = elem_t->element_type->struct_name;
+                            base = builder_.create_load(elem_ptr, "ptr_idx_val");
+                        } else {
+                            last_struct_name_.clear();
+                            base = builder_.create_load(elem_ptr, "ptr_idx_val");
+                        }
+                    } else {
+                        base = builder_.create_call("grass_array_get", ctx_.get_i64_type(), { base, idx });
+                    }
                     continue;
                 }
                 break;
@@ -3239,11 +3437,12 @@ int64_t memory_free_block(int64_t block_addr) {
                         case ir::IROp::ConstFloat: {
                             uint64_t raw_bits;
                             std::memcpy(&raw_bits, &inst->float_imm, 8);
-                            int32_t off = get_spill_offset(inst->result_id);
+                            backend::Reg dst = get_loc_reg(inst->result_id);
+                            bool in_reg = (dst != backend::Reg::None && backend::reg_is_xmm(dst));
+                            int32_t off = in_reg ? phi_scratch_base : get_spill_offset(inst->result_id);
                             encoder.mov_ri64(backend::Reg::R11, (int64_t)raw_bits);
                             encoder.mov_mr(backend::mem(backend::Reg::RBP, -off, 8), backend::Reg::R11);
-                            backend::Reg dst = get_loc_reg(inst->result_id);
-                            if (dst != backend::Reg::None && backend::reg_is_xmm(dst)) {
+                            if (in_reg) {
                                 encoder.movsd_xm(dst, backend::mem(backend::Reg::RBP, -off, 8));
                             }
                             break;
@@ -3310,6 +3509,10 @@ int64_t memory_free_block(int64_t block_addr) {
                         case ir::IROp::SDiv: {
                             backend::Reg lhs = load_val(inst->operands[0], backend::Reg::RAX);
                             backend::Reg rhs = load_val(inst->operands[1], backend::Reg::R10);
+                            if (rhs == backend::Reg::RAX || rhs == backend::Reg::RDX) {
+                                encoder.mov_rr(backend::Reg::R10, rhs);
+                                rhs = backend::Reg::R10;
+                            }
                             backend::LabelId non_zero_lbl = encoder.create_label();
                             backend::LabelId done_lbl = encoder.create_label();
                             encoder.test_rr(rhs, rhs);
@@ -3335,6 +3538,10 @@ int64_t memory_free_block(int64_t block_addr) {
                         case ir::IROp::SRem: {
                             backend::Reg lhs = load_val(inst->operands[0], backend::Reg::RAX);
                             backend::Reg rhs = load_val(inst->operands[1], backend::Reg::R10);
+                            if (rhs == backend::Reg::RAX || rhs == backend::Reg::RDX) {
+                                encoder.mov_rr(backend::Reg::R10, rhs);
+                                rhs = backend::Reg::R10;
+                            }
                             backend::LabelId non_zero_lbl = encoder.create_label();
                             backend::LabelId done_lbl = encoder.create_label();
                             encoder.test_rr(rhs, rhs);
@@ -3797,15 +4004,20 @@ int64_t memory_free_block(int64_t block_addr) {
                             load_binary_fp(inst->operands[0], inst->operands[1], lhs, rhs);
                             backend::Reg dst = get_loc_reg(inst->result_id);
                             backend::Reg out = (dst != backend::Reg::None && backend::reg_is_xmm(dst)) ? dst : backend::Reg::XMM0;
-                            if (out == rhs) {
-                                encoder.movsd_xx(backend::Reg::XMM2, lhs);
-                                encoder.divsd_xx(backend::Reg::XMM2, rhs);
-                                store_val(inst->result_id, backend::Reg::XMM2);
-                            } else {
-                                if (out != lhs) encoder.movsd_xx(out, lhs);
-                                encoder.divsd_xx(out, rhs);
-                                store_val(inst->result_id, out);
-                            }
+                            backend::Reg res_reg = (out == rhs) ? backend::Reg::XMM2 : out;
+                            backend::LabelId non_zero_lbl = encoder.create_label();
+                            backend::LabelId done_lbl = encoder.create_label();
+                            encoder.xorpd_xx(backend::Reg::XMM3, backend::Reg::XMM3);
+                            encoder.ucomisd_xx(rhs, backend::Reg::XMM3);
+                            encoder.jcc_label(backend::CondCode::NE, non_zero_lbl);
+                            encoder.jcc_label(backend::CondCode::P, non_zero_lbl);
+                            encoder.xorpd_xx(res_reg, res_reg);
+                            encoder.jmp_label(done_lbl);
+                            encoder.bind_label(non_zero_lbl);
+                            if (res_reg != lhs) encoder.movsd_xx(res_reg, lhs);
+                            encoder.divsd_xx(res_reg, rhs);
+                            encoder.bind_label(done_lbl);
+                            store_val(inst->result_id, res_reg);
                             break;
                         }
                         case ir::IROp::FCmp: {

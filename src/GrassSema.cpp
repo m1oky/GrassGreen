@@ -1076,6 +1076,7 @@ void GrassSema::checkAssignStmt(const AssignStmtAST* assign) {
 }
 
 void GrassSema::checkIfStmt(const IfStmtAST* if_stmt) {
+    if (!if_stmt) return;
     SemaType cond_type = checkExpr(if_stmt->condition.get());
     if (!cond_type.is_bool() && !cond_type.is_numeric() && !cond_type.is_pointer() &&
         !cond_type.is_any() && !cond_type.is_unknown()) {
@@ -1090,6 +1091,7 @@ void GrassSema::checkIfStmt(const IfStmtAST* if_stmt) {
 }
 
 void GrassSema::checkWhileStmt(const WhileStmtAST* while_stmt) {
+    if (!while_stmt) return;
     SemaType cond_type = checkExpr(while_stmt->condition.get());
     if (!cond_type.is_bool() && !cond_type.is_numeric() && !cond_type.is_pointer() &&
         !cond_type.is_any() && !cond_type.is_unknown()) {
@@ -1101,6 +1103,7 @@ void GrassSema::checkWhileStmt(const WhileStmtAST* while_stmt) {
 }
 
 void GrassSema::checkForStmt(const ForStmtAST* for_stmt) {
+    if (!for_stmt) return;
     enterScope(Scope::Kind::Block);
     if (for_stmt->init) checkStmt(for_stmt->init.get());
     if (for_stmt->condition) {
@@ -1214,6 +1217,7 @@ SemaType GrassSema::checkVariableExpr(const VariableExprAST* var) {
 }
 
 SemaType GrassSema::checkBinaryExpr(const BinaryExprAST* bin) {
+    if (!bin) return SemaType::Unknown();
     SemaType lhs = checkExpr(bin->lhs.get());
     SemaType rhs = checkExpr(bin->rhs.get());
 
@@ -1305,6 +1309,9 @@ SemaType GrassSema::checkBinaryExpr(const BinaryExprAST* bin) {
             if (lhs.is_pointer() && rhs.is_pointer()) {
                 return SemaType::Bool();
             }
+            if ((lhs.is_pointer() && rhs.is_integral()) || (rhs.is_pointer() && lhs.is_integral())) {
+                return SemaType::Bool();
+            }
             if (strict_mode_ && (lhs.is_pointer() != rhs.is_pointer())) {
                 reportError(bin->loc,
                     "Cannot compare pointer and non-pointer types '" + lhs.toString() + "' and '" + rhs.toString() + "'.",
@@ -1328,6 +1335,7 @@ SemaType GrassSema::checkBinaryExpr(const BinaryExprAST* bin) {
 }
 
 SemaType GrassSema::checkUnaryExpr(const UnaryExprAST* un) {
+    if (!un) return SemaType::Unknown();
     SemaType operand_type = checkExpr(un->operand.get());
 
     switch (un->op) {
@@ -1451,6 +1459,7 @@ SemaType GrassSema::checkCallExpr(const CallExprAST* call) {
 }
 
 SemaType GrassSema::checkMemberAccessExpr(const MemberAccessExprAST* mem) {
+    if (!mem || !mem->object) return SemaType::Unknown();
     SemaType obj_type = checkExpr(mem->object.get());
 
     if (mem->is_arrow) {
@@ -1586,6 +1595,7 @@ SemaType GrassSema::checkMemberAccessExpr(const MemberAccessExprAST* mem) {
 }
 
 SemaType GrassSema::checkIndexExpr(const IndexExprAST* idx) {
+    if (!idx) return SemaType::Unknown();
     SemaType target_type = checkExpr(idx->target.get());
     SemaType idx_type = checkExpr(idx->index.get());
 
