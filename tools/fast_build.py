@@ -92,7 +92,7 @@ def compile_file(src):
         return (src, True, "")
 
     cmd = [
-        "g++", "-std=c++20", "-O3", "-MMD", "-MF", d_path,
+        "g++", "-std=c++20", "-O3", "-Iinclude", "-MMD", "-MF", d_path,
         "-c", src, "-o", obj_path
     ]
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -152,7 +152,7 @@ def main():
     gpm_exe = os.path.join(BIN_DIR, "gpm.exe")
     if os.path.exists(gpm_src) and (not os.path.exists(gpm_exe) or os.path.getmtime(gpm_src) > os.path.getmtime(gpm_exe)):
         print("[GrassCompiler] Building gpm package manager...")
-        subprocess.run(["g++", "-std=c++17", "-O3", gpm_src, "-o", gpm_exe], check=False)
+        subprocess.run(["g++", "-std=c++17", "-O3", "-Iinclude", gpm_src, "-o", gpm_exe], check=False)
 
     # 3. Build grassvm.dll if needed or out of date
     vm_src = "src/grassvm_capi.cpp"

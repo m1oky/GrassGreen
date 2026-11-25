@@ -1,6 +1,6 @@
 # GrassGreen (G&G) — Расширение для Visual Studio Code
 
-Официальное расширение Visual Studio Code для суверенного системного языка программирования GrassGreen 4.2 (G&G).
+Официальное расширение Visual Studio Code для суверенного системного языка программирования GrassGreen 4.3.0 (G&G).
 
 ---
 
@@ -42,7 +42,7 @@
        take cmd;
        use utf - 65001;
 
-       gout << "GrassGreen OS v4.2 Kernel [Multiboot Online]" << endl;
+       gout << "GrassGreen OS v4.3.0 Kernel [Multiboot Online]" << endl;
        gout << "CPU: " << hw_cpu_vendor() << " " << hw_cpu_brand() << endl;
        gout << "RAM: " << hw_ram_total() << " MB total" << endl;
        return 0;

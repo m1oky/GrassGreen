@@ -1,6 +1,6 @@
 # GrassGreen Language, Encoding & Layout Specification (`docs/languages.md`)
 
-This document defines the language, encoding, and keyboard layout subsystem in GrassGreen v4.2.0, centered around the restored `use utf -` directive and layout management.
+This document defines the language, encoding, and keyboard layout subsystem in GrassGreen v4.3.0, centered around the restored `use utf -` directive and layout management.
 
 ---
 

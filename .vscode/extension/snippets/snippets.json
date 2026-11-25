@@ -5,7 +5,7 @@
       "!GrassGreen!",
       "",
       "int main() {",
-      "\tgout << \"${1:Hello from GrassGreen 4.0!}\" << endl;",
+      "\tgout << \"${1:Hello from GrassGreen 4.3.0!}\" << endl;",
       "\t${0}",
       "\treturn 0;",
       "}"
@@ -338,7 +338,7 @@
       "",
       "int main() {",
       "\tcli();",
-      "\tgout << \"[GrassOS v4.2.0]: Kernel Started on Bare-Metal!\" << endl;",
+      "\tgout << \"[GrassOS v4.3.0]: Kernel Started on Bare-Metal!\" << endl;",
       "\tgout << \"Type a command: \";",
       "\ttake cmd = kbd_read_line();",
       "\tgout << \"Received: \" << cmd << endl;",

@@ -1,10 +1,11 @@
 // =============================================================================
-//  GrassGreen 4.3.0 (Pre-release) — Evolution of the Bare-Metal (!baremetal!)
+//  GrassGreen 4.3.0 — Evolution of the Bare-Metal (!baremetal!)
 //  Implementation of Universal colors, Smooth cursor, read_key(), TUI widgets,
 //  Power management, RamFS/VFS, terminal commands, not_clear/not_show.
 // =============================================================================
 
 #include "GrassBaremetal.h"
+#include "GrassVersion.h"
 #include <iostream>
 #include <algorithm>
 #include <cmath>
@@ -572,12 +573,12 @@ namespace GrassBaremetal {
 
     void vd_desktop() {
         clear();
-        std::cout << " [ GrassGreen VD+ Desktop Engine v4.3.0 | GrassGreen Core ] \n";
+        std::cout << " [ GrassGreen VD+ Desktop Engine v" << GRASS_VERSION << " | GrassGreen Core ] \n";
         std::cout << "╔══════════════════════════════════════════════════════════════════════════════╗\n";
         std::cout << "║  [* 1. СИСТЕМА *]       [ 2. ФАЙЛЫ ]       [ 3. ЖЕЛЕЗО ]                     ║\n";
         std::cout << "╠══════════════════════════════════════════════════════════════════════════════╣\n";
         std::cout << "║                                                                              ║\n";
-        std::cout << "║  Операционная система:  GrassGreen Sovereign OS (Kernel v4.4.0)                     ║\n";
+        std::cout << "║  Операционная система:  GrassGreen Sovereign OS (Kernel v" << GRASS_VERSION << ")              ║\n";
         std::cout << "║  Графическая среда:     VD+ (Vector Display Plus TUI/GUI Engine)             ║\n";
         std::cout << "║  Файловая система:      RamFS (Виртуальная структура активна)                ║\n";
         std::cout << "║  Текущий путь:          " << vfs_pwd() << "\n";
@@ -596,7 +597,7 @@ namespace GrassBaremetal {
         if (trimmed.empty()) return true;
 
         if (trimmed == "help") {
-            std::cout << "Команды системы GrassGreen (Baremetal v4.4.0):\n";
+            std::cout << "Команды системы GrassGreen (Baremetal v" << GRASS_VERSION << "):\n";
             std::cout << "  ls [-a]     - Список файлов и папок в директории\n";
             std::cout << "  cd <папка>  - Перейти в папку (напр.: cd system, cd .., cd /)\n";
             std::cout << "  pwd         - Показать текущую рабочую директорию\n";

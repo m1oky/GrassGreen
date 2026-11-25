@@ -1,6 +1,6 @@
 @echo off
 setlocal
-echo [GrassCompiler] Building GrassGreen v4.3...
+echo [GrassCompiler] Building GrassGreen v4.3.0...
 if not exist "bin" mkdir bin
 if not exist "obj" mkdir obj
 
@@ -15,7 +15,7 @@ rem Check if MSVC cl.exe is used
 where cl.exe >nul 2>&1
 if %ERRORLEVEL% equ 0 (
     echo [GrassCompiler] Compiling with MSVC /MP...
-    cl /nologo /std:c++20 /O2 /MP /EHsc /utf-8 ^
+    cl /nologo /std:c++20 /O2 /MP /EHsc /utf-8 /Iinclude ^
       src/grassc.cpp src/GrassHAL.cpp src/GrassMMIO.cpp src/GrassASM.cpp ^
       src/GrassKeyboard.cpp src/GrassBoot.cpp src/GrassThread.cpp src/GrassJIT.cpp ^
       src/GrassImport.cpp src/GrassOptimizer.cpp src/GrassSyntax.cpp src/GrassProc.cpp ^
@@ -34,7 +34,7 @@ if %ERRORLEVEL% equ 0 (
 
 rem Fallback to sequential g++
 echo [GrassCompiler] Compiling with g++...
-g++ -std=c++20 -O3 -s -static -static-libgcc -static-libstdc++ ^
+g++ -std=c++20 -O3 -s -static -static-libgcc -static-libstdc++ -Iinclude ^
   src/grassc.cpp src/GrassHAL.cpp src/GrassMMIO.cpp src/GrassASM.cpp ^
   src/GrassKeyboard.cpp src/GrassBoot.cpp src/GrassThread.cpp src/GrassJIT.cpp ^
   src/GrassImport.cpp src/GrassOptimizer.cpp src/GrassSyntax.cpp src/GrassProc.cpp ^
@@ -56,7 +56,7 @@ if %ERRORLEVEL% equ 0 (
     echo [GrassCompiler] Build SUCCESSFUL: bin\grassc.exe ^& bin\grg.exe
 
     echo [GrassCompiler] Building gpm package manager...
-    g++ -std=c++17 -O3 src/gpm.cpp -o bin/gpm.exe
+    g++ -std=c++17 -O3 -Iinclude src/gpm.cpp -o bin/gpm.exe
 
     echo [GrassCompiler] Building libgrassvm embedded library...
     g++ -std=c++17 -O3 -shared src/grassvm_capi.cpp -Iinclude -o bin/grassvm.dll "-Wl,--out-implib,bin/grassvm.lib"

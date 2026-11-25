@@ -1,8 +1,9 @@
 // =============================================================================
-//  GrassGreen 4.2.0 — Реализация сборки ядра, драйверов и ISO-образов
+//  GrassGreen 4.3.0 — Реализация сборки ядра, драйверов и ISO-образов
 //  Поддержка: --multiboot, --kernel (.bin), --sys (.sys), --iso (.iso)
 // =============================================================================
 #include "GrassBoot.h"
+#include "GrassVersion.h"
 #include "GrassCyrillicFont.h"
 #include "GrassUnifiedFont.h"
 #include "GrassSyntax.h"
@@ -898,7 +899,7 @@ namespace GrassBoot {
         append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x00092F40); append_u8(bin_data, 1);   // is_dir = 1
 
         // --- 5. Вывод приветственного баннера GrassGreen в строку 0 ---
-        const char* banner = "GrassGreen OS v4.3.0 Kernel [Multiboot Online]";
+        const char* banner = "GrassGreen OS v" GRASS_VERSION " Kernel [Multiboot Online]";
         size_t banner_len = strlen(banner);
         for (size_t i = 0; i < banner_len; ++i) {
             uint32_t vga_offset = 0x000B8000 + (uint32_t)(i * 2);
@@ -943,7 +944,7 @@ namespace GrassBoot {
         append_u8(bin_data, 0xB0); append_u8(bin_data, 0x0B);
         append_u8(bin_data, 0xEE);
 
-        const char* com_msg = "\r\n[GrassGreen OS v4.3.0]: Booted successfully via Multiboot!\r\n";
+        const char* com_msg = "\r\n[GrassGreen OS v" GRASS_VERSION "]: Booted successfully via Multiboot!\r\n";
         for (size_t i = 0; i < strlen(com_msg); ++i) {
             append_u8(bin_data, 0xBA); append_u16(bin_data, 0x03F8); append_u16(bin_data, 0x0000);
             append_u8(bin_data, 0xB0); append_u8(bin_data, (uint8_t)com_msg[i]);
@@ -2565,7 +2566,7 @@ namespace GrassBoot {
                     { "root", "/home", 1, 0, 0, "" },
                     { "Desktop", "/root", 1, 0, 0, "" },
                     { "system", "/", 1, 0, 0, "" },
-                    { "kernel.sys", "/system", 0, 0, 24, "GrassGreen Kernel v4.4.0" },
+                    { "kernel.sys", "/system", 0, 0, 24, "GrassGreen Kernel v" GRASS_VERSION },
                     { "config.sys", "/system", 0, 0, 35, "DISPLAY=VGA;MODE=TEXT_80X25;GUI=VD+" },
                     { "users", "/", 1, 0, 0, "" },
                     { "readme.txt", "/users", 0, 0, 44, "Welcome to GrassGreen Sovereign Bare-Metal OS!" },
@@ -5310,7 +5311,7 @@ namespace GrassBoot {
             size_t jz_bm_chk_ls = 0;
             emit_cmd_check("help", jz_bm_chk_ls);
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0E); // Yellow
-            emit_print_str_lit("Команды системы GrassGreen (Baremetal v4.4.0):\n");
+            emit_print_str_lit("Команды системы GrassGreen (Baremetal v" GRASS_VERSION "):\n");
             append_u8(bin_data, 0xC6); append_u8(bin_data, 0x05); append_u32(bin_data, 0x0009100D); append_u8(bin_data, 0x0A); // Green
             emit_print_str_lit("  ls [-a]     - Список файлов и папок в директории\n");
             emit_print_str_lit("  cd <папка>  - Перейти в папку (cd system, cd .., cd /)\n");
@@ -7113,7 +7114,7 @@ namespace GrassBoot {
 
         const uint32_t GSYS_MAGIC = 0x47535953;
         write_u32_le(sys_data, 0x00, GSYS_MAGIC);
-        write_u16_le(sys_data, 0x04, 0x0402); // v4.2.0
+        write_u16_le(sys_data, 0x04, 0x0403); // v4.3.0
 
         // Определение типа драйвера по имени
         uint16_t driver_type = 0;

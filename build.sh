@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # ==============================================================================
-#  GrassGreen 4.2 — Linux Fast Build Script
+#  GrassGreen 4.3.0 — Linux Fast Build Script
 # ==============================================================================
 
 set -e
 
-echo "[GrassCompiler] Building GrassGreen v4.2 on Linux..."
+echo "[GrassCompiler] Building GrassGreen v4.3.0 on Linux..."
 mkdir -p bin
 
-g++ -std=c++20 -O3 -s -static-libgcc -static-libstdc++ \
+g++ -std=c++20 -O3 -s -static -static-libgcc -static-libstdc++ -Iinclude \
   src/grassc.cpp \
   src/GrassHAL.cpp \
   src/GrassMMIO.cpp \
@@ -43,6 +43,17 @@ g++ -std=c++20 -O3 -s -static-libgcc -static-libstdc++ \
   src/GrassMath3D.cpp \
   src/GrassGfx3D.cpp \
   src/GrassPhysics.cpp \
+  src/GrassIR.cpp \
+  src/GrassX86Encoder.cpp \
+  src/GrassObjWriter.cpp \
+  src/GrassElfWriter.cpp \
+  src/GrassAdvancedOpt.cpp \
+  src/GrassNativeCodegen.cpp \
+  src/GrassNativeDebug.cpp \
+  src/GrassSema.cpp \
+  src/GrassNativeOOP.cpp \
+  src/GrassNativeMemory.cpp \
+  src/GrassNativeStdlib.cpp \
   -o bin/grassc \
   -pthread -ldl
 
@@ -50,7 +61,7 @@ cp bin/grassc bin/grg
 chmod +x bin/grassc bin/grg
 
 echo "[GrassCompiler] Building gpm package manager..."
-g++ -std=c++17 -O3 src/gpm.cpp -o bin/gpm
+g++ -std=c++17 -O3 -Iinclude src/gpm.cpp -o bin/gpm
 chmod +x bin/gpm
 
 echo "[GrassCompiler] Building libgrassvm shared library..."

@@ -28,7 +28,7 @@ int main() {
     if (!vm) return 1;
 
     grg_vm_set_int(vm, "external_factor", 42);
-    grg_vm_set_str(vm, "app_version", "v4.3");
+    grg_vm_set_str(vm, "app_version", "v4.3.0");
 
     const char* script =
         "!GrassGreen!\n"

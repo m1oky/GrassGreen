@@ -1,6 +1,6 @@
 @echo off
 setlocal
-echo [GrassInstaller] Building GrassGreen v4.2.0 Sovereign Setup...
+echo [GrassInstaller] Building GrassGreen v4.3.0 Sovereign Setup...
 
 if not exist "bin" mkdir bin
 
@@ -20,7 +20,7 @@ if not exist "installer\payload_data.h" (
 )
 
 echo [GrassInstaller] 2. Compiling installer\setup.cpp into setup.exe...
-g++ -std=c++20 -O2 -s -mwindows -static -static-libgcc -static-libstdc++ ^
+g++ -std=c++20 -O2 -s -mwindows -static -static-libgcc -static-libstdc++ -Iinclude ^
     installer\setup.cpp ^
     -o setup.exe ^
     -lcomctl32 -lshlwapi -lole32 -lshell32 -ladvapi32 -lgdi32

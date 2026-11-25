@@ -21,6 +21,7 @@
 #include <mutex>
 
 #include "GrassSyntax.h"
+#include "GrassVersion.h"
 #include "FastMath.h"
 #include "GrassASM.h"
 #include "GrassKeyboard.h"
@@ -3728,7 +3729,7 @@ void InstallGrassGreenEcosystem() {
     fs::path root_dir = exe_path.parent_path();
     if (root_dir.filename() == "bin") root_dir = root_dir.parent_path();
 
-    cout << "\n=== [GrassGreen (G&G) v4.1.0 Installer] ===\n";
+    cout << "\n=== [GrassGreen (G&G) v" << GRASS_VERSION << " Installer] ===\n";
 
 #if defined(_WIN32)
     {
@@ -3760,7 +3761,7 @@ void InstallGrassGreenEcosystem() {
     if (!userprofile) userprofile = getenv("HOME");
 #endif
     if (userprofile) {
-        fs::path ext_dir = fs::path(userprofile) / ".vscode" / "extensions" / "m1oky.grassgreen-lang-4.1.0";
+        fs::path ext_dir = fs::path(userprofile) / ".vscode" / "extensions" / ("m1oky.grassgreen-lang-" GRASS_VERSION);
         fs::create_directories(ext_dir / "syntaxes");
         fs::create_directories(ext_dir / "snippets");
 
@@ -3857,7 +3858,7 @@ void InstallGrassGreenEcosystem() {
             << "  \"name\": \"grassgreen-lang\",\n"
             << "  \"displayName\": \"GrassGreen Official\",\n"
             << "  \"description\": \"Official language support for GrassGreen (.grass, .gdb)\",\n"
-            << "  \"version\": \"3.0.0\",\n"
+            << "  \"version\": \"" << GRASS_VERSION << "\",\n"
             << "  \"publisher\": \"m1oky\",\n"
             << "  \"engines\": { \"vscode\": \"^1.60.0\" },\n"
             << "  \"contributes\": {\n"
@@ -4187,11 +4188,11 @@ struct CompilerOptions {
 
 void PrintVersion(bool lang_ru) {
     if (lang_ru) {
-        cout << "GrassGreen (G&G) v4.2.0 (x86_64-win32)\n"
+        cout << "GrassGreen (G&G) v" << GRASS_VERSION << " (x86_64-win32)\n"
              << "Официальный компилятор и ядро выполнения (grg / grassc)\n"
              << "Сайт: grassgreen.info | Репозиторий: github.com/m1oky/GrassGreen\n";
     } else {
-        cout << "GrassGreen (G&G) v4.2.0 (x86_64-win32)\n"
+        cout << "GrassGreen (G&G) v" << GRASS_VERSION << " (x86_64-win32)\n"
              << "Official Compiler & Freestanding Execution Core (grg / grassc)\n"
              << "Domain: grassgreen.info | Repository: github.com/m1oky/GrassGreen\n";
     }
@@ -4199,7 +4200,7 @@ void PrintVersion(bool lang_ru) {
 
 void PrintHelp(bool lang_ru) {
     if (lang_ru) {
-        cout << "GrassGreen (G&G) v4.2.0 Компилятор и Рантайм (grg / grassc)\n\n"
+        cout << "GrassGreen (G&G) v" << GRASS_VERSION << " Компилятор и Рантайм (grg / grassc)\n\n"
              << "Использование:\n"
              << "  grg [опции] <файл.grass>\n"
              << "  grassc [опции] <файл.grass>\n\n"
@@ -4212,7 +4213,7 @@ void PrintHelp(bool lang_ru) {
              << "  -O2, -O3         Оптимизация байт-кода (по умолчанию: -O2)\n"
              << "  --jit            Включить нативный JIT-компилятор x86_64 для горячих циклов\n"
              << "  --freestanding   Автономный режим ядра (без libc/C++ рантайма)\n\n"
-             << "Низкоуровневая разработка и ОС (G&G v4.2.0 Bare-Metal):\n"
+             << "Низкоуровневая разработка и ОС (G&G v" << GRASS_VERSION << " Bare-Metal):\n"
              << "  --multiboot      Генерация заголовка Multiboot 1/2 спецификации (GRUB / QEMU)\n"
              << "  --kernel         Выделенный режим компиляции в чистый бинарный файл ядра (.bin)\n"
              << "  --sys            Режим компиляции драйверов ядра в системный модуль (.sys)\n"
@@ -4237,7 +4238,7 @@ void PrintHelp(bool lang_ru) {
              << "  -h, --help       Показать эту справку\n"
              << "  --install, -i    Установить инструментарий G&G и расширение VS Code\n";
     } else {
-        cout << "GrassGreen (G&G) v4.2.0 Compiler & Runner (grg / grassc)\n\n"
+        cout << "GrassGreen (G&G) v" << GRASS_VERSION << " Compiler & Runner (grg / grassc)\n\n"
              << "Usage:\n"
              << "  grg [options] <source.grass>\n"
              << "  grassc [options] <source.grass>\n\n"
@@ -4250,7 +4251,7 @@ void PrintHelp(bool lang_ru) {
              << "  -O2, -O3         Enable bytecode optimizations (default: -O2)\n"
              << "  --jit            Enable native x86_64 JIT (Just-In-Time) compiler for loops\n"
              << "  --freestanding   Freestanding kernel build (independent of libc/C++)\n\n"
-             << "Bare-Metal & OS Development (G&G v4.2.0):\n"
+             << "Bare-Metal & OS Development (G&G v" << GRASS_VERSION << "):\n"
              << "  --multiboot      Generate Multiboot 1/2 header specification for GRUB / QEMU\n"
              << "  --kernel         Dedicated build mode to raw binary OS kernel (.bin)\n"
              << "  --sys            Device driver compilation to system kernel module (.sys)\n"
@@ -4279,11 +4280,11 @@ void PrintHelp(bool lang_ru) {
 
 void DisassembleBytecode(const vector<uint8_t>& code, bool lang_ru) {
     if (lang_ru) {
-        cout << "\n=== ДИЗАССЕМБЛЕР БАЙТ-КОДА GRASSGREEN (G&G v4.2.0) ===\n";
+        cout << "\n=== ДИЗАССЕМБЛЕР БАЙТ-КОДА GRASSGREEN (G&G v" << GRASS_VERSION << ") ===\n";
         cout << "Смещение  Опкод            Аргументы\n";
         cout << "--------------------------------------------------------\n";
     } else {
-        cout << "\n=== GRASSGREEN (G&G v4.2.0) BYTECODE DISASSEMBLY ===\n";
+        cout << "\n=== GRASSGREEN (G&G v" << GRASS_VERSION << ") BYTECODE DISASSEMBLY ===\n";
         cout << "Offset    OpCode           Arguments\n";
         cout << "--------------------------------------------------------\n";
     }
@@ -5032,7 +5033,7 @@ int main(int argc, char* argv[]) {
     }
 
     cout << "========================================================\n";
-    cout << "  GrassGreen (G&G) Native Compiler & VM v4.2.0 (grg)\n";
+    cout << "  GrassGreen (G&G) Native Compiler & VM v" << GRASS_VERSION << " (grg)\n";
     cout << "  Repository: github.com/m1oky/GrassGreen\n";
     cout << "  Type 'help' or '-h' for commands, 'exit' to quit.\n";
     cout << "========================================================\n";

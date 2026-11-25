@@ -4,6 +4,7 @@
 #include <vector>
 #include <cstdlib>
 #include <sstream>
+#include "GrassVersion.h"
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -37,8 +38,9 @@ static string read_text_file(const string& path) {
 }
 
 static void print_help() {
-    cout << "Grass Package Manager (gpm) v1.0\n"
+    cout << "Grass Package Manager (gpm) v" << GRASS_VERSION << "\n"
          << "Usage:\n"
+         << "  gpm -v | --version           Show gpm version\n"
          << "  gpm init <project_name>      Initialize a new GrassGreen project\n"
          << "  gpm build                    Build project according to grass.cfg\n"
          << "  gpm run                      Build and run project\n"
@@ -215,7 +217,13 @@ int main(int argc, char* argv[]) {
     }
 
     string command = argv[1];
-    if (command == "init") {
+    if (command == "-v" || command == "--version" || command == "-V") {
+        cout << "Grass Package Manager (gpm) v" << GRASS_VERSION << "\n";
+        return 0;
+    } else if (command == "-h" || command == "--help") {
+        print_help();
+        return 0;
+    } else if (command == "init") {
         return cmd_init(argc >= 3 ? argv[2] : "");
     } else if (command == "build") {
         return cmd_build_or_run(false);

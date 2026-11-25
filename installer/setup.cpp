@@ -13,6 +13,7 @@
 #include <shellapi.h>
 #include <string>
 #include <vector>
+#include "../include/GrassVersion.h"
 #include "payload_data.h"
 
 #pragma comment(lib, "comctl32.lib")

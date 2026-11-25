@@ -163,11 +163,11 @@ cd "$WORK_DIR"
 mkdir -p bin
 
 # ------------------------------------------------------------------------------
-# 4. Компиляция компилятора GrassGreen v4.3
+# 4. Компиляция компилятора GrassGreen v4.3.0
 # ------------------------------------------------------------------------------
-echo -e "${CYAN}[*] Compiling GrassGreen v4.3 (Single Compilation Unit / C++20 -O3)...${NC}"
+echo -e "${CYAN}[*] Compiling GrassGreen v4.3.0 (C++20 -O3)...${NC}"
 
-g++ -std=c++20 -O3 -s -static-libgcc -static-libstdc++ \
+g++ -std=c++20 -O3 -s -static-libgcc -static-libstdc++ -Iinclude \
   src/grassc.cpp \
   src/GrassHAL.cpp \
   src/GrassMMIO.cpp \
@@ -197,8 +197,24 @@ g++ -std=c++20 -O3 -s -static-libgcc -static-libstdc++ \
   src/Grass2DGraphics.cpp \
   src/GrassHardware.cpp \
   src/GrassBaremetal.cpp \
+  src/GrassFFI.cpp \
+  src/GrassLangGen.cpp \
+  src/GrassMath3D.cpp \
+  src/GrassGfx3D.cpp \
+  src/GrassPhysics.cpp \
+  src/GrassIR.cpp \
+  src/GrassX86Encoder.cpp \
+  src/GrassObjWriter.cpp \
+  src/GrassElfWriter.cpp \
+  src/GrassAdvancedOpt.cpp \
+  src/GrassNativeCodegen.cpp \
+  src/GrassNativeDebug.cpp \
+  src/GrassSema.cpp \
+  src/GrassNativeOOP.cpp \
+  src/GrassNativeMemory.cpp \
+  src/GrassNativeStdlib.cpp \
   -o bin/grassc \
-  -pthread
+  -pthread -ldl
 
 cp bin/grassc bin/grg
 chmod +x bin/grassc bin/grg
@@ -276,7 +292,7 @@ cat << 'EOF' > "$TEST_DIR/verify.grass"
 !GrassGreen!
 use utf - 8;
 int main() {
-    gout << "GrassGreen v4.3 is running perfectly on Linux!" << endl;
+    gout << "GrassGreen v4.3.0 is running perfectly on Linux!" << endl;
     return 0;
 }
 EOF

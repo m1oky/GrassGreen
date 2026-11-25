@@ -1,6 +1,6 @@
 # История изменений GrassGreen VS Code Extension
 
-## [4.3.0] — 2026-11-08 (Pre-release) — Evolution of the Bare-Metal
+## [4.3.0] — 2026-11-25 — Evolution of the Bare-Metal & Native RAII
 
 ### Добавлено
 - **Новая системная библиотека `!baremetal!` (псевдонимы: `!bm!`, `!kernel!`):**

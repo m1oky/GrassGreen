@@ -81,7 +81,7 @@ namespace GrassGreen.VisualStudio.Constants
 
         public static readonly List<ModuleInfo> Modules = new List<ModuleInfo>
         {
-            new ModuleInfo("!GrassGreen!", "Базовое ядро языка GrassGreen 4.3, потоковый ввод-вывод (gout/gin), типы данных и операторы."),
+            new ModuleInfo("!GrassGreen!", "Базовое ядро языка GrassGreen 4.3.0, потоковый ввод-вывод (gout/gin), типы данных и операторы."),
             new ModuleInfo("!baremetal!", "Системная разработка и собственные ОС: 16 цветов VGA и HEX, плавный курсор 60+ FPS, read_key(), TUI-виджеты, перезапуск reboot() и выключение poweroff(), RamFS VFS."),
             new ModuleInfo("!bm!", "Короткий алиас библиотеки прямого программирования на голом железе (!baremetal!)."),
             new ModuleInfo("!kernel!", "Алиас библиотеки !baremetal! для ядер операционных систем."),

@@ -1,0 +1,10 @@
+#pragma once
+#ifndef GRASS_VERSION_H
+#define GRASS_VERSION_H
+
+#define GRASS_VERSION "4.3.0"
+#define GRASS_VERSION_MAJOR 4
+#define GRASS_VERSION_MINOR 3
+#define GRASS_VERSION_PATCH 0
+
+#endif // GRASS_VERSION_H

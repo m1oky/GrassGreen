@@ -1,0 +1,50 @@
+name: Release GrassGreen
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-win64:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build GrassGreen toolchain and installer
+        shell: cmd
+        run: |
+          call build.bat
+          if errorlevel 1 exit /b %errorlevel%
+          call installer\build_installer.bat
+          if errorlevel 1 exit /b %errorlevel%
+
+      - name: Package Win64 release archive
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $stage = "release_stage"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item -Recurse -Force "bin" "$stage\bin"
+          Get-ChildItem "$stage\bin" -Include *.o,*.obj -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force "stdlib" "$stage\stdlib"
+          Copy-Item -Recurse -Force "include" "$stage\include"
+          Copy-Item -Recurse -Force "docs" "$stage\docs"
+          Copy-Item -Recurse -Force "examples" "$stage\examples"
+          Copy-Item -Force *.cmd "$stage\" -ErrorAction SilentlyContinue
+          Copy-Item -Force "setup.exe" "$stage\setup.exe"
+          Copy-Item -Force "README.md" "$stage\README.md"
+          Copy-Item -Force "LICENSE" "$stage\LICENSE"
+          $zipName = "GrassGreen-$tag-win64.zip"
+          Compress-Archive -Path "$stage\*" -DestinationPath $zipName -Force
+          Remove-Item -Recurse -Force $stage
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: GrassGreen-${{ github.ref_name }}-win64.zip
+          generate_release_notes: true
