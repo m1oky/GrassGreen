@@ -46,6 +46,8 @@ namespace grass::native {
         std::string base_name;
         bool is_class = true;
         bool has_vtable = false;
+        bool has_destructor = false;
+        bool has_explicit_destructor = false;
         uint64_t vptr_offset = 0;
         uint64_t total_size = 0;
         uint64_t alignment = 1;
@@ -121,6 +123,9 @@ namespace grass::native {
         // Query registered class/struct definition
         const OOPClassDef* get_class(const std::string& name) const;
         bool has_class(const std::string& name) const;
+        std::string get_destructor_name(const std::string& class_name) const {
+            return class_name + "__dtor";
+        }
 
         // Field access:
         // Compute GEP pointer to field: instance_ptr->field

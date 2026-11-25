@@ -2572,6 +2572,55 @@ namespace grass::backend {
             if (needed_symbols.count("free") > 0) append_function("free", code, rels);
         }
 
+        // 3b. memory_alloc: Win32 HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size) returning 0 if size <= 0
+        if (needed_symbols.count("memory_alloc") > 0 && defined_symbols.count("memory_alloc") == 0) {
+            std::vector<uint8_t> code = {
+                0x48, 0x85, 0xC9,                   // 0: test rcx, rcx
+                0x7F, 0x03,                         // 3: jg +3 (.do_alloc at 8)
+                0x31, 0xC0,                         // 5: xor eax, eax
+                0xC3,                               // 7: ret
+                0x48, 0x83, 0xEC, 0x28,             // 8: sub rsp, 40
+                0x49, 0x89, 0xC8,                   // 12: mov r8, rcx (size)
+                0xE8, 0x00, 0x00, 0x00, 0x00,       // 15: call GetProcessHeap
+                0x48, 0x89, 0xC1,                   // 20: mov rcx, rax (hHeap)
+                0xBA, 0x08, 0x00, 0x00, 0x00,       // 23: mov edx, 8 (HEAP_ZERO_MEMORY)
+                0xE8, 0x00, 0x00, 0x00, 0x00,       // 28: call HeapAlloc
+                0x48, 0x83, 0xC4, 0x28,             // 33: add rsp, 40
+                0xC3                                // 37: ret
+            };
+            std::vector<RelocEntry> rels = {
+                { SectionKind::Text, 16, "GetProcessHeap", RelocType::Rel32, -4 },
+                { SectionKind::Text, 29, "HeapAlloc", RelocType::Rel32, -4 }
+            };
+            append_function("memory_alloc", code, rels);
+        }
+
+        // 3c. memory_free_block: Win32 HeapFree(GetProcessHeap(), 0, ptr) returning 1/0
+        if (needed_symbols.count("memory_free_block") > 0 && defined_symbols.count("memory_free_block") == 0) {
+            std::vector<uint8_t> code = {
+                0x48, 0x85, 0xC9,                   // 0: test rcx, rcx
+                0x75, 0x03,                         // 3: jnz +3 (.do_free at 8)
+                0x31, 0xC0,                         // 5: xor eax, eax
+                0xC3,                               // 7: ret
+                0x48, 0x83, 0xEC, 0x28,             // 8: sub rsp, 40
+                0x49, 0x89, 0xC8,                   // 12: mov r8, rcx (ptr)
+                0xE8, 0x00, 0x00, 0x00, 0x00,       // 15: call GetProcessHeap
+                0x48, 0x89, 0xC1,                   // 20: mov rcx, rax (hHeap)
+                0x31, 0xD2,                         // 23: xor edx, edx
+                0xE8, 0x00, 0x00, 0x00, 0x00,       // 25: call HeapFree
+                0x85, 0xC0,                         // 30: test eax, eax
+                0x0F, 0x95, 0xC0,                   // 32: setnz al
+                0x0F, 0xB6, 0xC0,                   // 35: movzx eax, al
+                0x48, 0x83, 0xC4, 0x28,             // 38: add rsp, 40
+                0xC3                                // 42: ret
+            };
+            std::vector<RelocEntry> rels = {
+                { SectionKind::Text, 16, "GetProcessHeap", RelocType::Rel32, -4 },
+                { SectionKind::Text, 26, "HeapFree", RelocType::Rel32, -4 }
+            };
+            append_function("memory_free_block", code, rels);
+        }
+
         // 4. grass_realloc and realloc: Win32 HeapReAlloc(GetProcessHeap(), 8, ptr, new_size)
         if ((needed_symbols.count("grass_realloc") > 0 && defined_symbols.count("grass_realloc") == 0) ||
             (needed_symbols.count("realloc") > 0 && defined_symbols.count("realloc") == 0)) {

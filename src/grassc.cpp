@@ -3147,15 +3147,26 @@ public:
     do_new_struct: {
         {
             string s_name = readString();
+            auto alloc_struct_inst = [&](auto& self, GrassStructDef& sd) -> GrassStructInstance* {
+                GrassStructInstance* inst = (GrassStructInstance*)g_vm_arena.alloc(sizeof(GrassStructInstance));
+                uint8_t* buf = (uint8_t*)g_vm_arena.alloc(sd.total_size);
+                if (buf) memset(buf, 0, sd.total_size);
+                inst->def = &sd;
+                inst->data = buf;
+                for (const auto& fd : sd.fields) {
+                    if (!fd.struct_name.empty()) {
+                        auto fit = g_struct_registry.find(fd.struct_name);
+                        if (fit != g_struct_registry.end()) {
+                            GrassStructInstance* sub = self(self, fit->second);
+                            *(GrassValue*)(buf + fd.offset) = GrassValue::Struct(sub);
+                        }
+                    }
+                }
+                return inst;
+            };
             auto it = g_struct_registry.find(s_name);
             if (it != g_struct_registry.end()) {
-                GrassStructDef& def = it->second;
-                GrassStructInstance* inst = (GrassStructInstance*)g_vm_arena.alloc(sizeof(GrassStructInstance));
-                uint8_t* buf = (uint8_t*)g_vm_arena.alloc(def.total_size);
-                if (buf) memset(buf, 0, def.total_size);
-                inst->def = &def;
-                inst->data = buf;
-                push(GrassValue::Struct(inst));
+                push(GrassValue::Struct(alloc_struct_inst(alloc_struct_inst, it->second)));
             } else {
                 push(GrassValue::Nil());
             }

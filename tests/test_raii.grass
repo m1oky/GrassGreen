@@ -1,0 +1,146 @@
+!GrassGreen!
+!memory!
+
+struct Res {
+    int id;
+    int ptr;
+
+    void init(int rid, int bytes) {
+        this.id = rid;
+        this.ptr = memory_alloc(bytes);
+    }
+
+    ~Res() {
+        int freed = 0;
+        if (this.ptr != 0) {
+            freed = memory_free_block(this.ptr);
+            this.ptr = 0;
+        }
+        gout << "~Res(" << this.id << ", freed=" << freed << ")" << endl;
+    }
+}
+
+struct InnerPart {
+    int tag;
+    int ptr;
+
+    void setup(int t, int bytes) {
+        this.tag = t;
+        this.ptr = memory_alloc(bytes);
+    }
+
+    ~InnerPart() {
+        int freed = 0;
+        if (this.ptr != 0) {
+            freed = memory_free_block(this.ptr);
+            this.ptr = 0;
+        }
+        gout << "~InnerPart(" << this.tag << ", freed=" << freed << ")" << endl;
+    }
+}
+
+struct OuterAuto {
+    InnerPart first;
+    InnerPart second;
+}
+
+struct OuterExplicit {
+    InnerPart child;
+    int code;
+
+    ~OuterExplicit() {
+        gout << "~OuterExplicit(" << this.code << ")" << endl;
+    }
+}
+
+int test_early_return(int trigger) {
+    take outer_r = Res();
+    outer_r.init(10, 64);
+    if (trigger > 0) {
+        take inner_r = Res();
+        inner_r.init(20, 64);
+        return outer_r.id + inner_r.id;
+    }
+    return 0;
+}
+
+int main() {
+    gout << "=== 1. Block Exit & LIFO ===" << endl;
+    {
+        take a = Res();
+        a.init(1, 64);
+        take b = Res();
+        b.init(2, 128);
+        gout << "inside block" << endl;
+    }
+    gout << "after block" << endl;
+
+    gout << "=== 2. Stack LIFO ===" << endl;
+    {
+        Res s1;
+        s1.init(3, 32);
+        Res s2;
+        s2.init(4, 32);
+    }
+
+    gout << "=== 3. Early Return ===" << endl;
+    take ret_val = test_early_return(1);
+    gout << "ret_val=" << ret_val << endl;
+
+    gout << "=== 4. Loop Continue & Break (while & for) ===" << endl;
+    int i = 0;
+    while (i < 4) {
+        take loop_r = Res();
+        loop_r.init(30 + i, 32);
+        i = i + 1;
+        if (i == 1) {
+            gout << "loop continue" << endl;
+            continue;
+        }
+        if (i == 3) {
+            take brk_r = Res();
+            brk_r.init(99, 32);
+            gout << "loop break" << endl;
+            break;
+        }
+        gout << "loop end iter" << endl;
+    }
+    for (int j = 0; j < 4; j++) {
+        take for_r = Res();
+        for_r.init(40 + j, 32);
+        if (j == 0) {
+            gout << "for continue j=0" << endl;
+            continue;
+        }
+        if (j == 2) {
+            take for_brk = Res();
+            for_brk.init(88, 32);
+            gout << "for break j=2" << endl;
+            break;
+        }
+        gout << "for iter j=" << j << endl;
+    }
+
+    gout << "=== 5. Reassignment ===" << endl;
+    {
+        take buf = Res();
+        buf.init(50, 64);
+        buf = Res();
+        buf.init(51, 64);
+        gout << "reassigned" << endl;
+    }
+
+    gout << "=== 6. Nested Struct Implicit & Explicit Dtor ===" << endl;
+    {
+        take oa = OuterAuto();
+        oa.first.setup(101, 32);
+        oa.second.setup(102, 32);
+
+        take oe = OuterExplicit();
+        oe.code = 77;
+        oe.child.setup(201, 32);
+    }
+
+    gout << "=== ALL RAII DONE ===" << endl;
+    return 0;
+}

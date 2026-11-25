@@ -207,6 +207,18 @@ int64_t grass_array_len(void* ptr) {
     GrassDynArray* arr = (GrassDynArray*)ptr;
     return arr ? (int64_t)arr->size : 0;
 }
+
+int64_t memory_alloc(int64_t size) {
+    if (size <= 0) return 0;
+    void* p = calloc(1, (size_t)size);
+    return (int64_t)(uintptr_t)p;
+}
+
+int64_t memory_free_block(int64_t block_addr) {
+    if (block_addr == 0) return 0;
+    free((void*)(uintptr_t)block_addr);
+    return 1;
+}
 )";
 
     // =========================================================================
@@ -395,16 +407,24 @@ int64_t grass_array_len(void* ptr) {
             ir::ValueId alloca_id = 0;
             ir::IRType* type = nullptr;
             std::string struct_type_name;
+            bool is_raii = false;
         };
-        std::vector<std::unordered_map<std::string, VarBinding>> scopes_;
+        struct ScopeFrame {
+            std::unordered_map<std::string, VarBinding> vars;
+            std::vector<std::string> raii_vars;
+        };
+        std::vector<ScopeFrame> scopes_;
 
         struct LoopContext {
             ir::BasicBlock* b_step = nullptr;
             ir::BasicBlock* b_exit = nullptr;
+            size_t break_scope_depth = 0;
+            size_t continue_scope_depth = 0;
         };
         std::vector<LoopContext> loop_stack_;
         bool in_stream_io_ = false;
         std::string last_struct_name_;
+        std::string current_dtor_struct_;
 
         std::vector<std::string> namespace_stack_;
         std::vector<std::string> using_namespaces_;
@@ -496,22 +516,125 @@ int64_t grass_array_len(void* ptr) {
             scopes_.emplace_back();
         }
 
-        void pop_scope() {
-            if (!scopes_.empty()) scopes_.pop_back();
+        void emit_var_dtor(const VarBinding& b) {
+            if (!b.is_raii || b.struct_type_name.empty() || !oop_mgr_) return;
+            ir::BasicBlock* cur_bb = builder_.get_insert_block();
+            if (!cur_bb || cur_bb->has_terminator()) return;
+            const auto* cd = oop_mgr_->get_class(b.struct_type_name);
+            if (!cd || !cd->has_destructor) return;
+            std::string dtor_name = oop_mgr_->get_destructor_name(cd->name);
+            ir::ValueId ptr_type_expected = 0;
+            (void)ptr_type_expected;
+            ir::IRType* struct_ptr_t = ctx_.get_ptr_type(cd->ir_struct_type);
+            if (b.type && b.type->is_pointer()) {
+                ir::ValueId obj_ptr = builder_.create_load(b.alloca_id, cd->name + "_dtor_ptr");
+                ir::ValueId null_ptr = builder_.create_const_int(b.type, 0);
+                ir::ValueId is_nn = builder_.create_icmp_ne(obj_ptr, null_ptr);
+                ir::BasicBlock* bb_call = builder_.create_block("dtor_call");
+                ir::BasicBlock* bb_skip = builder_.create_block("dtor_skip");
+                builder_.create_branch(is_nn, bb_call, bb_skip);
+                builder_.set_insert_point(bb_call);
+                ir::ValueId cast_ptr = coerce_type(obj_ptr, struct_ptr_t);
+                builder_.create_call(dtor_name, ctx_.get_void_type(), { cast_ptr });
+                builder_.create_jump(bb_skip);
+                builder_.set_insert_point(bb_skip);
+            } else {
+                ir::ValueId cast_ptr = coerce_type(b.alloca_id, struct_ptr_t);
+                builder_.create_call(dtor_name, ctx_.get_void_type(), { cast_ptr });
+            }
         }
 
-        bool declare_var(const std::string& name, ir::ValueId alloca_id, ir::IRType* type, const std::string& struct_name = "") {
+        void emit_struct_field_dtors(ir::ValueId this_ptr, const std::string& struct_name) {
+            if (!oop_mgr_ || struct_name.empty() || !this_ptr) return;
+            ir::BasicBlock* cur_bb = builder_.get_insert_block();
+            if (!cur_bb || cur_bb->has_terminator()) return;
+            const auto* cd = oop_mgr_->get_class(struct_name);
+            if (!cd) return;
+            for (auto it = cd->fields.rbegin(); it != cd->fields.rend(); ++it) {
+                if (it->type && it->type->is_struct()) {
+                    const auto* fcd = oop_mgr_->get_class(it->type->struct_name);
+                    if (fcd && fcd->has_destructor) {
+                        ir::ValueId fptr = oop_mgr_->emit_field_gep(builder_, this_ptr, struct_name, it->name, it->name + "_dtor_gep");
+                        if (fptr != ir::kInvalidValueId) {
+                            builder_.create_call(oop_mgr_->get_destructor_name(fcd->name), ctx_.get_void_type(), { fptr });
+                        }
+                    }
+                }
+            }
+        }
+
+        void emit_scope_cleanups(size_t frame_idx) {
+            if (frame_idx >= scopes_.size()) return;
+            ir::BasicBlock* cur_bb = builder_.get_insert_block();
+            if (!cur_bb || cur_bb->has_terminator()) return;
+            const auto& frame = scopes_[frame_idx];
+            for (auto it = frame.raii_vars.rbegin(); it != frame.raii_vars.rend(); ++it) {
+                auto vit = frame.vars.find(*it);
+                if (vit != frame.vars.end()) {
+                    emit_var_dtor(vit->second);
+                }
+            }
+        }
+
+        void emit_scopes_cleanup_to(size_t target_depth) {
+            for (size_t idx = scopes_.size(); idx > target_depth; --idx) {
+                emit_scope_cleanups(idx - 1);
+            }
+        }
+
+        void pop_scope(bool emit_cleanups = true) {
+            if (scopes_.empty()) return;
+            if (emit_cleanups) {
+                emit_scope_cleanups(scopes_.size() - 1);
+            }
+            scopes_.pop_back();
+        }
+
+        bool declare_var(const std::string& name, ir::ValueId alloca_id, ir::IRType* type,
+                         const std::string& struct_name = "", bool is_raii = false) {
             if (scopes_.empty()) push_scope();
-            scopes_.back()[name] = { alloca_id, type, struct_name };
+            scopes_.back().vars[name] = { alloca_id, type, struct_name, is_raii };
+            if (is_raii) {
+                scopes_.back().raii_vars.push_back(name);
+            }
             return true;
         }
 
         const VarBinding* lookup_var(const std::string& name) const {
             for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
-                auto f = it->find(name);
-                if (f != it->end()) return &f->second;
+                auto f = it->vars.find(name);
+                if (f != it->vars.end()) return &f->second;
             }
             return nullptr;
+        }
+
+        void emit_zero_struct(ir::ValueId struct_alloca, ir::IRType* st_type) {
+            if (!struct_alloca || !st_type || !st_type->is_struct()) return;
+            uint64_t total_sz = st_type->size();
+            uint64_t qwords = (total_sz + 7) / 8;
+            ir::IRType* i64_ptr_t = ctx_.get_ptr_type(ctx_.get_i64_type());
+            ir::ValueId base_p = builder_.create_bitcast(struct_alloca, i64_ptr_t, "zinit_ptr");
+            ir::ValueId zero64 = builder_.create_const_i64(0);
+            for (uint64_t i = 0; i < qwords; ++i) {
+                ir::ValueId slot_p = (i == 0) ? base_p : builder_.create_gep(base_p, { builder_.create_const_i64(static_cast<int64_t>(i)) }, ctx_.get_i64_type());
+                builder_.create_store(zero64, slot_p);
+            }
+        }
+
+        void emit_copy_struct(ir::ValueId dst_ptr, ir::ValueId src_ptr, ir::IRType* st_type) {
+            if (!dst_ptr || !src_ptr || !st_type || !st_type->is_struct()) return;
+            uint64_t total_sz = st_type->size();
+            uint64_t qwords = (total_sz + 7) / 8;
+            ir::IRType* i64_ptr_t = ctx_.get_ptr_type(ctx_.get_i64_type());
+            ir::ValueId dst_p = builder_.create_bitcast(dst_ptr, i64_ptr_t, "copy_dst");
+            ir::ValueId src_p = builder_.create_bitcast(src_ptr, i64_ptr_t, "copy_src");
+            for (uint64_t i = 0; i < qwords; ++i) {
+                ir::ValueId idx = builder_.create_const_i64(static_cast<int64_t>(i));
+                ir::ValueId s_elem = (i == 0) ? src_p : builder_.create_gep(src_p, { idx }, ctx_.get_i64_type());
+                ir::ValueId d_elem = (i == 0) ? dst_p : builder_.create_gep(dst_p, { idx }, ctx_.get_i64_type());
+                ir::ValueId v = builder_.create_load(s_elem, "copy_qw");
+                builder_.create_store(v, d_elem);
+            }
         }
 
         std::string add_rodata_string(const std::string& str) {
@@ -759,6 +882,7 @@ int64_t grass_array_len(void* ptr) {
             std::vector<std::string> param_struct_names;
             size_t body_start_pos = 0;
             size_t body_end_pos = 0;
+            bool is_dtor = false;
         };
 
         bool parse_struct_definition(std::string& error) {
@@ -789,9 +913,50 @@ int64_t grass_array_len(void* ptr) {
             std::vector<PendingMethod> pending_methods;
 
             while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
-                if (peek().kind == TOK_IDENT && is_var_keyword(peek().text)) {
+                if (match(TOK_SEMI)) continue;
+
+                // Destructor: ~StructName() { ... }
+                if (match(TOK_TILDE)) {
+                    if (peek().kind != TOK_IDENT) {
+                        error = "Line " + std::to_string(peek().line) + ": Expected destructor name after '~'!";
+                        return false;
+                    }
+                    std::string dname = advance().text;
+                    if (dname != struct_name) {
+                        error = "Line " + std::to_string(peek().line) + ": Destructor name '~" + dname + "' does not match struct '" + struct_name + "'!";
+                        return false;
+                    }
+                    if (!consume(TOK_LPAREN, "Expected '(' in destructor declaration!", error)) return false;
+                    if (!consume(TOK_RPAREN, "Destructor cannot take parameters!", error)) return false;
+                    if (!consume(TOK_LBRACE, "Expected '{' at start of destructor body!", error)) return false;
+
+                    size_t body_start = pos_;
+                    int brace_depth = 1;
+                    while (brace_depth > 0 && peek().kind != TOK_EOF) {
+                        if (peek().kind == TOK_LBRACE) brace_depth++;
+                        else if (peek().kind == TOK_RBRACE) {
+                            brace_depth--;
+                            if (brace_depth == 0) break;
+                        }
+                        advance();
+                    }
+                    size_t body_end = pos_;
+                    consume(TOK_RBRACE, "Expected '}' closing destructor body!", error);
+
+                    pending_methods.push_back({ "dtor", ctx_.get_void_type(), {}, {}, {}, body_start, body_end, true });
+                    if (oop_mgr_) {
+                        oop_mgr_->add_destructor();
+                    }
+                    continue;
+                }
+
+                bool is_struct_field_or_ret = (oop_mgr_ && oop_mgr_->has_class(peek().text));
+                if (peek().kind == TOK_IDENT && (is_var_keyword(peek().text) || is_type_or_func_keyword(peek().text) || is_struct_field_or_ret)) {
                     std::string ftype_str = advance().text;
-                    ir::IRType* ftype = parse_type_name(ftype_str);
+                    ir::IRType* ftype = (ftype_str == "fn") ? ctx_.get_void_type() : parse_type_name(ftype_str);
+                    while (match(TOK_STAR)) {
+                        ftype = ctx_.get_ptr_type(ftype);
+                    }
                     if (peek().kind != TOK_IDENT) {
                         error = "Line " + std::to_string(peek().line) + ": Expected field or method name!";
                         return false;
@@ -806,17 +971,23 @@ int64_t grass_array_len(void* ptr) {
                         if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
                             while (true) {
                                 ir::IRType* ptype = ctx_.get_i64_type();
-                                std::string struct_name = "";
-                                if (peek().kind == TOK_IDENT && peek(1).kind == TOK_IDENT) {
+                                std::string p_struct_name = "";
+                                if (peek().kind == TOK_IDENT && (peek(1).kind == TOK_IDENT || peek(1).kind == TOK_STAR)) {
                                     std::string tname = advance().text;
                                     if (oop_mgr_ && oop_mgr_->has_class(tname)) {
-                                        struct_name = tname;
-                                        ptype = ctx_.get_ptr_type();
+                                        p_struct_name = tname;
+                                        ptype = ctx_.get_ptr_type(parse_type_name(tname));
                                     } else {
                                         ptype = parse_type_name(tname);
                                     }
+                                    while (match(TOK_STAR)) {
+                                        ptype = ctx_.get_ptr_type(ptype);
+                                    }
                                 } else if (is_type_or_func_keyword(peek().text)) {
                                     ptype = parse_type_name(advance().text);
+                                    while (match(TOK_STAR)) {
+                                        ptype = ctx_.get_ptr_type(ptype);
+                                    }
                                 }
                                 if (peek().kind != TOK_IDENT) {
                                     error = "Line " + std::to_string(peek().line) + ": Expected parameter name!";
@@ -825,7 +996,7 @@ int64_t grass_array_len(void* ptr) {
                                 std::string pname = advance().text;
                                 param_types.push_back(ptype);
                                 param_names.push_back(pname);
-                                param_struct_names.push_back(struct_name);
+                                param_struct_names.push_back(p_struct_name);
                                 if (!match(TOK_COMMA)) break;
                             }
                         }
@@ -845,13 +1016,14 @@ int64_t grass_array_len(void* ptr) {
                         size_t body_end = pos_;
                         consume(TOK_RBRACE, "Expected '}' closing method body!", error);
 
-                        pending_methods.push_back({ mname, ftype, param_types, param_names, param_struct_names, body_start, body_end });
+                        pending_methods.push_back({ mname, ftype, param_types, param_names, param_struct_names, body_start, body_end, false });
                         if (oop_mgr_) {
                             oop_mgr_->add_method(mname, ftype, param_types, param_names);
                         }
                     } else {
                         match(TOK_SEMI);
-                        if (mname == "name" || mname == "title" || mname == "msg" || mname == "text" || mname == "path" || mname == "str") {
+                        if (!ftype->is_struct() && !ftype->is_pointer() &&
+                            (mname == "name" || mname == "title" || mname == "msg" || mname == "text" || mname == "path" || mname == "str")) {
                             ftype = ctx_.get_ptr_type(ctx_.get_i8_type());
                         }
                         field_types.push_back(ftype);
@@ -872,13 +1044,16 @@ int64_t grass_array_len(void* ptr) {
                 oop_mgr_->finalize_class();
             }
 
+            bool generated_explicit_dtor = false;
             for (const auto& pm : pending_methods) {
+                if (pm.is_dtor) generated_explicit_dtor = true;
                 ir::IRFunction* fn = nullptr;
                 if (oop_mgr_) {
                     fn = oop_mgr_->create_method_function(struct_name, pm.name);
                 }
                 if (!fn) {
-                    fn = module_.create_function(struct_name + "_" + pm.name, pm.ret_type);
+                    std::string mangled = pm.is_dtor ? (struct_name + "__dtor") : (struct_name + "_" + pm.name);
+                    fn = module_.create_function(mangled, pm.ret_type);
                     ir::IRType* this_t = ctx_.get_ptr_type(ctx_.get_struct_type(struct_name, field_types, field_names));
                     fn->add_argument("this", this_t);
                     for (size_t i = 0; i < pm.param_types.size(); ++i) {
@@ -887,7 +1062,9 @@ int64_t grass_array_len(void* ptr) {
                 }
 
                 ir::IRFunction* prev_fn = builder_.get_function();
+                std::string prev_dtor_struct = current_dtor_struct_;
                 builder_.set_function(fn);
+                if (pm.is_dtor) current_dtor_struct_ = struct_name;
                 scopes_.clear();
                 push_scope();
 
@@ -896,13 +1073,13 @@ int64_t grass_array_len(void* ptr) {
 
                 ir::ValueId this_alloca = builder_.create_alloca(fn->arguments[0].type, 1, 0, "this");
                 builder_.create_store(fn->arguments[0].id, this_alloca);
-                declare_var("this", this_alloca, fn->arguments[0].type, struct_name);
+                declare_var("this", this_alloca, fn->arguments[0].type, struct_name, false);
 
                 for (size_t i = 1; i < fn->arguments.size(); ++i) {
                     ir::ValueId p_alloca = builder_.create_alloca(fn->arguments[i].type, 1, 0, fn->arguments[i].name);
                     builder_.create_store(fn->arguments[i].id, p_alloca);
                     std::string sname = (i - 1 < pm.param_struct_names.size()) ? pm.param_struct_names[i - 1] : "";
-                    declare_var(fn->arguments[i].name, p_alloca, fn->arguments[i].type, sname);
+                    declare_var(fn->arguments[i].name, p_alloca, fn->arguments[i].type, sname, false);
                 }
 
                 size_t saved_pos = pos_;
@@ -910,6 +1087,7 @@ int64_t grass_array_len(void* ptr) {
                 while (pos_ < pm.body_end_pos && peek().kind != TOK_EOF) {
                     if (!parse_statement(error)) {
                         pos_ = saved_pos;
+                        current_dtor_struct_ = prev_dtor_struct;
                         return false;
                     }
                 }
@@ -917,17 +1095,47 @@ int64_t grass_array_len(void* ptr) {
 
                 ir::BasicBlock* cur_bb = builder_.get_insert_block();
                 if (cur_bb && !cur_bb->has_terminator()) {
-                    if (pm.ret_type->is_void()) {
-                        builder_.create_ret_void();
-                    } else {
-                        ir::ValueId def_ret = builder_.create_const_int(pm.ret_type, 0);
-                        builder_.create_ret(def_ret);
+                    pop_scope(true);
+                    if (pm.is_dtor) {
+                        ir::ValueId this_val = builder_.create_load(this_alloca, "this_dtor");
+                        emit_struct_field_dtors(this_val, struct_name);
                     }
+                    cur_bb = builder_.get_insert_block();
+                    if (cur_bb && !cur_bb->has_terminator()) {
+                        if (pm.ret_type->is_void()) {
+                            builder_.create_ret_void();
+                        } else {
+                            ir::ValueId def_ret = builder_.create_const_int(pm.ret_type, 0);
+                            builder_.create_ret(def_ret);
+                        }
+                    }
+                } else {
+                    pop_scope(false);
                 }
 
-                pop_scope();
                 fn->rebuild_cfg();
+                current_dtor_struct_ = prev_dtor_struct;
                 builder_.set_function(prev_fn);
+            }
+
+            if (!generated_explicit_dtor && oop_mgr_) {
+                const auto* cd = oop_mgr_->get_class(struct_name);
+                if (cd && cd->has_destructor) {
+                    ir::IRFunction* fn = oop_mgr_->create_method_function(struct_name, "dtor");
+                    if (fn) {
+                        ir::IRFunction* prev_fn = builder_.get_function();
+                        builder_.set_function(fn);
+                        ir::BasicBlock* entry_bb = builder_.create_block("entry");
+                        builder_.set_insert_point(entry_bb);
+                        emit_struct_field_dtors(fn->arguments[0].id, struct_name);
+                        ir::BasicBlock* cur_bb = builder_.get_insert_block();
+                        if (cur_bb && !cur_bb->has_terminator()) {
+                            builder_.create_ret_void();
+                        }
+                        fn->rebuild_cfg();
+                        builder_.set_function(prev_fn);
+                    }
+                }
             }
 
             return true;
@@ -1010,15 +1218,20 @@ int64_t grass_array_len(void* ptr) {
             // Ensure block ends with terminator
             ir::BasicBlock* current_bb = builder_.get_insert_block();
             if (current_bb && !current_bb->has_terminator()) {
-                if (ret_type->is_void()) {
-                    builder_.create_ret_void();
-                } else {
-                    ir::ValueId default_ret = builder_.create_const_int(ret_type, 0);
-                    builder_.create_ret(default_ret);
+                pop_scope(true);
+                current_bb = builder_.get_insert_block();
+                if (current_bb && !current_bb->has_terminator()) {
+                    if (ret_type->is_void()) {
+                        builder_.create_ret_void();
+                    } else {
+                        ir::ValueId default_ret = builder_.create_const_int(ret_type, 0);
+                        builder_.create_ret(default_ret);
+                    }
                 }
+            } else {
+                pop_scope(false);
             }
 
-            pop_scope();
             fn->rebuild_cfg();
             return true;
         }
@@ -1034,7 +1247,7 @@ int64_t grass_array_len(void* ptr) {
                     if (!parse_statement(error)) return false;
                 }
                 consume(TOK_RBRACE, "Expected '}' closing block!", error);
-                pop_scope();
+                pop_scope(true);
                 return true;
             }
 
@@ -1190,6 +1403,7 @@ int64_t grass_array_len(void* ptr) {
                 std::string type_name = advance().text;
                 ir::IRType* vtype = nullptr;
                 std::string struct_name = "";
+                bool is_explicit_ptr = false;
                 if (is_struct_decl) {
                     struct_name = type_name;
                     const auto* cd = oop_mgr_->get_class(type_name);
@@ -1199,15 +1413,24 @@ int64_t grass_array_len(void* ptr) {
                 }
                 while (match(TOK_STAR)) {
                     vtype = ctx_.get_ptr_type(vtype);
+                    is_explicit_ptr = true;
                 }
 
                 while (peek().kind == TOK_IDENT || peek().kind == TOK_STAR) {
                     ir::IRType* cur_vtype = vtype;
+                    bool cur_explicit_ptr = is_explicit_ptr;
                     while (match(TOK_STAR)) {
                         cur_vtype = ctx_.get_ptr_type(cur_vtype);
+                        cur_explicit_ptr = true;
                     }
                     if (peek().kind != TOK_IDENT) break;
                     std::string var_name = advance().text;
+
+                    auto has_raii_dtor = [&](const std::string& sname, bool explicit_ptr) -> bool {
+                        if (explicit_ptr || sname.empty() || !oop_mgr_) return false;
+                        const auto* cd = oop_mgr_->get_class(sname);
+                        return cd && cd->has_destructor;
+                    };
 
                     if (type_name == "take") {
                         if (!match(TOK_ASSIGN)) {
@@ -1231,8 +1454,9 @@ int64_t grass_array_len(void* ptr) {
                         } else if (cur_vtype->is_pointer() && !last_struct_name_.empty() && oop_mgr_ && oop_mgr_->has_class(last_struct_name_)) {
                             struct_name = last_struct_name_;
                         }
+                        bool raii = has_raii_dtor(struct_name, false);
                         ir::ValueId alloca_id = builder_.create_alloca(cur_vtype, 1, 0, var_name);
-                        declare_var(var_name, alloca_id, cur_vtype, struct_name);
+                        declare_var(var_name, alloca_id, cur_vtype, struct_name, raii);
                         builder_.create_store(init_val, alloca_id);
                     } else if (match(TOK_ASSIGN)) {
                         last_struct_name_.clear();
@@ -1252,14 +1476,23 @@ int64_t grass_array_len(void* ptr) {
                                 struct_name = last_struct_name_;
                             }
                         }
+                        bool raii = has_raii_dtor(struct_name, cur_explicit_ptr);
                         ir::ValueId alloca_id = builder_.create_alloca(cur_vtype, 1, 0, var_name);
-                        declare_var(var_name, alloca_id, cur_vtype, struct_name);
-                        init_val = coerce_type(init_val, cur_vtype);
-                        builder_.create_store(init_val, alloca_id);
+                        declare_var(var_name, alloca_id, cur_vtype, struct_name, raii);
+                        ir::IRType* init_t = builder_.get_function()->get_value(init_val).type;
+                        if (cur_vtype && cur_vtype->is_struct() && init_t && init_t->is_pointer()) {
+                            emit_copy_struct(alloca_id, init_val, cur_vtype);
+                        } else {
+                            init_val = coerce_type(init_val, cur_vtype);
+                            builder_.create_store(init_val, alloca_id);
+                        }
                     } else {
+                        bool raii = has_raii_dtor(struct_name, cur_explicit_ptr);
                         ir::ValueId alloca_id = builder_.create_alloca(cur_vtype, 1, 0, var_name);
-                        declare_var(var_name, alloca_id, cur_vtype, struct_name);
-                        if (!is_struct_decl) {
+                        declare_var(var_name, alloca_id, cur_vtype, struct_name, raii);
+                        if (cur_vtype && cur_vtype->is_struct()) {
+                            emit_zero_struct(alloca_id, cur_vtype);
+                        } else {
                             ir::ValueId default_val = builder_.create_const_int(cur_vtype, 0);
                             builder_.create_store(default_val, alloca_id);
                         }
@@ -1294,18 +1527,32 @@ int64_t grass_array_len(void* ptr) {
 
                 // Then Block
                 builder_.set_insert_point(b_then);
+                push_scope();
                 if (!parse_statement(error)) return false;
                 if (!builder_.get_insert_block()->has_terminator()) {
-                    builder_.create_jump(b_merge);
+                    pop_scope(true);
+                    if (!builder_.get_insert_block()->has_terminator()) {
+                        builder_.create_jump(b_merge);
+                    }
+                } else {
+                    pop_scope(false);
                 }
 
                 // Else Block
                 builder_.set_insert_point(b_else);
                 if (match_ident("else")) {
                     has_else = true;
+                    push_scope();
                     if (!parse_statement(error)) return false;
-                }
-                if (!builder_.get_insert_block()->has_terminator()) {
+                    if (!builder_.get_insert_block()->has_terminator()) {
+                        pop_scope(true);
+                        if (!builder_.get_insert_block()->has_terminator()) {
+                            builder_.create_jump(b_merge);
+                        }
+                    } else {
+                        pop_scope(false);
+                    }
+                } else if (!builder_.get_insert_block()->has_terminator()) {
                     builder_.create_jump(b_merge);
                 }
 
@@ -1341,11 +1588,18 @@ int64_t grass_array_len(void* ptr) {
                 builder_.create_branch(cond, b_body, b_exit);
 
                 // Body block
-                loop_stack_.push_back({ b_cond, b_exit });
+                size_t loop_depth = scopes_.size();
+                loop_stack_.push_back({ b_cond, b_exit, loop_depth, loop_depth });
                 builder_.set_insert_point(b_body);
+                push_scope();
                 if (!parse_statement(error)) return false;
                 if (!builder_.get_insert_block()->has_terminator()) {
-                    builder_.create_jump(b_cond);
+                    pop_scope(true);
+                    if (!builder_.get_insert_block()->has_terminator()) {
+                        builder_.create_jump(b_cond);
+                    }
+                } else {
+                    pop_scope(false);
                 }
                 loop_stack_.pop_back();
 
@@ -1397,11 +1651,18 @@ int64_t grass_array_len(void* ptr) {
                 if (!consume(TOK_RPAREN, "Expected ')' closing for loop header!", error)) return false;
 
                 // Body Block
-                loop_stack_.push_back({ b_step, b_exit });
+                size_t body_depth = scopes_.size();
+                loop_stack_.push_back({ b_step, b_exit, body_depth, body_depth });
                 builder_.set_insert_point(b_body);
+                push_scope();
                 if (!parse_statement(error)) return false;
                 if (!builder_.get_insert_block()->has_terminator()) {
-                    builder_.create_jump(b_step);
+                    pop_scope(true);
+                    if (!builder_.get_insert_block()->has_terminator()) {
+                        builder_.create_jump(b_step);
+                    }
+                } else {
+                    pop_scope(false);
                 }
                 loop_stack_.pop_back();
 
@@ -1420,8 +1681,8 @@ int64_t grass_array_len(void* ptr) {
                 }
                 builder_.create_jump(b_cond);
 
-                pop_scope();
                 builder_.set_insert_point(b_exit);
+                pop_scope(true);
                 return true;
             }
 
@@ -1432,6 +1693,7 @@ int64_t grass_array_len(void* ptr) {
                     error = "Break statement outside loop!";
                     return false;
                 }
+                emit_scopes_cleanup_to(loop_stack_.back().break_scope_depth);
                 builder_.create_jump(loop_stack_.back().b_exit);
                 return true;
             }
@@ -1442,6 +1704,7 @@ int64_t grass_array_len(void* ptr) {
                     error = "Continue statement outside loop!";
                     return false;
                 }
+                emit_scopes_cleanup_to(loop_stack_.back().continue_scope_depth);
                 builder_.create_jump(loop_stack_.back().b_step);
                 return true;
             }
@@ -1455,10 +1718,26 @@ int64_t grass_array_len(void* ptr) {
                     if (exp_t && !exp_t->is_void()) {
                         ret_val = coerce_type(ret_val, exp_t);
                     }
+                    emit_scopes_cleanup_to(0);
                     if (mem_mgr_) mem_mgr_->emit_all_cleanups(builder_);
+                    if (!current_dtor_struct_.empty()) {
+                        const VarBinding* tv = lookup_var("this");
+                        if (tv) {
+                            ir::ValueId tptr = builder_.create_load(tv->alloca_id, "this_ret_dtor");
+                            emit_struct_field_dtors(tptr, current_dtor_struct_);
+                        }
+                    }
                     builder_.create_ret(ret_val);
                 } else {
+                    emit_scopes_cleanup_to(0);
                     if (mem_mgr_) mem_mgr_->emit_all_cleanups(builder_);
+                    if (!current_dtor_struct_.empty()) {
+                        const VarBinding* tv = lookup_var("this");
+                        if (tv) {
+                            ir::ValueId tptr = builder_.create_load(tv->alloca_id, "this_ret_dtor");
+                            emit_struct_field_dtors(tptr, current_dtor_struct_);
+                        }
+                    }
                     builder_.create_ret_void();
                 }
                 match(TOK_SEMI);
@@ -1507,96 +1786,99 @@ int64_t grass_array_len(void* ptr) {
                 }
             }
 
-            // Check for arrow member assignment: ptr->field = expr or ptr->field += expr
-            if (peek().kind == TOK_IDENT && peek(1).kind == TOK_ARROW && peek(2).kind == TOK_IDENT &&
-                (peek(3).kind == TOK_ASSIGN || peek(3).kind == TOK_PLUS_ASSIGN ||
-                 peek(3).kind == TOK_MINUS_ASSIGN || peek(3).kind == TOK_MUL_ASSIGN ||
-                 peek(3).kind == TOK_DIV_ASSIGN)) {
-                std::string ptr_name = advance().text;
-                advance(); // consume '->'
-                std::string field_name = advance().text;
-                GrassTokenKind op = advance().kind;
-
-                const VarBinding* ptr_var = lookup_var(ptr_name);
-                if (!ptr_var) {
-                    error = "Undeclared pointer object: " + ptr_name;
-                    return 0;
+            // Check for member assignment: obj.field = expr or obj.a.b = expr (supports '.' and '->')
+            if (peek().kind == TOK_IDENT && (peek(1).kind == TOK_DOT || peek(1).kind == TOK_ARROW)) {
+                size_t look = pos_ + 1;
+                while (look + 1 < tokens_.size() &&
+                       (tokens_[look].kind == TOK_DOT || tokens_[look].kind == TOK_ARROW) &&
+                       tokens_[look + 1].kind == TOK_IDENT) {
+                    look += 2;
                 }
-                ir::ValueId inst_ptr = builder_.create_load(ptr_var->alloca_id, ptr_name + "_ptr");
-                std::string sname = ptr_var->struct_type_name;
-                ir::ValueId rhs = parse_assignment(error);
-                if (!rhs) return 0;
-
-                if (op == TOK_ASSIGN) {
-                    if (oop_mgr_) {
-                        oop_mgr_->emit_store_field(builder_, inst_ptr, sname, field_name, rhs);
+                if (look > pos_ + 1 && look < tokens_.size() &&
+                    (tokens_[look].kind == TOK_ASSIGN || tokens_[look].kind == TOK_PLUS_ASSIGN ||
+                     tokens_[look].kind == TOK_MINUS_ASSIGN || tokens_[look].kind == TOK_MUL_ASSIGN ||
+                     tokens_[look].kind == TOK_DIV_ASSIGN)) {
+                    std::string obj_name = advance().text;
+                    const VarBinding* obj_var = lookup_var(obj_name);
+                    if (!obj_var) {
+                        error = "Undeclared object: " + obj_name;
+                        return 0;
                     }
-                    return rhs;
-                } else {
-                    ir::ValueId cur = 0;
-                    if (oop_mgr_) {
-                        cur = oop_mgr_->emit_load_field(builder_, inst_ptr, sname, field_name, field_name + "_val");
+                    ir::ValueId inst_ptr = obj_var->alloca_id;
+                    if (obj_var->type && obj_var->type->is_pointer()) {
+                        inst_ptr = builder_.create_load(obj_var->alloca_id, obj_name + "_ptr");
                     }
-                    match_types(cur, rhs);
-                    ir::ValueId computed = 0;
-                    if (op == TOK_PLUS_ASSIGN) computed = builder_.create_add(cur, rhs);
-                    else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_sub(cur, rhs);
-                    else if (op == TOK_MUL_ASSIGN) computed = builder_.create_mul(cur, rhs);
-                    else if (op == TOK_DIV_ASSIGN) computed = builder_.create_sdiv(cur, rhs);
+                    std::string sname = obj_var->struct_type_name;
 
-                    if (oop_mgr_) {
-                        oop_mgr_->emit_store_field(builder_, inst_ptr, sname, field_name, computed);
+                    std::vector<std::string> member_chain;
+                    while ((peek().kind == TOK_DOT || peek().kind == TOK_ARROW) && peek(1).kind == TOK_IDENT) {
+                        advance();
+                        member_chain.push_back(advance().text);
                     }
-                    return computed;
-                }
-            }
+                    GrassTokenKind op = advance().kind;
 
-            // Check for member assignment: obj.field = expr or obj.field += expr
-            if (peek().kind == TOK_IDENT && peek(1).kind == TOK_DOT && peek(2).kind == TOK_IDENT &&
-                (peek(3).kind == TOK_ASSIGN || peek(3).kind == TOK_PLUS_ASSIGN ||
-                 peek(3).kind == TOK_MINUS_ASSIGN || peek(3).kind == TOK_MUL_ASSIGN ||
-                 peek(3).kind == TOK_DIV_ASSIGN)) {
-                std::string obj_name = advance().text;
-                advance(); // consume '.'
-                std::string field_name = advance().text;
-                GrassTokenKind op = advance().kind;
-
-                const VarBinding* obj_var = lookup_var(obj_name);
-                if (!obj_var) {
-                    error = "Undeclared object: " + obj_name;
-                    return 0;
-                }
-
-                ir::ValueId inst_ptr = obj_var->alloca_id;
-                if (obj_var->type && obj_var->type->is_pointer()) {
-                    inst_ptr = builder_.create_load(obj_var->alloca_id, obj_name + "_ptr");
-                }
-
-                std::string sname = obj_var->struct_type_name;
-                ir::ValueId rhs = parse_assignment(error);
-                if (!rhs) return 0;
-
-                if (op == TOK_ASSIGN) {
-                    if (oop_mgr_) {
-                        oop_mgr_->emit_store_field(builder_, inst_ptr, sname, field_name, rhs);
+                    for (size_t ci = 0; ci + 1 < member_chain.size(); ++ci) {
+                        const std::string& mid_field = member_chain[ci];
+                        if (!oop_mgr_ || sname.empty()) break;
+                        const auto* cd = oop_mgr_->get_class(sname);
+                        std::string next_s;
+                        bool is_val_struct = false;
+                        if (cd) {
+                            auto fit = cd->field_indices.find(mid_field);
+                            if (fit != cd->field_indices.end()) {
+                                const auto& fld = cd->fields[fit->second];
+                                if (fld.type && fld.type->is_struct()) {
+                                    is_val_struct = true;
+                                    next_s = fld.type->struct_name;
+                                } else if (fld.type && fld.type->is_pointer() && fld.type->element_type && fld.type->element_type->is_struct()) {
+                                    next_s = fld.type->element_type->struct_name;
+                                }
+                            }
+                        }
+                        if (is_val_struct) {
+                            inst_ptr = oop_mgr_->emit_field_gep(builder_, inst_ptr, sname, mid_field, mid_field + "_gep");
+                        } else {
+                            inst_ptr = oop_mgr_->emit_load_field(builder_, inst_ptr, sname, mid_field, mid_field + "_ptr");
+                        }
+                        sname = next_s;
                     }
-                    return rhs;
-                } else {
-                    ir::ValueId cur = 0;
-                    if (oop_mgr_) {
-                        cur = oop_mgr_->emit_load_field(builder_, inst_ptr, sname, field_name, field_name + "_val");
-                    }
-                    match_types(cur, rhs);
-                    ir::ValueId computed = 0;
-                    if (op == TOK_PLUS_ASSIGN) computed = builder_.create_add(cur, rhs);
-                    else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_sub(cur, rhs);
-                    else if (op == TOK_MUL_ASSIGN) computed = builder_.create_mul(cur, rhs);
-                    else if (op == TOK_DIV_ASSIGN) computed = builder_.create_sdiv(cur, rhs);
 
-                    if (oop_mgr_) {
-                        oop_mgr_->emit_store_field(builder_, inst_ptr, sname, field_name, computed);
+                    const std::string& field_name = member_chain.back();
+                    ir::ValueId rhs = parse_assignment(error);
+                    if (!rhs) return 0;
+
+                    ir::IRType* field_type = nullptr;
+                    if (oop_mgr_ && !sname.empty()) {
+                        const auto* cd = oop_mgr_->get_class(sname);
+                        const auto* fld = cd ? cd->find_field(field_name) : nullptr;
+                        if (fld) field_type = fld->type;
                     }
-                    return computed;
+
+                    if (op == TOK_ASSIGN) {
+                        if (oop_mgr_) {
+                            if (field_type && !field_type->is_struct()) {
+                                rhs = coerce_type(rhs, field_type);
+                            }
+                            oop_mgr_->emit_store_field(builder_, inst_ptr, sname, field_name, rhs);
+                        }
+                        return rhs;
+                    } else {
+                        ir::ValueId cur = 0;
+                        if (oop_mgr_) {
+                            cur = oop_mgr_->emit_load_field(builder_, inst_ptr, sname, field_name, field_name + "_val");
+                        }
+                        match_types(cur, rhs);
+                        ir::ValueId computed = 0;
+                        if (op == TOK_PLUS_ASSIGN) computed = builder_.create_add(cur, rhs);
+                        else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_sub(cur, rhs);
+                        else if (op == TOK_MUL_ASSIGN) computed = builder_.create_mul(cur, rhs);
+                        else if (op == TOK_DIV_ASSIGN) computed = builder_.create_sdiv(cur, rhs);
+
+                        if (oop_mgr_) {
+                            oop_mgr_->emit_store_field(builder_, inst_ptr, sname, field_name, computed);
+                        }
+                        return computed;
+                    }
                 }
             }
 
@@ -1660,8 +1942,16 @@ int64_t grass_array_len(void* ptr) {
                 if (!rhs) return 0;
 
                 if (op == TOK_ASSIGN) {
-                    rhs = coerce_type(rhs, var->type);
-                    builder_.create_store(rhs, var->alloca_id);
+                    if (var->is_raii) {
+                        emit_var_dtor(*var);
+                    }
+                    ir::IRType* rhs_t = builder_.get_function()->get_value(rhs).type;
+                    if (var->type && var->type->is_struct() && rhs_t && rhs_t->is_pointer()) {
+                        emit_copy_struct(var->alloca_id, rhs, var->type);
+                    } else {
+                        rhs = coerce_type(rhs, var->type);
+                        builder_.create_store(rhs, var->alloca_id);
+                    }
                     return rhs;
                 } else {
                     ir::ValueId cur = builder_.create_load(var->alloca_id, var_name);
@@ -2087,17 +2377,19 @@ int64_t grass_array_len(void* ptr) {
                             return base;
                         }
                     } else {
-                        // Field access e.g. this.name, hero.hp
+                        // Field access e.g. this.name, hero.hp, outer.inner.val
                         if (oop_mgr_ && !receiver_struct.empty()) {
                             std::string prev_struct = receiver_struct;
                             const auto* cd = oop_mgr_->get_class(prev_struct);
                             std::string next_struct = "";
+                            bool is_nested_val_struct = false;
                             if (cd) {
                                 auto fit = cd->field_indices.find(member_name);
                                 if (fit != cd->field_indices.end()) {
                                     const auto& fld = cd->fields[fit->second];
                                     if (fld.type) {
                                         if (fld.type->is_struct()) {
+                                            is_nested_val_struct = true;
                                             next_struct = fld.type->struct_name;
                                         } else if (fld.type->is_pointer() && fld.type->element_type && fld.type->element_type->is_struct()) {
                                             next_struct = fld.type->element_type->struct_name;
@@ -2105,7 +2397,11 @@ int64_t grass_array_len(void* ptr) {
                                     }
                                 }
                             }
-                            base = oop_mgr_->emit_load_field(builder_, base, prev_struct, member_name);
+                            if (is_nested_val_struct) {
+                                base = oop_mgr_->emit_field_gep(builder_, base, prev_struct, member_name);
+                            } else {
+                                base = oop_mgr_->emit_load_field(builder_, base, prev_struct, member_name);
+                            }
                             last_struct_name_ = next_struct;
                         }
                     }
@@ -2148,12 +2444,14 @@ int64_t grass_array_len(void* ptr) {
                             std::string prev_struct = receiver_struct;
                             const auto* cd = oop_mgr_->get_class(prev_struct);
                             std::string next_struct = "";
+                            bool is_nested_val_struct = false;
                             if (cd) {
                                 auto fit = cd->field_indices.find(member_name);
                                 if (fit != cd->field_indices.end()) {
                                     const auto& fld = cd->fields[fit->second];
                                     if (fld.type) {
                                         if (fld.type->is_struct()) {
+                                            is_nested_val_struct = true;
                                             next_struct = fld.type->struct_name;
                                         } else if (fld.type->is_pointer() && fld.type->element_type && fld.type->element_type->is_struct()) {
                                             next_struct = fld.type->element_type->struct_name;
@@ -2161,7 +2459,11 @@ int64_t grass_array_len(void* ptr) {
                                     }
                                 }
                             }
-                            base = oop_mgr_->emit_load_field(builder_, base, prev_struct, member_name);
+                            if (is_nested_val_struct) {
+                                base = oop_mgr_->emit_field_gep(builder_, base, prev_struct, member_name);
+                            } else {
+                                base = oop_mgr_->emit_load_field(builder_, base, prev_struct, member_name);
+                            }
                             last_struct_name_ = next_struct;
                         }
                     }
@@ -2393,7 +2695,13 @@ int64_t grass_array_len(void* ptr) {
                         }
                     }
 
-                    last_struct_name_.clear();
+                    if (call_ret_type && call_ret_type->is_struct()) {
+                        last_struct_name_ = call_ret_type->struct_name;
+                    } else if (call_ret_type && call_ret_type->is_pointer() && call_ret_type->element_type && call_ret_type->element_type->is_struct()) {
+                        last_struct_name_ = call_ret_type->element_type->struct_name;
+                    } else {
+                        last_struct_name_.clear();
+                    }
                     return builder_.create_call(target_fn ? target_fn->name : target_call_name, call_ret_type, args);
                 }
 
@@ -2624,7 +2932,7 @@ int64_t grass_array_len(void* ptr) {
                         uint32_t bytes = 8;
                         if (inst->type && inst->type->element_type) {
                             if (inst->type->element_type->is_struct()) {
-                                bytes = static_cast<uint32_t>(inst->type->element_type->struct_fields.size() * 8);
+                                bytes = static_cast<uint32_t>(inst->type->element_type->size());
                                 if (bytes == 0) bytes = 8;
                             }
                         }

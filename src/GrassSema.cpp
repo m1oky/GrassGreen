@@ -515,13 +515,18 @@ void GrassSema::pass1_registerDeclarations(const ProgramAST& program) {
             for (const auto& m : st->methods) {
                 FunctionSymbol msym;
                 msym.name = m->name;
-                msym.return_type = resolveType(m->return_type, m->return_pointer_depth, m->loc);
+                msym.return_type = m->is_destructor ? SemaType::Void() : resolveType(m->return_type, m->return_pointer_depth, m->loc);
                 msym.loc = m->loc;
                 msym.is_method = true;
+                msym.is_destructor = m->is_destructor;
                 msym.struct_name = qname;
                 msym.has_body = (m->body != nullptr);
                 for (const auto& p : m->params) {
                     msym.params.emplace_back(p.name, resolveType(p.type_name, p.pointer_depth, p.loc));
+                }
+                if (m->is_destructor) {
+                    sym.has_explicit_destructor = true;
+                    sym.has_destructor = true;
                 }
                 sym.methods[m->name] = msym;
             }
@@ -543,13 +548,18 @@ void GrassSema::pass1_registerDeclarations(const ProgramAST& program) {
             for (const auto& m : cls->methods) {
                 FunctionSymbol msym;
                 msym.name = m->name;
-                msym.return_type = resolveType(m->return_type, m->return_pointer_depth, m->loc);
+                msym.return_type = m->is_destructor ? SemaType::Void() : resolveType(m->return_type, m->return_pointer_depth, m->loc);
                 msym.loc = m->loc;
                 msym.is_method = true;
+                msym.is_destructor = m->is_destructor;
                 msym.struct_name = qname;
                 msym.has_body = (m->body != nullptr);
                 for (const auto& p : m->params) {
                     msym.params.emplace_back(p.name, resolveType(p.type_name, p.pointer_depth, p.loc));
+                }
+                if (m->is_destructor) {
+                    sym.has_explicit_destructor = true;
+                    sym.has_destructor = true;
                 }
                 sym.methods[m->name] = msym;
             }
@@ -597,6 +607,36 @@ void GrassSema::pass1_registerDeclarations(const ProgramAST& program) {
 
     for (const auto& decl : program.declarations) {
         register_decl(register_decl, decl.get());
+    }
+
+    // Transitive has_destructor propagation across struct fields and base classes
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (auto& kv : structs_) {
+            if (kv.second.has_destructor) continue;
+            bool need_dtor = false;
+            if (!kv.second.base_class.empty()) {
+                const StructSymbol* base = findStruct(kv.second.base_class);
+                if (base && base->has_destructor) need_dtor = true;
+            }
+            if (!need_dtor) {
+                for (const auto& fname : kv.second.field_order) {
+                    auto fit = kv.second.fields.find(fname);
+                    if (fit != kv.second.fields.end() && fit->second.is_struct()) {
+                        const StructSymbol* fstruct = findStruct(fit->second.name);
+                        if (fstruct && fstruct->has_destructor) {
+                            need_dtor = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (need_dtor) {
+                kv.second.has_destructor = true;
+                changed = true;
+            }
+        }
     }
 }
 
@@ -710,11 +750,32 @@ void GrassSema::checkFunctionDecl(const FunctionDeclAST* func) {
 }
 
 void GrassSema::checkStructDecl(const StructDeclAST* st) {
-    auto it = structs_.find(st->name);
+    auto it = structs_.find(qualifyName(st->name));
+    if (it == structs_.end()) it = structs_.find(st->name);
     if (it == structs_.end()) return;
     current_struct_ = &it->second;
 
+    int dtor_count = 0;
     for (const auto& m : st->methods) {
+        if (m->is_destructor) {
+            dtor_count++;
+            if (dtor_count > 1) {
+                reportError(m->loc,
+                    "Struct '" + st->name + "' cannot declare more than one destructor.",
+                    "Keep at most one destructor declaration per struct");
+            }
+            std::string dname = (!m->name.empty() && m->name[0] == '~') ? m->name.substr(1) : m->name;
+            if (dname != st->name) {
+                reportError(m->loc,
+                    "Destructor name '~" + dname + "' does not match struct name '" + st->name + "'.",
+                    "Rename destructor to '~" + st->name + "'");
+            }
+            if (!m->params.empty()) {
+                reportError(m->loc,
+                    "Destructor '~" + st->name + "()' cannot take any parameters.",
+                    "Remove parameters from '~" + st->name + "()'");
+            }
+        }
         auto mit = current_struct_->methods.find(m->name);
         if (mit == current_struct_->methods.end()) continue;
         const FunctionSymbol& msym = mit->second;
@@ -782,7 +843,27 @@ void GrassSema::checkClassDecl(const ClassDeclAST* cls) {
         }
     }
 
+    int dtor_count = 0;
     for (const auto& m : cls->methods) {
+        if (m->is_destructor) {
+            dtor_count++;
+            if (dtor_count > 1) {
+                reportError(m->loc,
+                    "Class '" + cls->name + "' cannot declare more than one destructor.",
+                    "Keep at most one destructor declaration per class");
+            }
+            std::string dname = (!m->name.empty() && m->name[0] == '~') ? m->name.substr(1) : m->name;
+            if (dname != cls->name) {
+                reportError(m->loc,
+                    "Destructor name '~" + dname + "' does not match class name '" + cls->name + "'.",
+                    "Rename destructor to '~" + cls->name + "'");
+            }
+            if (!m->params.empty()) {
+                reportError(m->loc,
+                    "Destructor '~" + cls->name + "()' cannot take any parameters.",
+                    "Remove parameters from '~" + cls->name + "()'");
+            }
+        }
         auto mit = current_struct_->methods.find(m->name);
         if (mit == current_struct_->methods.end()) continue;
         const FunctionSymbol& msym = mit->second;
@@ -942,6 +1023,13 @@ void GrassSema::checkVarDeclStmt(const VarDeclStmtAST* vdecl) {
     sym.is_const = vdecl->is_const;
     sym.is_initialized = (vdecl->init_expr != nullptr);
     current_scope_->declareVariable(sym);
+
+    if (decl_type.is_struct()) {
+        const StructSymbol* st_sym = findStruct(decl_type.name);
+        if (st_sym && st_sym->has_destructor) {
+            current_scope_->registerRAIIVariable(sym);
+        }
+    }
 }
 
 void GrassSema::checkAssignStmt(const AssignStmtAST* assign) {

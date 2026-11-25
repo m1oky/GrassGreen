@@ -139,9 +139,12 @@ namespace grass::native {
 
     void GrassNativeOOP::add_destructor() {
         if (!is_building_) return;
+        current_class_.has_destructor = true;
+        current_class_.has_explicit_destructor = true;
+        if (current_class_.find_method("dtor")) return;
         OOPMethod m;
         m.name = "dtor";
-        m.mangled_name = mangle_method_name(current_class_.name, "dtor");
+        m.mangled_name = get_destructor_name(current_class_.name);
         m.return_type = module_.context.get_void_type();
         m.is_destructor = true;
         current_class_.method_indices[m.name] = current_class_.methods.size();
@@ -190,6 +193,34 @@ namespace grass::native {
         if (total == 0) total = max_align;
         current_class_.total_size = total;
         current_class_.alignment = max_align;
+
+        // Check transitive destructor requirement from base class or struct fields
+        if (!current_class_.has_destructor && !current_class_.base_name.empty()) {
+            const OOPClassDef* base_cd = get_class(current_class_.base_name);
+            if (base_cd && base_cd->has_destructor) {
+                current_class_.has_destructor = true;
+            }
+        }
+        if (!current_class_.has_destructor) {
+            for (const auto& f : current_class_.fields) {
+                if (f.type && f.type->is_struct()) {
+                    const OOPClassDef* fcd = get_class(f.type->struct_name);
+                    if (fcd && fcd->has_destructor) {
+                        current_class_.has_destructor = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (current_class_.has_destructor && !current_class_.find_method("dtor")) {
+            OOPMethod m;
+            m.name = "dtor";
+            m.mangled_name = get_destructor_name(current_class_.name);
+            m.return_type = module_.context.get_void_type();
+            m.is_destructor = true;
+            current_class_.method_indices[m.name] = current_class_.methods.size();
+            current_class_.methods.push_back(m);
+        }
 
         // Build IR struct type
         std::vector<ir::IRType*> f_types;

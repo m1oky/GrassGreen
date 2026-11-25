@@ -631,6 +631,103 @@ bool BytecodeCompiler::isVarKeyword(const string& s) {
 
 void BytecodeCompiler::emitByte(uint8_t b) { code.push_back(b); }
 
+void BytecodeCompiler::pushVMScope() {
+    vm_scopes_.emplace_back();
+}
+
+void BytecodeCompiler::registerVMVarType(const std::string& var_name, const std::string& struct_name) {
+    if (vm_scopes_.empty()) pushVMScope();
+    auto& frame = vm_scopes_.back();
+    bool already_tracked = false;
+    for (const auto& d : frame.declared_var_types) {
+        if (d == var_name) { already_tracked = true; break; }
+    }
+    if (!already_tracked) {
+        for (const auto& s : frame.shadowed_var_types) {
+            if (s.first == var_name) { already_tracked = true; break; }
+        }
+    }
+    if (!already_tracked) {
+        auto it = var_struct_types.find(var_name);
+        if (it != var_struct_types.end()) {
+            frame.shadowed_var_types.push_back({ var_name, it->second });
+        } else {
+            frame.declared_var_types.push_back(var_name);
+        }
+    }
+    if (!struct_name.empty()) {
+        var_struct_types[var_name] = struct_name;
+    } else {
+        var_struct_types.erase(var_name);
+    }
+}
+
+void BytecodeCompiler::registerVMRAIIVar(const std::string& var_name, const std::string& struct_name) {
+    if (struct_name.empty()) return;
+    auto it = g_struct_registry.find(struct_name);
+    if (it == g_struct_registry.end() || !it->second.has_destructor) return;
+    if (vm_scopes_.empty()) pushVMScope();
+    vm_scopes_.back().raii_vars.push_back({ var_name, struct_name });
+}
+
+void BytecodeCompiler::emitVMDtorCall(const std::string& var_name, const std::string& struct_name) {
+    if (struct_name.empty()) return;
+    auto it = g_struct_registry.find(struct_name);
+    if (it == g_struct_registry.end() || !it->second.has_destructor) return;
+    emitByte(OP_LOAD_VAR); emitString(var_name);
+    std::string target_fn = struct_name + "__dtor";
+    if (user_functions.count(target_fn)) {
+        emitByte(OP_CALL_USER);
+        emitU32(user_functions[target_fn].entry_ip);
+    } else {
+        emitByte(OP_CALL_USER);
+        method_call_fixups.push_back({ code.size(), target_fn });
+        emitU32(0);
+    }
+    emitByte(OP_POP);
+}
+
+void BytecodeCompiler::emitVMScopesCleanupTo(size_t target_depth) {
+    for (size_t idx = vm_scopes_.size(); idx > target_depth; --idx) {
+        const auto& vars = vm_scopes_[idx - 1].raii_vars;
+        for (auto it = vars.rbegin(); it != vars.rend(); ++it) {
+            emitVMDtorCall(it->name, it->struct_type);
+        }
+    }
+}
+
+void BytecodeCompiler::emitVMFieldDtors(const std::string& struct_name) {
+    if (struct_name.empty()) return;
+    emitByte(OP_LOAD_VAR); emitString("this");
+    std::string target_fn = struct_name + "__dtor_fields";
+    if (user_functions.count(target_fn)) {
+        emitByte(OP_CALL_USER);
+        emitU32(user_functions[target_fn].entry_ip);
+    } else {
+        emitByte(OP_CALL_USER);
+        method_call_fixups.push_back({ code.size(), target_fn });
+        emitU32(0);
+    }
+    emitByte(OP_POP);
+}
+
+void BytecodeCompiler::popVMScope(bool emit_cleanups) {
+    if (vm_scopes_.empty()) return;
+    if (emit_cleanups) {
+        const auto& vars = vm_scopes_.back().raii_vars;
+        for (auto it = vars.rbegin(); it != vars.rend(); ++it) {
+            emitVMDtorCall(it->name, it->struct_type);
+        }
+    }
+    for (const auto& d : vm_scopes_.back().declared_var_types) {
+        var_struct_types.erase(d);
+    }
+    for (const auto& s : vm_scopes_.back().shadowed_var_types) {
+        var_struct_types[s.first] = s.second;
+    }
+    vm_scopes_.pop_back();
+}
+
 void BytecodeCompiler::emitU32(uint32_t v) {
     uint8_t bytes[4];
     memcpy(bytes, &v, 4);
@@ -948,24 +1045,34 @@ void BytecodeCompiler::parsePrimary() {
             }
         }
 
-        // Точка или стрелка как отдельный токен (с пробелами): obj . member / ptr -> member
+        // Точка или стрелка как отдельный токен: obj.member / outer.inner.val / obj.method(args)
         if (match(TOK_DOT) || match(TOK_ARROW)) {
             string member = advance().text;
-            if (match(TOK_LPAREN)) {
+            if ((member == "push" || member == "pop") && match(TOK_LPAREN)) {
                 if (member == "push") {
                     parseExpression();
                     consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
                     emitByte(OP_LOAD_VAR); emitString(name);
                     emitByte(OP_ARRAY_PUSH);
                     return;
-                } else if (member == "pop") {
+                } else {
                     consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
                     emitByte(OP_LOAD_VAR); emitString(name);
                     emitByte(OP_ARRAY_POP);
                     return;
-                } else {
-                    // Вызов метода структуры: obj.method(args...) -> Struct_method(obj, args...)
-                    emitByte(OP_LOAD_VAR); emitString(name);
+                }
+            }
+
+            emitByte(OP_LOAD_VAR); emitString(name);
+            string cur_struct;
+            if (var_struct_types.count(name)) {
+                cur_struct = var_struct_types[name];
+            } else if (name == "this" && !current_struct_context.empty()) {
+                cur_struct = current_struct_context;
+            }
+
+            while (true) {
+                if (match(TOK_LPAREN)) {
                     uint8_t argc = 1;
                     if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
                         do {
@@ -974,12 +1081,11 @@ void BytecodeCompiler::parsePrimary() {
                         } while (match(TOK_COMMA));
                     }
                     consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')' у метода '" + member + "'!");
+                    (void)argc;
 
                     string target_fn;
-                    if (var_struct_types.count(name)) {
-                        target_fn = var_struct_types[name] + "_" + member;
-                    } else if (name == "this" && !current_struct_context.empty()) {
-                        target_fn = current_struct_context + "_" + member;
+                    if (!cur_struct.empty()) {
+                        target_fn = cur_struct + "_" + member;
                     } else if (method_to_structs.count(member) && !method_to_structs[member].empty()) {
                         target_fn = method_to_structs[member][0] + "_" + member;
                     } else {
@@ -994,13 +1100,26 @@ void BytecodeCompiler::parsePrimary() {
                         method_call_fixups.push_back({code.size(), target_fn});
                         emitU32(0);
                     }
-                    return;
+                    cur_struct.clear();
+                } else {
+                    emitByte(OP_GET_FIELD); emitString(member);
+                    string next_struct;
+                    if (!cur_struct.empty() && g_struct_registry.count(cur_struct)) {
+                        const auto& sdef = g_struct_registry[cur_struct];
+                        auto fit = sdef.field_indices.find(member);
+                        if (fit != sdef.field_indices.end()) {
+                            next_struct = sdef.fields[fit->second].struct_name;
+                        }
+                    }
+                    cur_struct = next_struct;
                 }
-            } else {
-                emitByte(OP_LOAD_VAR); emitString(name);
-                emitByte(OP_GET_FIELD); emitString(member);
-                return;
+                if (match(TOK_DOT) || match(TOK_ARROW)) {
+                    member = advance().text;
+                } else {
+                    break;
+                }
             }
+            return;
         }
 
         // Конструктор структуры: Player()
@@ -1570,6 +1689,7 @@ void BytecodeCompiler::parseWindowBlock() {
 
 void BytecodeCompiler::parseBlock() {
     if (match(TOK_LBRACE)) {
+        pushVMScope();
         while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
             size_t before = cur;
             parseStatement();
@@ -1578,10 +1698,13 @@ void BytecodeCompiler::parseBlock() {
                 synchronize();
             }
         }
+        popVMScope(true);
         consume(TOK_RBRACE, "Ожидалась закрывающая фигурная скобка '}'!");
     } else {
         reportError(peek().line, "Ожидалась открывающая фигурная скобка '{' для блока кода!");
+        pushVMScope();
         parseStatement();
+        popVMScope(true);
     }
 }
 
@@ -1631,6 +1754,10 @@ void BytecodeCompiler::parseStepStatement() {
 void BytecodeCompiler::parseStatement() {
     if (match(TOK_SEMI)) return;
     if (peek().kind == TOK_RBRACE || peek().kind == TOK_EOF) return;
+    if (peek().kind == TOK_LBRACE) {
+        parseBlock();
+        return;
+    }
 
     // 0. РЕГИСТРАЦИЯ ПОДКЛЮЧЕННЫХ БИБЛИОТЕК (!GrassGreen!, !interface!, !database! и т.д.)
     if (peek().kind == TOK_LIB) {
@@ -2040,7 +2167,7 @@ void BytecodeCompiler::parseStatement() {
 
     // 1. ОБЪЯВЛЕНИЕ ФУНКЦИЙ (int main() {}, take my_func() {}, void my_func() {}, int64* get_ptr() {})
     bool is_func_decl = false;
-    if (peek().kind == TOK_IDENT && isTypeOrFuncKeyword(peek().text)) {
+    if (peek().kind == TOK_IDENT && (isTypeOrFuncKeyword(peek().text) || g_struct_registry.count(peek().text))) {
         size_t off = 1;
         while (peek(off).kind == TOK_STAR) off++;
         if (peek(off).kind == TOK_IDENT && peek(off + 1).kind == TOK_LPAREN) {
@@ -2051,7 +2178,7 @@ void BytecodeCompiler::parseStatement() {
         int fn_line = peek().line;
         requireLib("core", "!GrassGreen!", "объявление функции", fn_line);
 
-        advance();
+        string ret_type_tok = advance().text;
         while (match(TOK_STAR)) {}
         string fn_name = advance().text;
         while (match(TOK_COLON_COLON)) {
@@ -2060,12 +2187,15 @@ void BytecodeCompiler::parseStatement() {
         if (!current_ns_.empty() && fn_name.find("::") == string::npos) {
             fn_name = current_ns_ + "::" + fn_name;
         }
+        if (g_struct_registry.count(ret_type_tok)) {
+            var_struct_types["__fn_ret_" + fn_name] = ret_type_tok;
+        }
         vector<string> params;
 
         match(TOK_LPAREN);
         if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
             while (true) {
-                if (isTypeOrFuncKeyword(peek().text)) {
+                if (isTypeOrFuncKeyword(peek().text) || g_struct_registry.count(peek().text)) {
                     advance();
                     while (match(TOK_STAR)) {}
                 }
@@ -2102,7 +2232,16 @@ void BytecodeCompiler::parseStatement() {
 
         {
             FunctionContextGuard func_guard(inside_function, true);
+            auto saved_scopes = std::move(vm_scopes_);
+            auto saved_loop_depths = std::move(loop_scope_depths_);
+            auto saved_cont_depths = std::move(continue_scope_depths_);
+            vm_scopes_.clear();
+            loop_scope_depths_.clear();
+            continue_scope_depths_.clear();
             parseBlock();
+            vm_scopes_ = std::move(saved_scopes);
+            loop_scope_depths_ = std::move(saved_loop_depths);
+            continue_scope_depths_ = std::move(saved_cont_depths);
         }
 
         emitByte(OP_CONST_NUM);
@@ -2120,14 +2259,18 @@ void BytecodeCompiler::parseStatement() {
     }
 
     // Пространства имен namespace Name { ... }
-    if (peek().kind == TOK_NAMESPACE || matchIdent("namespace")) {
+    if (match(TOK_NAMESPACE) || matchIdent("namespace")) {
         if (peek().kind == TOK_IDENT) advance();
         while (match(TOK_COLON_COLON)) {
             if (peek().kind == TOK_IDENT) advance();
         }
         if (match(TOK_LBRACE)) {
             while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
+                size_t before_ns = cur;
                 parseStatement();
+                if (cur == before_ns && peek().kind != TOK_EOF && peek().kind != TOK_RBRACE) {
+                    advance();
+                }
             }
             match(TOK_RBRACE);
         }
@@ -2136,8 +2279,8 @@ void BytecodeCompiler::parseStatement() {
     }
 
     // Директива using
-    if (peek().kind == TOK_USING || matchIdent("using")) {
-        if (peek().kind == TOK_NAMESPACE || matchIdent("namespace")) advance();
+    if (match(TOK_USING) || matchIdent("using")) {
+        if (match(TOK_NAMESPACE) || matchIdent("namespace")) {}
         if (peek().kind == TOK_IDENT) advance();
         while (match(TOK_COLON_COLON)) {
             if (peek().kind == TOK_IDENT) advance();
@@ -2198,6 +2341,21 @@ void BytecodeCompiler::parseStatement() {
             emitDouble(0.0);
         }
         match(TOK_SEMI);
+        bool need_cleanup = !current_dtor_struct_.empty();
+        if (!need_cleanup) {
+            for (const auto& sc : vm_scopes_) {
+                if (!sc.raii_vars.empty()) { need_cleanup = true; break; }
+            }
+        }
+        if (need_cleanup) {
+            std::string tmp_ret = "__vm_ret_" + to_string(vm_temp_counter_++);
+            emitByte(OP_DEF_VAR); emitString(tmp_ret);
+            emitVMScopesCleanupTo(0);
+            if (!current_dtor_struct_.empty()) {
+                emitVMFieldDtors(current_dtor_struct_);
+            }
+            emitByte(OP_LOAD_VAR); emitString(tmp_ret);
+        }
         emitByte(OP_RET);
         return;
     }
@@ -2764,17 +2922,21 @@ void BytecodeCompiler::parseStatement() {
         while (peek(off).kind == TOK_STAR) off++;
         if (peek(off).kind == TOK_IDENT) {
             string s_name = advance().text;
-            while (match(TOK_STAR)) {}
+            bool is_explicit_ptr = false;
+            while (match(TOK_STAR)) is_explicit_ptr = true;
             string v_name = advance().text;
-            var_struct_types[v_name] = s_name;
+            registerVMVarType(v_name, s_name);
             if (match(TOK_ASSIGN)) {
                 parseExpression();
             } else {
                 emitByte(OP_NEW_STRUCT);
                 emitString(s_name);
             }
-            emitByte(OP_STORE_VAR);
+            emitByte(OP_DEF_VAR);
             emitString(v_name);
+            if (!is_explicit_ptr) {
+                registerVMRAIIVar(v_name, s_name);
+            }
             match(TOK_SEMI);
             return;
         }
@@ -2802,9 +2964,14 @@ void BytecodeCompiler::parseStatement() {
             while (match(TOK_STAR)) {}
             if (peek().kind != TOK_IDENT) break;
             string var_name = advance().text;
+            string inferred_struct;
             if (match(TOK_ASSIGN)) {
                 if (peek().kind == TOK_IDENT && g_struct_registry.count(peek().text) && peek(1).kind == TOK_LPAREN) {
-                    var_struct_types[var_name] = peek().text;
+                    inferred_struct = peek().text;
+                } else if (peek().kind == TOK_IDENT && peek(1).kind == TOK_LPAREN && var_struct_types.count("__fn_ret_" + peek().text)) {
+                    inferred_struct = var_struct_types["__fn_ret_" + peek().text];
+                } else if (peek().kind == TOK_IDENT && (peek(1).kind == TOK_SEMI || peek(1).kind == TOK_COMMA) && var_struct_types.count(peek().text)) {
+                    inferred_struct = var_struct_types[peek().text];
                 }
                 parseExpression();
             } else if (decl_kw == "array") {
@@ -2816,6 +2983,10 @@ void BytecodeCompiler::parseStatement() {
             }
             emitByte(OP_DEF_VAR);
             emitString(var_name);
+            if (!inferred_struct.empty()) {
+                registerVMVarType(var_name, inferred_struct);
+                registerVMRAIIVar(var_name, inferred_struct);
+            }
             if (!match(TOK_COMMA)) break;
         }
         match(TOK_SEMI);
@@ -2859,6 +3030,7 @@ void BytecodeCompiler::parseStatement() {
     // 8. ЦИКЛ FOR
     if (matchIdent("for")) {
         match(TOK_LPAREN);
+        pushVMScope();
         parseStatement();
 
         size_t loop_start = code.size();
@@ -2890,7 +3062,11 @@ void BytecodeCompiler::parseStatement() {
         patchU32(body_jmp_patch, (uint32_t)code.size());
         break_Fixups.push_back({});
         continue_Fixups.push_back({});
+        loop_scope_depths_.push_back(vm_scopes_.size());
+        continue_scope_depths_.push_back(vm_scopes_.size());
         parseBlock();
+        loop_scope_depths_.pop_back();
+        continue_scope_depths_.pop_back();
 
         emitByte(OP_JMP);
         emitU32((uint32_t)step_start);
@@ -2906,6 +3082,7 @@ void BytecodeCompiler::parseStatement() {
             patchU32(patch_pos, (uint32_t)step_start);
         }
         continue_Fixups.pop_back();
+        popVMScope(true);
         return;
     }
 
@@ -2925,7 +3102,11 @@ void BytecodeCompiler::parseStatement() {
 
         break_Fixups.push_back({});
         continue_Fixups.push_back({});
+        loop_scope_depths_.push_back(vm_scopes_.size());
+        continue_scope_depths_.push_back(vm_scopes_.size());
         parseBlock();
+        loop_scope_depths_.pop_back();
+        continue_scope_depths_.pop_back();
 
         emitByte(OP_JMP);
         emitU32((uint32_t)loop_start);
@@ -2984,7 +3165,11 @@ void BytecodeCompiler::parseStatement() {
 
         break_Fixups.push_back({});
         continue_Fixups.push_back({});
+        loop_scope_depths_.push_back(vm_scopes_.size());
+        continue_scope_depths_.push_back(vm_scopes_.size());
         parseBlock();
+        loop_scope_depths_.pop_back();
+        continue_scope_depths_.pop_back();
 
         emitByte(OP_JMP);
         emitU32((uint32_t)loop_start);
@@ -3006,6 +3191,9 @@ void BytecodeCompiler::parseStatement() {
     if (matchIdent("break") || matchIdent("stop") || matchIdent("stoped")) {
         if (match(TOK_LPAREN)) match(TOK_RPAREN);
         match(TOK_SEMI);
+        if (!loop_scope_depths_.empty()) {
+            emitVMScopesCleanupTo(loop_scope_depths_.back());
+        }
         emitByte(OP_JMP);
         size_t patch_pos = code.size();
         emitU32(0);
@@ -3021,6 +3209,9 @@ void BytecodeCompiler::parseStatement() {
         if (continue_Fixups.empty()) {
             reportError(peek(-1).line, "Оператор continue может использоваться только внутри циклов!");
             return;
+        }
+        if (!continue_scope_depths_.empty()) {
+            emitVMScopesCleanupTo(continue_scope_depths_.back());
         }
         emitByte(OP_JMP);
         size_t patch_pos = code.size();
@@ -3110,43 +3301,86 @@ void BytecodeCompiler::parseStatement() {
             }
             return;
         }
-        if ((peek(1).kind == TOK_DOT || peek(1).kind == TOK_ARROW) && peek(2).kind == TOK_IDENT &&
-            (peek(3).kind == TOK_ASSIGN || peek(3).kind == TOK_PLUS_ASSIGN ||
-             peek(3).kind == TOK_MINUS_ASSIGN || peek(3).kind == TOK_MUL_ASSIGN ||
-             peek(3).kind == TOK_DIV_ASSIGN)) {
-            string obj_name = advance().text;
-            advance(); // consume '.' or '->'
-            string field_name = advance().text;
-            GrassTokenKind op = advance().kind;
-            if (op == TOK_ASSIGN) {
-                parseExpression(); // value
-                match(TOK_SEMI);
-                emitByte(OP_LOAD_VAR); emitString(obj_name);
-                emitByte(OP_SET_FIELD); emitString(field_name);
-            } else {
-                emitByte(OP_LOAD_VAR); emitString(obj_name);
-                emitByte(OP_GET_FIELD); emitString(field_name);
-                parseExpression();
-                if (op == TOK_PLUS_ASSIGN) emitByte(OP_ADD);
-                else if (op == TOK_MINUS_ASSIGN) emitByte(OP_SUB);
-                else if (op == TOK_MUL_ASSIGN) emitByte(OP_MUL);
-                else emitByte(OP_DIV);
-                match(TOK_SEMI);
-                emitByte(OP_LOAD_VAR); emitString(obj_name);
-                emitByte(OP_SET_FIELD); emitString(field_name);
+        if (peek(1).kind == TOK_DOT || peek(1).kind == TOK_ARROW) {
+            int off = 1;
+            while ((peek(off).kind == TOK_DOT || peek(off).kind == TOK_ARROW) &&
+                   peek(off + 1).kind == TOK_IDENT) {
+                off += 2;
             }
-            return;
+            GrassTokenKind op = peek(off).kind;
+            if (off > 1 &&
+                (op == TOK_ASSIGN || op == TOK_PLUS_ASSIGN ||
+                 op == TOK_MINUS_ASSIGN || op == TOK_MUL_ASSIGN ||
+                 op == TOK_DIV_ASSIGN)) {
+                string obj_name = advance().text;
+                vector<string> member_chain;
+                while ((peek().kind == TOK_DOT || peek().kind == TOK_ARROW) && peek(1).kind == TOK_IDENT) {
+                    advance();
+                    member_chain.push_back(advance().text);
+                }
+                advance(); // consume assignment op
+                const string& last_field = member_chain.back();
+                if (op == TOK_ASSIGN) {
+                    parseExpression(); // value
+                    match(TOK_SEMI);
+                    emitByte(OP_LOAD_VAR); emitString(obj_name);
+                    for (size_t ci = 0; ci + 1 < member_chain.size(); ++ci) {
+                        emitByte(OP_GET_FIELD); emitString(member_chain[ci]);
+                    }
+                    emitByte(OP_SET_FIELD); emitString(last_field);
+                } else {
+                    emitByte(OP_LOAD_VAR); emitString(obj_name);
+                    for (size_t ci = 0; ci + 1 < member_chain.size(); ++ci) {
+                        emitByte(OP_GET_FIELD); emitString(member_chain[ci]);
+                    }
+                    emitByte(OP_GET_FIELD); emitString(last_field);
+                    parseExpression();
+                    if (op == TOK_PLUS_ASSIGN) emitByte(OP_ADD);
+                    else if (op == TOK_MINUS_ASSIGN) emitByte(OP_SUB);
+                    else if (op == TOK_MUL_ASSIGN) emitByte(OP_MUL);
+                    else emitByte(OP_DIV);
+                    match(TOK_SEMI);
+                    emitByte(OP_LOAD_VAR); emitString(obj_name);
+                    for (size_t ci = 0; ci + 1 < member_chain.size(); ++ci) {
+                        emitByte(OP_GET_FIELD); emitString(member_chain[ci]);
+                    }
+                    emitByte(OP_SET_FIELD); emitString(last_field);
+                }
+                return;
+            }
         }
         if (peek(1).kind == TOK_ASSIGN) {
             string var_name = advance().text;
             advance();
+            string old_raii_struct;
+            for (auto sit = vm_scopes_.rbegin(); sit != vm_scopes_.rend(); ++sit) {
+                for (auto vit = sit->raii_vars.rbegin(); vit != sit->raii_vars.rend(); ++vit) {
+                    if (vit->name == var_name) {
+                        old_raii_struct = vit->struct_type;
+                        break;
+                    }
+                }
+                if (!old_raii_struct.empty()) break;
+            }
+            string new_struct;
             if (peek().kind == TOK_IDENT && g_struct_registry.count(peek().text) && peek(1).kind == TOK_LPAREN) {
-                var_struct_types[var_name] = peek().text;
-            } else if (peek().kind == TOK_IDENT && var_struct_types.count(peek().text)) {
-                var_struct_types[var_name] = var_struct_types[peek().text];
+                new_struct = peek().text;
+            } else if (peek().kind == TOK_IDENT && peek(1).kind == TOK_LPAREN && var_struct_types.count("__fn_ret_" + peek().text)) {
+                new_struct = var_struct_types["__fn_ret_" + peek().text];
+            } else if (peek().kind == TOK_IDENT && (peek(1).kind == TOK_SEMI || peek(1).kind == TOK_COMMA) && var_struct_types.count(peek().text)) {
+                new_struct = var_struct_types[peek().text];
+            }
+            if (!new_struct.empty()) {
+                var_struct_types[var_name] = new_struct;
             }
             parseExpression();
             match(TOK_SEMI);
+            if (!old_raii_struct.empty()) {
+                string tmp = "__vm_assign_" + to_string(vm_temp_counter_++);
+                emitByte(OP_DEF_VAR); emitString(tmp);
+                emitVMDtorCall(var_name, old_raii_struct);
+                emitByte(OP_LOAD_VAR); emitString(tmp);
+            }
             emitByte(OP_STORE_VAR);
             emitString(var_name);
             return;
@@ -3269,21 +3503,90 @@ void BytecodeCompiler::parseStructDefinition() {
     def.name = sname;
     size_t cur_offset = 0;
     size_t max_align = 1;
+    bool has_explicit_dtor = false;
 
     while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
         if (match(TOK_SEMI)) continue;
 
+        if (match(TOK_TILDE)) {
+            string dname;
+            if (peek().kind == TOK_IDENT) {
+                dname = advance().text;
+            }
+            (void)dname;
+            match(TOK_LPAREN);
+            while (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) advance();
+            consume(TOK_RPAREN, "Expected ')' after destructor parameters!");
+
+            string fn_name = sname + "__dtor";
+            def.has_destructor = true;
+            has_explicit_dtor = true;
+            dtor_structs_[sname] = true;
+
+            emitByte(OP_JUMP);
+            size_t skip_patch = code.size();
+            emitU32(0);
+
+            vector<string> params = { "this" };
+            uint32_t entry_ip = (uint32_t)code.size();
+            user_functions[fn_name] = { entry_ip, params };
+            func_table[fn_name] = entry_ip;
+            struct_methods[sname].push_back("__dtor");
+            method_to_structs["__dtor"].push_back(sname);
+            def.methods.push_back("__dtor");
+
+            emitByte(OP_PARAM_PROLOGUE);
+            emitByte(OP_DEF_VAR); emitString("this");
+            emitByte(OP_PARAM_EPILOGUE);
+
+            string prev_struct = current_struct_context;
+            string prev_dtor = current_dtor_struct_;
+            auto saved_scopes = std::move(vm_scopes_);
+            auto saved_loop_depths = std::move(loop_scope_depths_);
+            auto saved_cont_depths = std::move(continue_scope_depths_);
+            vm_scopes_.clear();
+            loop_scope_depths_.clear();
+            continue_scope_depths_.clear();
+            current_struct_context = sname;
+            current_dtor_struct_ = sname;
+            {
+                FunctionContextGuard func_guard(inside_function, true);
+                parseBlock();
+            }
+            emitVMFieldDtors(sname);
+            emitByte(OP_CONST_NUM);
+            emitDouble(0.0);
+            emitByte(OP_RET);
+
+            current_dtor_struct_ = prev_dtor;
+            current_struct_context = prev_struct;
+            vm_scopes_ = std::move(saved_scopes);
+            loop_scope_depths_ = std::move(saved_loop_depths);
+            continue_scope_depths_ = std::move(saved_cont_depths);
+
+            patchU32(skip_patch, (uint32_t)code.size());
+            match(TOK_SEMI);
+            continue;
+        }
+
         bool is_method = false;
-        if (isTypeOrFuncKeyword(peek().text) && peek(1).kind == TOK_IDENT && peek(2).kind == TOK_LPAREN) {
-            is_method = true;
-        } else if (peek().kind == TOK_IDENT && peek(1).kind == TOK_LPAREN) {
+        if (isTypeOrFuncKeyword(peek().text) || g_struct_registry.count(peek().text)) {
+            int off = 1;
+            while (peek(off).kind == TOK_STAR) off++;
+            if (peek(off).kind == TOK_IDENT && peek(off + 1).kind == TOK_LPAREN) {
+                is_method = true;
+            }
+        }
+        if (!is_method && peek().kind == TOK_IDENT && peek(1).kind == TOK_LPAREN) {
             is_method = true;
         }
 
         if (is_method) {
             string mname;
-            if (isTypeOrFuncKeyword(peek().text) && peek(1).kind == TOK_IDENT) {
-                advance(); // consume return type / keyword (take / void / int)
+            if ((isTypeOrFuncKeyword(peek().text) || g_struct_registry.count(peek().text)) &&
+                (peek(1).kind == TOK_IDENT || peek(1).kind == TOK_STAR)) {
+                advance(); // consume return type / keyword
+                while (match(TOK_STAR)) {}
                 mname = advance().text;
             } else {
                 mname = advance().text;
@@ -3295,8 +3598,10 @@ void BytecodeCompiler::parseStructDefinition() {
 
             if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
                 while (true) {
-                    if (isTypeOrFuncKeyword(peek().text) && peek(1).kind == TOK_IDENT) {
+                    if ((isTypeOrFuncKeyword(peek().text) || g_struct_registry.count(peek().text)) &&
+                        (peek(1).kind == TOK_IDENT || peek(1).kind == TOK_STAR)) {
                         advance();
+                        while (match(TOK_STAR)) {}
                     }
                     params.push_back(advance().text);
                     if (!match(TOK_COMMA)) break;
@@ -3329,12 +3634,21 @@ void BytecodeCompiler::parseStructDefinition() {
             }
 
             string prev_struct = current_struct_context;
+            auto saved_scopes = std::move(vm_scopes_);
+            auto saved_loop_depths = std::move(loop_scope_depths_);
+            auto saved_cont_depths = std::move(continue_scope_depths_);
+            vm_scopes_.clear();
+            loop_scope_depths_.clear();
+            continue_scope_depths_.clear();
             current_struct_context = sname;
             {
                 FunctionContextGuard func_guard(inside_function, true);
                 parseBlock();
             }
             current_struct_context = prev_struct;
+            vm_scopes_ = std::move(saved_scopes);
+            loop_scope_depths_ = std::move(saved_loop_depths);
+            continue_scope_depths_ = std::move(saved_cont_depths);
 
             emitByte(OP_CONST_NUM);
             emitDouble(0.0);
@@ -3348,13 +3662,16 @@ void BytecodeCompiler::parseStructDefinition() {
         // 1. C-style: string name; или int hp;
         // 2. RoadMap-style: hp: u32, или x: u64
         string f_type, f_name;
+        bool is_field_ptr = false;
         if (peek(1).kind == TOK_ASSIGN || peek(1).kind == TOK_COLON) {
             f_name = advance().text;
             advance(); // consume ':' / '='
             f_type = advance().text;
+            while (match(TOK_STAR)) is_field_ptr = true;
             if (match(TOK_COMMA) || match(TOK_SEMI)) {}
         } else {
             f_type = advance().text;
+            while (match(TOK_STAR)) is_field_ptr = true;
             f_name = advance().text;
             if (match(TOK_SEMI) || match(TOK_COMMA)) {}
         }
@@ -3362,8 +3679,11 @@ void BytecodeCompiler::parseStructDefinition() {
         GrassFieldType ft = GrassFieldType::VALUE;
         size_t f_size = 8;
         size_t f_align = 8;
+        string f_struct_name;
 
-        if (f_type == "u8" || f_type == "uint8" || f_type == "char" || f_type == "byte") {
+        if (is_field_ptr) {
+            ft = GrassFieldType::U64; f_size = 8; f_align = 8;
+        } else if (f_type == "u8" || f_type == "uint8" || f_type == "char" || f_type == "byte") {
             ft = GrassFieldType::U8; f_size = 1; f_align = 1;
         } else if (f_type == "bool") {
             ft = GrassFieldType::BOOL; f_size = 1; f_align = 1;
@@ -3381,6 +3701,12 @@ void BytecodeCompiler::parseStructDefinition() {
             ft = GrassFieldType::DOUBLE; f_size = 8; f_align = 8;
         } else if (f_type == "string" || f_type == "str") {
             ft = GrassFieldType::STRING; f_size = 8; f_align = 8;
+        } else if (g_struct_registry.count(f_type)) {
+            ft = GrassFieldType::VALUE; f_size = 8; f_align = 8;
+            f_struct_name = f_type;
+            if (g_struct_registry[f_type].has_destructor) {
+                def.has_destructor = true;
+            }
         } else {
             ft = GrassFieldType::VALUE; f_size = 8; f_align = 8;
         }
@@ -3394,6 +3720,7 @@ void BytecodeCompiler::parseStructDefinition() {
         fd.offset = cur_offset;
         fd.size = f_size;
         fd.alignment = f_align;
+        fd.struct_name = f_struct_name;
 
         def.field_indices[f_name] = def.fields.size();
         def.fields.push_back(fd);
@@ -3409,7 +3736,69 @@ void BytecodeCompiler::parseStructDefinition() {
     def.total_size = (cur_offset + max_align - 1) & ~(max_align - 1);
     if (def.total_size == 0) def.total_size = 1;
 
+    if (def.has_destructor) {
+        dtor_structs_[sname] = true;
+    }
     g_struct_registry[sname] = def;
+
+    auto emit_field_dtor_loop = [&]() {
+        for (auto it = def.fields.rbegin(); it != def.fields.rend(); ++it) {
+            if (it->struct_name.empty()) continue;
+            auto fit = g_struct_registry.find(it->struct_name);
+            if (fit == g_struct_registry.end() || !fit->second.has_destructor) continue;
+            emitByte(OP_LOAD_VAR); emitString("this");
+            emitByte(OP_GET_FIELD); emitString(it->name);
+            string target_fn = it->struct_name + "__dtor";
+            if (user_functions.count(target_fn)) {
+                emitByte(OP_CALL_USER);
+                emitU32(user_functions[target_fn].entry_ip);
+            } else {
+                emitByte(OP_CALL_USER);
+                method_call_fixups.push_back({ code.size(), target_fn });
+                emitU32(0);
+            }
+            emitByte(OP_POP);
+        }
+    };
+
+    if (has_explicit_dtor) {
+        string fields_fn = sname + "__dtor_fields";
+        emitByte(OP_JUMP);
+        size_t skip_patch = code.size();
+        emitU32(0);
+        uint32_t entry_ip = (uint32_t)code.size();
+        vector<string> params = { "this" };
+        user_functions[fields_fn] = { entry_ip, params };
+        func_table[fields_fn] = entry_ip;
+        emitByte(OP_PARAM_PROLOGUE);
+        emitByte(OP_DEF_VAR); emitString("this");
+        emitByte(OP_PARAM_EPILOGUE);
+        emit_field_dtor_loop();
+        emitByte(OP_CONST_NUM);
+        emitDouble(0.0);
+        emitByte(OP_RET);
+        patchU32(skip_patch, (uint32_t)code.size());
+    } else if (def.has_destructor) {
+        string dtor_fn = sname + "__dtor";
+        emitByte(OP_JUMP);
+        size_t skip_patch = code.size();
+        emitU32(0);
+        uint32_t entry_ip = (uint32_t)code.size();
+        vector<string> params = { "this" };
+        user_functions[dtor_fn] = { entry_ip, params };
+        func_table[dtor_fn] = entry_ip;
+        struct_methods[sname].push_back("__dtor");
+        method_to_structs["__dtor"].push_back(sname);
+        g_struct_registry[sname].methods.push_back("__dtor");
+        emitByte(OP_PARAM_PROLOGUE);
+        emitByte(OP_DEF_VAR); emitString("this");
+        emitByte(OP_PARAM_EPILOGUE);
+        emit_field_dtor_loop();
+        emitByte(OP_CONST_NUM);
+        emitDouble(0.0);
+        emitByte(OP_RET);
+        patchU32(skip_patch, (uint32_t)code.size());
+    }
 }
 
 void BytecodeCompiler::parseVFSBody() {
@@ -4259,10 +4648,27 @@ std::unique_ptr<StructDeclAST> GrassParser::parseStruct() {
 
     while (!check(TOK_RBRACE) && !isAtEnd()) {
         if (match(TOK_SEMI)) continue;
+        if (match(TOK_TILDE)) {
+            SourceLocation dloc = peek(-1).loc(filename);
+            if (peek().kind != TOK_IDENT) {
+                reportError(peek().loc(filename), "Expected struct name after '~'", "Declare destructor as ~" + sname + "()");
+                synchronize();
+                continue;
+            }
+            std::string dname = advance().text;
+            auto dtor = parseFunction("void", 0, "~" + dname);
+            dtor->loc = dloc;
+            dtor->is_method = true;
+            dtor->is_destructor = true;
+            methods.push_back(std::move(dtor));
+            continue;
+        }
         if (checkIdent("fn")) {
             advance();
             std::string fname = advance().text;
-            methods.push_back(parseFunction("auto", 0, fname));
+            auto fn = parseFunction("auto", 0, fname);
+            fn->is_method = true;
+            methods.push_back(std::move(fn));
             continue;
         }
         if (isTypeName(peek().text)) {
@@ -4271,7 +4677,9 @@ std::unique_ptr<StructDeclAST> GrassParser::parseStruct() {
             if (peek().kind == TOK_IDENT) {
                 std::string fname = advance().text;
                 if (check(TOK_LPAREN)) {
-                    methods.push_back(parseFunction(tname, ptr, fname));
+                    auto fn = parseFunction(tname, ptr, fname);
+                    fn->is_method = true;
+                    methods.push_back(std::move(fn));
                 } else {
                     fields.emplace_back(tname, fname, ptr, peek(-1).loc(filename));
                     match(TOK_SEMI);
@@ -4323,10 +4731,27 @@ std::unique_ptr<ClassDeclAST> GrassParser::parseClass() {
 
     while (!check(TOK_RBRACE) && !isAtEnd()) {
         if (match(TOK_SEMI)) continue;
+        if (match(TOK_TILDE)) {
+            SourceLocation dloc = peek(-1).loc(filename);
+            if (peek().kind != TOK_IDENT) {
+                reportError(peek().loc(filename), "Expected class name after '~'", "Declare destructor as ~" + cname + "()");
+                synchronize();
+                continue;
+            }
+            std::string dname = advance().text;
+            auto dtor = parseFunction("void", 0, "~" + dname);
+            dtor->loc = dloc;
+            dtor->is_method = true;
+            dtor->is_destructor = true;
+            methods.push_back(std::move(dtor));
+            continue;
+        }
         if (checkIdent("fn")) {
             advance();
             std::string fname = advance().text;
-            methods.push_back(parseFunction("auto", 0, fname));
+            auto fn = parseFunction("auto", 0, fname);
+            fn->is_method = true;
+            methods.push_back(std::move(fn));
             continue;
         }
         if (isTypeName(peek().text)) {
@@ -4335,7 +4760,9 @@ std::unique_ptr<ClassDeclAST> GrassParser::parseClass() {
             if (peek().kind == TOK_IDENT) {
                 std::string fname = advance().text;
                 if (check(TOK_LPAREN)) {
-                    methods.push_back(parseFunction(tname, ptr, fname));
+                    auto fn = parseFunction(tname, ptr, fname);
+                    fn->is_method = true;
+                    methods.push_back(std::move(fn));
                 } else {
                     fields.emplace_back(tname, fname, ptr, peek(-1).loc(filename));
                     match(TOK_SEMI);

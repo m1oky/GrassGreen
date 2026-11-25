@@ -150,6 +150,7 @@ struct FunctionSymbol {
     bool has_body = false;
     bool is_method = false;
     bool is_variadic = false;
+    bool is_destructor = false;
     std::string struct_name;
 };
 
@@ -160,6 +161,8 @@ struct StructSymbol {
     std::unordered_map<std::string, FunctionSymbol> methods;
     SourceLocation loc;
     std::string base_class;
+    bool has_destructor = false;
+    bool has_explicit_destructor = false;
 };
 
 struct ModuleSymbol {
@@ -196,6 +199,7 @@ public:
     Kind kind;
     Scope* parent = nullptr;
     std::unordered_map<std::string, VariableSymbol> variables;
+    std::vector<VariableSymbol> raii_variables;
 
     explicit Scope(Kind k, Scope* p = nullptr) : kind(k), parent(p) {}
 
@@ -205,6 +209,10 @@ public:
         }
         variables[sym.name] = sym;
         return true;
+    }
+
+    void registerRAIIVariable(const VariableSymbol& sym) {
+        raii_variables.push_back(sym);
     }
 
     VariableSymbol* lookupVariable(const std::string& name) {

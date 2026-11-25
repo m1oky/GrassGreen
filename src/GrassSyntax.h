@@ -252,6 +252,7 @@ struct GrassFieldDef {
     size_t offset;
     size_t size;
     size_t alignment;
+    std::string struct_name;
 };
 
 struct GrassStructDef {
@@ -261,6 +262,7 @@ struct GrassStructDef {
     std::vector<std::string> methods;
     size_t total_size = 0;
     size_t alignment = 1;
+    bool has_destructor = false;
 };
 
 struct GrassStructInstance {
@@ -488,6 +490,30 @@ class BytecodeCompiler {
     std::string current_ns_;
     std::vector<std::string> using_namespaces_;
     std::unordered_map<std::string, std::string> using_symbols_;
+
+    struct VMScopeVar {
+        std::string name;
+        std::string struct_type;
+    };
+    struct VMScopeFrame {
+        std::vector<VMScopeVar> raii_vars;
+        std::vector<std::pair<std::string, std::string>> shadowed_var_types;
+        std::vector<std::string> declared_var_types;
+    };
+    std::vector<VMScopeFrame> vm_scopes_;
+    std::vector<size_t> loop_scope_depths_;
+    std::vector<size_t> continue_scope_depths_;
+    int vm_temp_counter_ = 0;
+    std::string current_dtor_struct_;
+    std::unordered_map<std::string, bool> dtor_structs_;
+
+    void pushVMScope();
+    void popVMScope(bool emit_cleanups = true);
+    void registerVMVarType(const std::string& var_name, const std::string& struct_name);
+    void registerVMRAIIVar(const std::string& var_name, const std::string& struct_name);
+    void emitVMDtorCall(const std::string& var_name, const std::string& struct_name);
+    void emitVMScopesCleanupTo(size_t target_depth);
+    void emitVMFieldDtors(const std::string& struct_name);
 
     std::string resolveUserFunc(const std::string& name) const;
 
@@ -858,13 +884,15 @@ struct FunctionDeclAST : public DeclAST {
     std::unique_ptr<BlockStmtAST> body;
     bool is_method = false;
     bool is_virtual = false;
+    bool is_destructor = false;
 
     FunctionDeclAST(const SourceLocation& l, const std::string& ret_type, int ret_ptr,
                     const std::string& n, std::vector<ParamDecl> p,
-                    std::unique_ptr<BlockStmtAST> b, bool method = false, bool virt = false)
+                    std::unique_ptr<BlockStmtAST> b, bool method = false, bool virt = false,
+                    bool dtor = false)
         : DeclAST(NodeKind::FunctionDecl, l), return_type(ret_type), return_pointer_depth(ret_ptr),
           name(n), params(std::move(p)), body(std::move(b)),
-          is_method(method), is_virtual(virt) {}
+          is_method(method), is_virtual(virt), is_destructor(dtor) {}
 };
 
 struct StructDeclAST : public DeclAST {
