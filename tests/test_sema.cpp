@@ -1,5 +1,5 @@
-#include "GrassSyntax.h"
-#include "GrassSema.h"
+#include "frontend/GrassSyntax.h"
+#include "frontend/GrassSema.h"
 #include <iostream>
 #include <string>
 #include <vector>

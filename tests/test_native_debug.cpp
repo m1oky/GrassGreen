@@ -1,7 +1,7 @@
-#include "../src/GrassNativeDebug.h"
-#include "../src/GrassX86Encoder.h"
-#include "../src/GrassNativeCodegen.h"
-#include "../src/GrassIR.h"
+#include "native/GrassNativeDebug.h"
+#include "native/GrassX86Encoder.h"
+#include "native/GrassNativeCodegen.h"
+#include "native/GrassIR.h"
 
 #include <iostream>
 #include <vector>

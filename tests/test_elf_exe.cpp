@@ -6,7 +6,7 @@
 #include <fstream>
 #include <iomanip>
 
-#include "GrassElfWriter.h"
+#include "native/GrassElfWriter.h"
 
 using namespace grass::backend;
 

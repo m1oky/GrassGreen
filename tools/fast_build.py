@@ -6,51 +6,51 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
 SRCS = [
-    "src/grassc.cpp",
-    "src/GrassHAL.cpp",
-    "src/GrassMMIO.cpp",
-    "src/GrassASM.cpp",
-    "src/GrassKeyboard.cpp",
-    "src/GrassBoot.cpp",
-    "src/GrassThread.cpp",
-    "src/GrassJIT.cpp",
-    "src/GrassImport.cpp",
-    "src/GrassOptimizer.cpp",
-    "src/GrassSyntax.cpp",
-    "src/GrassProc.cpp",
-    "src/GrassFsys.cpp",
-    "src/GrassTime.cpp",
-    "src/GrassNet.cpp",
-    "src/GrassJson.cpp",
-    "src/GrassSys.cpp",
-    "src/gui_engine.cpp",
-    "src/GrassWeb.cpp",
-    "src/GSE.cpp",
-    "src/FastMath.cpp",
-    "src/CoreMath.cpp",
-    "src/GrassMemory.cpp",
-    "src/GrassRandom.cpp",
-    "src/GrassAudio.cpp",
-    "src/GrassTg.cpp",
-    "src/Grass2DGraphics.cpp",
-    "src/GrassHardware.cpp",
-    "src/GrassBaremetal.cpp",
-    "src/GrassFFI.cpp",
-    "src/GrassLangGen.cpp",
-    "src/GrassMath3D.cpp",
-    "src/GrassGfx3D.cpp",
-    "src/GrassPhysics.cpp",
-    "src/GrassIR.cpp",
-    "src/GrassX86Encoder.cpp",
-    "src/GrassObjWriter.cpp",
-    "src/GrassElfWriter.cpp",
-    "src/GrassAdvancedOpt.cpp",
-    "src/GrassNativeCodegen.cpp",
-    "src/GrassNativeDebug.cpp",
-    "src/GrassSema.cpp",
-    "src/GrassNativeOOP.cpp",
-    "src/GrassNativeMemory.cpp",
-    "src/GrassNativeStdlib.cpp"
+    "src/cli/grassc.cpp",
+    "src/frontend/GrassSyntax.cpp",
+    "src/frontend/GrassSema.cpp",
+    "src/frontend/GrassImport.cpp",
+    "src/frontend/GrassLangGen.cpp",
+    "src/native/GrassIR.cpp",
+    "src/native/GrassNativeCodegen.cpp",
+    "src/native/GrassNativeOOP.cpp",
+    "src/native/GrassNativeMemory.cpp",
+    "src/native/GrassNativeStdlib.cpp",
+    "src/native/GrassNativeDebug.cpp",
+    "src/native/GrassAdvancedOpt.cpp",
+    "src/native/GrassX86Encoder.cpp",
+    "src/native/GrassObjWriter.cpp",
+    "src/native/GrassElfWriter.cpp",
+    "src/vm/GrassOptimizer.cpp",
+    "src/vm/GrassJIT.cpp",
+    "src/vm/GrassMemory.cpp",
+    "src/vm/GrassFFI.cpp",
+    "src/baremetal/GrassBoot.cpp",
+    "src/baremetal/GrassBaremetal.cpp",
+    "src/baremetal/GrassHAL.cpp",
+    "src/baremetal/GrassMMIO.cpp",
+    "src/baremetal/GrassASM.cpp",
+    "src/baremetal/GrassKeyboard.cpp",
+    "src/baremetal/GSE.cpp",
+    "src/runtime/GrassFsys.cpp",
+    "src/runtime/GrassNet.cpp",
+    "src/runtime/GrassWeb.cpp",
+    "src/runtime/GrassThread.cpp",
+    "src/runtime/GrassTime.cpp",
+    "src/runtime/GrassProc.cpp",
+    "src/runtime/GrassSys.cpp",
+    "src/runtime/GrassRandom.cpp",
+    "src/runtime/GrassJson.cpp",
+    "src/runtime/GrassTg.cpp",
+    "src/runtime/GrassHardware.cpp",
+    "src/media/Grass2DGraphics.cpp",
+    "src/media/GrassGfx3D.cpp",
+    "src/media/gui_engine.cpp",
+    "src/media/GrassAudio.cpp",
+    "src/media/GrassPhysics.cpp",
+    "src/media/CoreMath.cpp",
+    "src/media/FastMath.cpp",
+    "src/media/GrassMath3D.cpp"
 ]
 
 LIBS = [
@@ -92,7 +92,7 @@ def compile_file(src):
         return (src, True, "")
 
     cmd = [
-        "g++", "-std=c++20", "-O3", "-Iinclude", "-MMD", "-MF", d_path,
+        "g++", "-std=c++20", "-O3", "-Isrc", "-Iinclude", "-MMD", "-MF", d_path,
         "-c", src, "-o", obj_path
     ]
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -148,19 +148,19 @@ def main():
     print("[GrassCompiler] Updated bin/grg.exe")
 
     # 2. Build gpm.exe if needed or out of date
-    gpm_src = "src/gpm.cpp"
+    gpm_src = "src/cli/gpm.cpp"
     gpm_exe = os.path.join(BIN_DIR, "gpm.exe")
     if os.path.exists(gpm_src) and (not os.path.exists(gpm_exe) or os.path.getmtime(gpm_src) > os.path.getmtime(gpm_exe)):
         print("[GrassCompiler] Building gpm package manager...")
-        subprocess.run(["g++", "-std=c++17", "-O3", "-Iinclude", gpm_src, "-o", gpm_exe], check=False)
+        subprocess.run(["g++", "-std=c++17", "-O3", "-Isrc", "-Iinclude", gpm_src, "-o", gpm_exe], check=False)
 
     # 3. Build grassvm.dll if needed or out of date
-    vm_src = "src/grassvm_capi.cpp"
+    vm_src = "src/vm/grassvm_capi.cpp"
     vm_dll = os.path.join(BIN_DIR, "grassvm.dll")
     vm_lib = os.path.join(BIN_DIR, "grassvm.lib")
     if os.path.exists(vm_src) and (not os.path.exists(vm_dll) or os.path.getmtime(vm_src) > os.path.getmtime(vm_dll)):
         print("[GrassCompiler] Building libgrassvm embedded library...")
-        subprocess.run(["g++", "-std=c++17", "-O3", "-shared", vm_src, "-Iinclude", "-o", vm_dll, f"-Wl,--out-implib,{vm_lib}"], check=False)
+        subprocess.run(["g++", "-std=c++17", "-O3", "-shared", vm_src, "-Isrc", "-Iinclude", "-o", vm_dll, f"-Wl,--out-implib,{vm_lib}"], check=False)
 
     # 4. Synchronize and deploy to C:\GrassGreen if directory exists
     install_root = r"C:\GrassGreen"

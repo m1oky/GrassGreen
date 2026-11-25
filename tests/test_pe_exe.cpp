@@ -7,7 +7,7 @@
 #include <cstdio>
 #include <sstream>
 
-#include "../src/GrassObjWriter.h"
+#include "native/GrassObjWriter.h"
 
 using namespace grass::backend;
 

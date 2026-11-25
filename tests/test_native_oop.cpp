@@ -3,9 +3,9 @@
 #include <string>
 #include <vector>
 
-#include "GrassIR.h"
-#include "GrassNativeMemory.h"
-#include "GrassNativeOOP.h"
+#include "native/GrassIR.h"
+#include "native/GrassNativeMemory.h"
+#include "native/GrassNativeOOP.h"
 
 using namespace grass;
 using namespace grass::native;

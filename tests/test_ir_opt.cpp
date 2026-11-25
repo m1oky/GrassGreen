@@ -2,8 +2,8 @@
 #include <cassert>
 #include <string>
 
-#include "GrassIR.h"
-#include "GrassAdvancedOpt.h"
+#include "native/GrassIR.h"
+#include "native/GrassAdvancedOpt.h"
 
 using namespace grass::ir;
 using namespace grass::opt;

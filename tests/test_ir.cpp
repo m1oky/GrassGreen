@@ -5,7 +5,7 @@
 #include <set>
 #include <algorithm>
 
-#include "../src/GrassIR.h"
+#include "native/GrassIR.h"
 
 using namespace grass::ir;
 
