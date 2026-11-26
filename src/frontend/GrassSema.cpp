@@ -41,6 +41,16 @@ void GrassSema::registerBuiltins() {
     add_builtin("grass_print_char", SemaType::Void(), {SemaType::Int()});
     add_builtin("gout_flush", SemaType::Void(), {});
     add_builtin("len", SemaType::Int(), {SemaType::Any()});
+    add_builtin("to_str", SemaType::String(), {SemaType::Any()});
+    add_builtin("to_string", SemaType::String(), {SemaType::Any()});
+    add_builtin("to_num", SemaType::Float(), {SemaType::Any()});
+    add_builtin("typeof", SemaType::String(), {SemaType::Any()});
+    add_builtin("upper", SemaType::String(), {SemaType::String()});
+    add_builtin("lower", SemaType::String(), {SemaType::String()});
+    add_builtin("trim", SemaType::String(), {SemaType::String()});
+    add_builtin("substr", SemaType::String(), {SemaType::String(), SemaType::Int()}, true);
+    add_builtin("replace", SemaType::String(), {SemaType::String(), SemaType::String(), SemaType::String()});
+    add_builtin("contains", SemaType::Bool(), {SemaType::String(), SemaType::String()});
     add_builtin("discor", SemaType::Float(), {SemaType::Float()});
 
     // Math functions
@@ -576,7 +586,7 @@ void GrassSema::registerBuiltins() {
     add_builtin("set_text", SemaType::Void(), {SemaType::String(), SemaType::String()});
     add_builtin("get_text", SemaType::String(), {SemaType::String()});
     add_builtin("set_val", SemaType::Void(), {SemaType::String(), SemaType::Any()});
-    add_builtin("get_val", SemaType::Float(), {SemaType::String()});
+    add_builtin("get_val", SemaType::Any(), {SemaType::String()});
     add_builtin("set_color", SemaType::Void(), {SemaType::String(), SemaType::String()});
     add_builtin("set_bg", SemaType::Void(), {SemaType::String(), SemaType::String()});
     add_builtin("set_visible", SemaType::Void(), {SemaType::String(), SemaType::Any()});
@@ -1432,7 +1442,7 @@ void GrassSema::checkAssignStmt(const AssignStmtAST* assign) {
         reportError(assign->loc,
             "Cannot shallow-copy assign value of type '" + val_type.toString() + "' to '" + tgt_type.toString() + "'.",
             "Use pointers 'vec<T>*' instead of copying RAII vec containers");
-    } else if (!val_type.is_assignable_to(tgt_type)) {
+    } else if (!val_type.is_assignable_to(tgt_type, strict_mode_)) {
         reportError(assign->loc,
             "Cannot assign value of type '" + val_type.toString() + "' to variable of type '" + tgt_type.toString() + "'.",
             "Ensure types match in assignment");

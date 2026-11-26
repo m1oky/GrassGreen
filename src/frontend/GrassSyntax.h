@@ -1048,6 +1048,8 @@ private:
     // Statements & Declarations
     std::unique_ptr<StmtAST> parseStatement();
     std::unique_ptr<BlockStmtAST> parseBlock();
+    bool isUIDSLBlockStart() const;
+    std::unique_ptr<StmtAST> parseUIDSLBlock(bool is_window);
     std::unique_ptr<StmtAST> parseVarDecl(const std::string& type_name, int ptr_depth, bool is_const);
     std::unique_ptr<StmtAST> parseIf();
     std::unique_ptr<StmtAST> parseWhile();

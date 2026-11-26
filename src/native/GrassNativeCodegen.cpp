@@ -1621,18 +1621,57 @@ int64_t memory_free_block(int64_t block_addr) {
                 builder_.create_call("not_clear_on", ctx_.get_void_type(), {});
                 return true;
             }
-            if (peek().kind == TOK_IDENT && peek().text == "window" && peek(1).kind == TOK_LBRACE) {
-                advance(); advance(); // 'window', '{'
-                int depth = 1;
-                while (depth > 0 && peek().kind != TOK_EOF) {
-                    if (peek().kind == TOK_LBRACE) depth++;
-                    else if (peek().kind == TOK_RBRACE) depth--;
-                    advance();
+            if (peek().kind == TOK_IDENT &&
+                (peek().text == "window" || peek().text == "tabs" || peek().text == "row" ||
+                 peek().text == "col" || peek().text == "panel" || peek().text == "group" ||
+                 peek().text == "card" || peek().text == "grid" || peek().text == "vbox" ||
+                 peek().text == "hbox" || peek().text == "header-bar" || peek().text == "tab" ||
+                 peek().text == "button" || peek().text == "label" || peek().text == "slider" ||
+                 peek().text == "checkbox" || peek().text == "progress" || peek().text == "enter" ||
+                 peek().text == "clock" || peek().text == "list" || peek().text == "scroll-box") &&
+                (peek(1).kind == TOK_LBRACE || peek(1).kind == TOK_STRING ||
+                 peek(1).kind == TOK_LPAREN || peek(1).kind == TOK_ASSIGN)) {
+                bool is_win = (peek().text == "window");
+                if (peek(1).kind == TOK_LPAREN && !is_win &&
+                    peek().text != "tabs" && peek().text != "row" && peek().text != "col" &&
+                    peek().text != "panel" && peek().text != "group" && peek().text != "card" &&
+                    peek().text != "tab") {
+                    // Only treat widget(params) { ... } as UI-DSL if '{' follows ')'
+                    size_t scan = 2;
+                    int pd = 1;
+                    while (pd > 0 && peek((int)scan).kind != TOK_EOF) {
+                        if (peek((int)scan).kind == TOK_LPAREN) pd++;
+                        else if (peek((int)scan).kind == TOK_RPAREN) pd--;
+                        scan++;
+                    }
+                    if (peek((int)scan).kind != TOK_LBRACE) goto not_ui_dsl_block;
+                }
+                advance(); // keyword
+                while (peek().kind != TOK_LBRACE && peek().kind != TOK_SEMI && peek().kind != TOK_EOF) {
+                    if (match(TOK_LPAREN)) {
+                        int pd = 1;
+                        while (pd > 0 && peek().kind != TOK_EOF) {
+                            if (peek().kind == TOK_LPAREN) pd++;
+                            else if (peek().kind == TOK_RPAREN) pd--;
+                            advance();
+                        }
+                    } else {
+                        advance();
+                    }
+                }
+                if (match(TOK_LBRACE)) {
+                    int depth = 1;
+                    while (depth > 0 && peek().kind != TOK_EOF) {
+                        if (peek().kind == TOK_LBRACE) depth++;
+                        else if (peek().kind == TOK_RBRACE) depth--;
+                        advance();
+                    }
                 }
                 match(TOK_SEMI);
-                builder_.create_call("gui_show", ctx_.get_void_type(), {});
+                if (is_win) builder_.create_call("gui_show", ctx_.get_void_type(), {});
                 return true;
             }
+            not_ui_dsl_block:
             if (peek().kind == TOK_IDENT && peek().text == "agent" && peek(1).kind == TOK_LBRACE) {
                 advance(); advance(); // 'agent', '{'
                 int depth = 1;
@@ -3327,7 +3366,33 @@ int64_t memory_free_block(int64_t block_addr) {
 
                     std::string target_call_name = resolve_callee(ident);
                     ir::IRType* call_ret_type = ctx_.get_i64_type();
-                    if (ident == "len" || ident == "size") {
+                    if ((ident == "to_str" || ident == "to_string") && !args.empty()) {
+                        ir::IRType* at0 = builder_.get_function()->has_value(args[0]) ? builder_.get_function()->get_value(args[0]).type : nullptr;
+                        if (at0 && at0->is_floating_point()) {
+                            ident = "grass_float_to_str";
+                            target_call_name = ident;
+                            call_ret_type = ctx_.get_ptr_type(ctx_.get_i8_type());
+                        } else if (at0 && at0->is_pointer()) {
+                            last_struct_name_.clear();
+                            return args[0];
+                        } else {
+                            ident = "int_to_str";
+                            target_call_name = ident;
+                            call_ret_type = ctx_.get_ptr_type(ctx_.get_i8_type());
+                        }
+                    } else if (ident == "upper" && !args.empty()) {
+                        ident = "grass_to_upper";
+                        target_call_name = ident;
+                        call_ret_type = ctx_.get_ptr_type(ctx_.get_i8_type());
+                    } else if (ident == "lower" && !args.empty()) {
+                        ident = "grass_to_lower";
+                        target_call_name = ident;
+                        call_ret_type = ctx_.get_ptr_type(ctx_.get_i8_type());
+                    } else if (ident == "trim" && !args.empty()) {
+                        ident = "grass_trim";
+                        target_call_name = ident;
+                        call_ret_type = ctx_.get_ptr_type(ctx_.get_i8_type());
+                    } else if (ident == "len" || ident == "size") {
                         ident = "grass_array_len";
                         target_call_name = ident;
                     } else if (ident == "alloc") {

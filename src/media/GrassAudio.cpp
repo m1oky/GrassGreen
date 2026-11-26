@@ -28,13 +28,7 @@ namespace GrassAudio {
     static std::atomic<uint32_t> g_sfx_counter{0};
 
     void init() {
-#if defined(_WIN32)
-        if (!g_audio_initialized.exchange(true)) {
-            timeBeginPeriod(1);
-        }
-#else
         g_audio_initialized = true;
-#endif
     }
 
 #if defined(_WIN32)
@@ -126,20 +120,29 @@ namespace GrassAudio {
             wfx.nBlockAlign = (wfx.nChannels * wfx.wBitsPerSample) / 8;
             wfx.nAvgBytesPerSec = wfx.nSamplesPerSec * wfx.nBlockAlign;
 
-            HWAVEOUT hWaveOut = NULL;
-            if (waveOutOpen(&hWaveOut, WAVE_MAPPER, &wfx, 0, 0, CALLBACK_NULL) == MMSYSERR_NOERROR) {
-                WAVEHDR hdr = {};
-                hdr.lpData = (LPSTR)samples.data();
-                hdr.dwBufferLength = (DWORD)(samples.size() * sizeof(int16_t));
-                waveOutPrepareHeader(hWaveOut, &hdr, sizeof(WAVEHDR));
-                waveOutWrite(hWaveOut, &hdr, sizeof(WAVEHDR));
+            HANDLE hDoneEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+            if (hDoneEvent) {
+                HWAVEOUT hWaveOut = NULL;
+                if (waveOutOpen(&hWaveOut, WAVE_MAPPER, &wfx, (DWORD_PTR)hDoneEvent, 0, CALLBACK_EVENT) == MMSYSERR_NOERROR) {
+                    WAVEHDR hdr = {};
+                    hdr.lpData = (LPSTR)samples.data();
+                    hdr.dwBufferLength = (DWORD)(samples.size() * sizeof(int16_t));
+                    waveOutPrepareHeader(hWaveOut, &hdr, sizeof(WAVEHDR));
+                    ResetEvent(hDoneEvent);
+                    waveOutWrite(hWaveOut, &hdr, sizeof(WAVEHDR));
 
-                while (!(hdr.dwFlags & WHDR_DONE)) {
-                    Sleep(2);
+                    DWORD max_wait_ms = (DWORD)(duration_ms + 5000);
+                    while (!(hdr.dwFlags & WHDR_DONE)) {
+                        DWORD wr = WaitForSingleObject(hDoneEvent, max_wait_ms);
+                        if (wr == WAIT_TIMEOUT || wr == WAIT_FAILED) break;
+                    }
+
+                    waveOutUnprepareHeader(hWaveOut, &hdr, sizeof(WAVEHDR));
+                    waveOutClose(hWaveOut);
+                } else {
+                    beep(freq_hz, duration_ms);
                 }
-
-                waveOutUnprepareHeader(hWaveOut, &hdr, sizeof(WAVEHDR));
-                waveOutClose(hWaveOut);
+                CloseHandle(hDoneEvent);
             } else {
                 beep(freq_hz, duration_ms);
             }
@@ -259,10 +262,6 @@ namespace GrassAudio {
 
     void cleanup() {
         sound_stop();
-#if defined(_WIN32)
-        if (g_audio_initialized.exchange(false)) {
-            timeEndPeriod(1);
-        }
-#endif
+        g_audio_initialized = false;
     }
 }

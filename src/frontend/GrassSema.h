@@ -120,7 +120,7 @@ struct SemaType {
             if (kind == SemaTypeKind::Int || kind == SemaTypeKind::Any) return true;
             return false;
         }
-        if (target.kind == SemaTypeKind::Float && kind == SemaTypeKind::Int) return true;
+        if (target.is_numeric() && is_numeric()) return true;
         return equals(target);
     }
 

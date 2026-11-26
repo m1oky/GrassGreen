@@ -750,6 +750,28 @@ GRG_API void gui_cmd(const char* cmd) { if (cmd) GrassGUI::exec_command(cmd); }
 GRG_API void gui_show(void) { GrassGUI::show_window(); }
 GRG_API const char* gui_get(const char* id) { return capi_intern_str(GrassGUI::get_input_value(id ? id : "")); }
 GRG_API void gui_set(const char* k, const char* v) { GrassGUI::set_variable(k ? k : "", v ? v : ""); }
+GRG_API const char* grass_float_to_str(double v) {
+    std::ostringstream ss;
+    ss << v;
+    return capi_intern_str(ss.str());
+}
+GRG_API const char* grass_to_upper(const char* s) {
+    std::string res = s ? s : "";
+    for (char& c : res) c = (char)std::toupper((unsigned char)c);
+    return capi_intern_str(res);
+}
+GRG_API const char* grass_to_lower(const char* s) {
+    std::string res = s ? s : "";
+    for (char& c : res) c = (char)std::tolower((unsigned char)c);
+    return capi_intern_str(res);
+}
+GRG_API const char* grass_trim(const char* s) {
+    std::string res = s ? s : "";
+    size_t first = res.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return capi_intern_str("");
+    size_t last = res.find_last_not_of(" \t\r\n");
+    return capi_intern_str(res.substr(first, last - first + 1));
+}
 GRG_API void surface(const char* mode) { GrassGUI::set_surface_mode(mode ? mode : "auto"); }
 GRG_API void auto_size_display(void) { GrassGUI::auto_size_display(true); }
 GRG_API void set_text(const char* id, const char* txt) { GrassGUI::set_text(id ? id : "", txt ? txt : ""); }

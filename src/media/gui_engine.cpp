@@ -484,6 +484,10 @@ namespace GrassGUI {
         return current_active_tab;
     }
 
+#if defined(_WIN32)
+    static void sync_render_timer(HWND hwnd);
+#endif
+
     void switch_tab(const string& tab_name) {
         current_active_tab = stripQuotes(tab_name);
         // Запуск анимации появления элементов для новой вкладки
@@ -499,9 +503,12 @@ namespace GrassGUI {
                 }
             }
         }
+#if defined(_WIN32)
         if (g_hwnd_main && IsWindow(g_hwnd_main)) {
+            sync_render_timer(g_hwnd_main);
             InvalidateRect(g_hwnd_main, NULL, FALSE);
         }
+#endif
     }
 
     void enable_particles(int count, COLORREF col, float speed) {
@@ -1233,6 +1240,60 @@ using namespace std;
         }
     }
 
+    // --- Адаптивное управление таймером отрисовки (без холостого 60 FPS спина) ---
+    static UINT g_active_timer_ms = 0;
+    static ULONGLONG g_last_caret_toggle_tick = 0;
+
+    static UINT compute_desired_timer_ms(HWND hwnd) {
+        bool iconic = (hwnd && IsIconic(hwnd));
+        if (!iconic && particles_active) {
+            return 16;
+        }
+        bool has_active_anim = false;
+        bool has_clock = false;
+        if (!iconic) {
+            for (const auto& elem : elements) {
+                if (!is_elem_visible(elem)) continue;
+                if (elem.is_clock) has_clock = true;
+                if (elem.animated && (elem.anim_progress < 1.0f || elem.anim_type == "pulse" || elem.anim_type == "glow")) {
+                    has_active_anim = true;
+                    break;
+                }
+            }
+        }
+        if (has_active_anim) return 16;
+
+        UINT best_ms = 0;
+        auto consider = [&](UINT ms) {
+            if (ms < 16) ms = 16;
+            if (best_ms == 0 || ms < best_ms) best_ms = ms;
+        };
+
+        for (const auto& t : g_window_timers) {
+            if (t.callback_ip != 0 && t.interval_ms > 0) {
+                consider((UINT)t.interval_ms);
+            }
+        }
+        if (!iconic) {
+            if (focused_elem_idx != -1) consider(500);
+            if (has_clock) consider(1000);
+        }
+        return best_ms;
+    }
+
+    static void sync_render_timer(HWND hwnd) {
+        if (!hwnd || !IsWindow(hwnd)) return;
+        UINT desired = compute_desired_timer_ms(hwnd);
+        if (desired == g_active_timer_ms) return;
+        if (g_active_timer_ms != 0) {
+            KillTimer(hwnd, 1);
+        }
+        if (desired != 0) {
+            SetTimer(hwnd, 1, desired, NULL);
+        }
+        g_active_timer_ms = desired;
+    }
+
     // --- Обработчик оконных сообщений Win32 ---
 
     LRESULT CALLBACK MainWndProc(HWND hwnd, UINT uMsg, WPARAM wp, LPARAM lp) {
@@ -1259,11 +1320,12 @@ using namespace std;
             }
 
             case WM_TIMER: {
-                if (wp == 1) { // 60 FPS Анимации и Частицы
-                    caret_pulse_phase += 0.14f;
+                if (wp == 1) {
+                    bool iconic = IsIconic(hwnd);
+                    uint64_t now_ticks = GetTickCount64();
+                    bool need_redraw = false;
 
-                    // Обновление частиц
-                    if (particles_active) {
+                    if (!iconic && particles_active) {
                         for (auto& p : g_particles) {
                             p.x += p.vx;
                             p.y += p.vy;
@@ -1274,59 +1336,75 @@ using namespace std;
                             p.pulse_t += p.pulse_speed;
                             p.alpha = p.base_alpha * (0.6f + 0.4f * sinf(p.pulse_t));
                         }
+                        need_redraw = true;
                     }
 
-                    // Обновление анимаций элементов
-                    bool need_redraw = particles_active || (focused_elem_idx != -1);
+                    if (!iconic && focused_elem_idx != -1) {
+                        if (g_active_timer_ms <= 60) {
+                            caret_pulse_phase += 0.14f;
+                            need_redraw = true;
+                        } else if (now_ticks - g_last_caret_toggle_tick >= 450) {
+                            caret_pulse_phase += 3.14159f;
+                            g_last_caret_toggle_tick = now_ticks;
+                            need_redraw = true;
+                        }
+                    }
 
                     // Обновление реактивных таймеров every(ms)
                     if (!g_window_timers.empty()) {
-                        uint64_t now_ticks = GetTickCount64();
                         for (auto& t : g_window_timers) {
                             if (t.callback_ip != 0 && (now_ticks - t.last_tick >= (uint64_t)t.interval_ms)) {
                                 t.last_tick = now_ticks;
                                 if (g_vm_callback_runner) {
                                     g_vm_callback_runner(t.callback_ip);
+                                    if (!iconic) need_redraw = true;
+                                }
+                            }
+                        }
+                    }
+
+                    if (!iconic) {
+                        bool has_clock = false;
+                        for (const auto& elem : elements) {
+                            if (elem.is_clock) { has_clock = true; break; }
+                        }
+                        if (has_clock) {
+                            SYSTEMTIME st;
+                            GetLocalTime(&st);
+                            static int last_clock_second = -1;
+                            if (st.wSecond != last_clock_second) {
+                                last_clock_second = st.wSecond;
+                                for (auto& elem : elements) {
+                                    if (elem.is_clock) {
+                                        elem.text = format_current_time(st, elem.clock_format);
+                                        need_redraw = true;
+                                    }
+                                }
+                            }
+                        }
+
+                        for (auto& elem : elements) {
+                            if (elem.animated) {
+                                if (elem.anim_progress < 1.0f) {
+                                    elem.anim_progress = min(1.0f, elem.anim_progress + 0.05f);
+                                    elem.alpha = (int)(255 * elem.anim_progress);
+                                    if (elem.anim_type == "slide-up") {
+                                        elem.y = (int)(elem.orig_y + 15 * (1.0f - elem.anim_progress));
+                                    }
+                                    need_redraw = true;
+                                }
+                                if (elem.anim_type == "pulse" || elem.anim_type == "glow") {
+                                    elem.pulse_phase += 0.08f;
                                     need_redraw = true;
                                 }
                             }
                         }
                     }
 
-                    // Обновление виджетов часов (Clock widget) раз в секунду
-                    SYSTEMTIME st;
-                    GetLocalTime(&st);
-                    static int last_clock_second = -1;
-                    if (st.wSecond != last_clock_second) {
-                        last_clock_second = st.wSecond;
-                        for (auto& elem : elements) {
-                            if (elem.is_clock) {
-                                elem.text = format_current_time(st, elem.clock_format);
-                                need_redraw = true;
-                            }
-                        }
-                    }
-
-                    for (auto& elem : elements) {
-                        if (elem.animated) {
-                            if (elem.anim_progress < 1.0f) {
-                                elem.anim_progress = min(1.0f, elem.anim_progress + 0.05f);
-                                elem.alpha = (int)(255 * elem.anim_progress);
-                                if (elem.anim_type == "slide-up") {
-                                    elem.y = (int)(elem.orig_y + 15 * (1.0f - elem.anim_progress));
-                                }
-                                need_redraw = true;
-                            }
-                            if (elem.anim_type == "pulse" || elem.anim_type == "glow") {
-                                elem.pulse_phase += 0.08f;
-                                need_redraw = true;
-                            }
-                        }
-                    }
-
-                    if (need_redraw) {
+                    if (need_redraw && !iconic) {
                         InvalidateRect(hwnd, NULL, FALSE);
                     }
+                    sync_render_timer(hwnd);
                 }
                 break;
             }
@@ -1417,6 +1495,7 @@ using namespace std;
 
                     InvalidateRect(hwnd, NULL, FALSE);
                 }
+                sync_render_timer(hwnd);
                 return 0;
             }
 
@@ -1763,6 +1842,8 @@ using namespace std;
                                 elem.is_focused = true;
                                 elem.caret_pos = elem.text.length();
                                 caret_pulse_phase = 0.0f;
+                                g_last_caret_toggle_tick = GetTickCount64();
+                                sync_render_timer(hwnd);
                                 InvalidateRect(hwnd, NULL, FALSE);
                             }
                             break;
@@ -1775,6 +1856,7 @@ using namespace std;
                         elements[focused_elem_idx].is_focused = false;
                     }
                     focused_elem_idx = -1;
+                    sync_render_timer(hwnd);
                     InvalidateRect(hwnd, NULL, FALSE);
                 }
 
@@ -2420,6 +2502,7 @@ using namespace std;
 
             case WM_DESTROY:
                 KillTimer(hwnd, 1);
+                g_active_timer_ms = 0;
                 if (pBgImage) { delete pBgImage; pBgImage = NULL; }
                 g_hwnd_main = NULL;
                 PostQuitMessage(0);
@@ -2468,6 +2551,7 @@ using namespace std;
         window_is_topmost = false;
         window_z_index = 0;
         g_hwnd_main = NULL;
+        g_active_timer_ms = 0;
         g_window_timers.clear();
         g_vm_callback_runner = nullptr;
         g_hovered_tooltip.clear();
@@ -3384,8 +3468,9 @@ using namespace std;
             }
         }
 
-        // Запуск таймера отрисовки 60 FPS (анимации, частицы, дышащая каретка)
-        SetTimer(hwndMain, 1, 16, NULL);
+        // Адаптивный таймер отрисовки (запускается только при наличии анимаций/таймеров/часов)
+        g_active_timer_ms = 0;
+        sync_render_timer(hwndMain);
 
         if (start_in_fullscreen) {
             ShowWindow(hwndMain, SW_MAXIMIZE);
@@ -3702,5 +3787,10 @@ using namespace std;
         te.callback_ip = callback_ip;
         te.last_tick = GetTickCount64();
         g_window_timers.push_back(te);
+#if defined(_WIN32)
+        if (g_hwnd_main && IsWindow(g_hwnd_main)) {
+            sync_render_timer(g_hwnd_main);
+        }
+#endif
     }
 }

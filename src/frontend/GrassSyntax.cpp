@@ -201,13 +201,15 @@ vector<GrassToken> Lexer::tokenize() {
             "header-buttons-offset", "header-buttons-pos", "header-text-color",
             "header-title-align", "auto-size-display", "border-radius-app",
             "placeholder-color", "header-buttons", "header-height",
-            "header-color", "window-border", "active-color", "hover-color",
-            "button-color", "click-switch", "click-synth", "click-sound",
-            "hover-synth", "hover-sound", "on-click",
-            "on-change", "scroll-box", "add-item", "header-align", "font-weight",
-            "clock-format", "time-format", "center-all", "font-style",
-            "text-color", "font-size", "window-ob", "align-all",
-            "size-top", "click-ob", "z-index"
+            "header-color", "window-border", "border-radius", "active-color",
+            "hover-color", "button-color", "click-switch", "click-synth",
+            "click-sound", "hover-synth", "hover-sound", "header-align",
+            "clock-format", "scroll-box", "font-weight", "time-format",
+            "header-bar", "center-all", "font-style", "text-color",
+            "fill-color", "font-size", "window-ob", "align-all",
+            "on-change", "bar-color", "tab-color", "bg-color",
+            "add-item", "click-ob", "on-click", "on-timer",
+            "size-top", "z-index"
         };
         bool matched_hk = false;
         for (const char* kw : kHyphenKeywords) {
@@ -1547,6 +1549,38 @@ bool BytecodeCompiler::parseSingleGuiDirective() {
         return true;
     }
 
+    // Контейнеры UI-DSL без обязательного заголовка: tabs { ... }, row { ... }, col { ... }, panel { ... }
+    if (cmd == "tabs" || cmd == "row" || cmd == "col" || cmd == "panel" ||
+        cmd == "group" || cmd == "card" || cmd == "grid" || cmd == "vbox" ||
+        cmd == "hbox" || cmd == "header-bar") {
+        advance();
+        string container_arg = "";
+        if (match(TOK_LPAREN)) {
+            int pdepth = 1;
+            while (pdepth > 0 && peek().kind != TOK_EOF) {
+                if (peek().kind == TOK_LPAREN) pdepth++;
+                else if (peek().kind == TOK_RPAREN) {
+                    pdepth--;
+                    if (pdepth == 0) { advance(); break; }
+                }
+                if (!container_arg.empty()) container_arg += " ";
+                container_arg += advance().text;
+            }
+        } else if (peek().kind == TOK_STRING) {
+            container_arg = advance().text;
+        }
+        if (match(TOK_LBRACE)) {
+            while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
+                if (!parseSingleGuiDirective()) advance();
+            }
+            consume(TOK_RBRACE, "Ожидалась закрывающая фигурная скобка '}'!");
+            match(TOK_SEMI);
+            return true;
+        }
+        match(TOK_SEMI);
+        return true;
+    }
+
     // Реактивный таймер: every(1000) { ... } / on_timer(ms) { ... }
     if (cmd == "every" || cmd == "on_timer" || cmd == "timer") {
         advance();
@@ -1752,16 +1786,18 @@ bool BytecodeCompiler::parseSingleGuiDirective() {
             emitUICmd("id(" + inline_id + ")");
         }
 
-        if (!match(TOK_LBRACE)) {
-            reportError(el_line, "Элемент '" + cmd + "' в едином синтаксисе GrassGreen должен открывать блок свойств '{ ... }'!");
+        if (match(TOK_LBRACE)) {
+            while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
+                if (!parseSingleGuiDirective()) advance();
+            }
+            consume(TOK_RBRACE, "Ожидалась закрывающая фигурная скобка '}'!");
+            match(TOK_SEMI);
             return true;
         }
-
-        while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
-            if (!parseSingleGuiDirective()) advance();
+        if (match(TOK_SEMI)) {
+            return true;
         }
-        consume(TOK_RBRACE, "Ожидалась закрывающая фигурная скобка '}'!");
-        match(TOK_SEMI);
+        reportError(el_line, "Элемент '" + cmd + "' в едином синтаксисе GrassGreen должен открывать блок свойств '{ ... }' или заканчиваться ';'!");
         return true;
     }
 
@@ -1932,6 +1968,19 @@ bool BytecodeCompiler::parseSingleGuiDirective() {
         return true;
     }
 
+    // Любые прочие дефисные UI-директивы внутри UI-блока (border-radius(...), bg-color(...), font-weight(...))
+    if (cmd.find('-') != string::npos) {
+        advance();
+        string arg = "";
+        if (peek().kind == TOK_LPAREN) {
+            arg = extractParenArgsAsString();
+        } else {
+            match(TOK_SEMI);
+        }
+        emitUICmd(arg.empty() ? cmd : (cmd + "(" + arg + ")"));
+        return true;
+    }
+
     return false;
 }
 
@@ -2075,7 +2124,7 @@ void BytecodeCompiler::parseStatement() {
             included_libs.insert("fsys");
         } else if (lib == "!GrassNet!" || lib == "!net!") {
             included_libs.insert("net");
-        } else if (lib == "!interface!" || lib == "!gui!" || lib == "!GrassGUI!") {
+        } else if (lib == "!interface!" || lib == "!gui!" || lib == "!GrassGUI!" || lib == "!disp!" || lib == "!Disp!") {
             included_libs.insert("gui");
         } else if (lib == "!time!") {
             included_libs.insert("time");
@@ -4823,6 +4872,148 @@ std::unique_ptr<ExprAST> GrassParser::parsePrimary() {
     return nullptr;
 }
 
+static bool isUIDSLContainerOrWidgetName(const std::string& t) {
+    return t == "window" || t == "tabs" || t == "row" || t == "col" || t == "panel" ||
+           t == "group" || t == "card" || t == "grid" || t == "vbox" || t == "hbox" ||
+           t == "header-bar" || t == "tab" || t == "header" ||
+           t == "button" || t == "label" || t == "enter" || t == "icon" ||
+           t == "video" || t == "svg" || t == "clock" || t == "progress" ||
+           t == "slider" || t == "checkbox" || t == "list" || t == "scroll-box";
+}
+
+static bool isUIDSLCallbackName(const std::string& t) {
+    return t == "on_click" || t == "on-click" || t == "on_change" || t == "on-change" ||
+           t == "every" || t == "on_timer" || t == "timer";
+}
+
+static bool isUIDSLPropertyName(const std::string& t) {
+    if (t.find('-') != std::string::npos) return true;
+    if (t.rfind("animate-", 0) == 0) return true;
+    return t == "title" || t == "name" || t == "name_el" || t == "size" || t == "height" ||
+           t == "color" || t == "bg" || t == "background" || t == "theme" || t == "fon" ||
+           t == "header" || t == "iconP" || t == "id" || t == "pos" || t == "position" || t == "align" ||
+           t == "radius" || t == "pad" || t == "shadow" || t == "glass" || t == "topmost" ||
+           t == "layer" || t == "fullscreen" || t == "fullscrean" || t == "surface" ||
+           t == "auto_size_display" || t == "layout" || t == "engine" || t == "vd_plus" ||
+           t == "vdplus" || t == "particles" || t == "animate" || t == "gradient" ||
+           t == "glow" || t == "border" || t == "placeholder" || t == "tooltip" ||
+           t == "cursor" || t == "disabled" || t == "val" || t == "value" || t == "percent" ||
+           t == "item" || t == "add_item" || t == "switch" || t == "switch_tab" ||
+           t == "run" || t == "action" || t == "middle" || t == "center" || t == "left" ||
+           t == "right" || t == "clock" || t == "clear" || t == "show";
+}
+
+bool GrassParser::isUIDSLBlockStart() const {
+    if (peek().kind != TOK_IDENT) return false;
+    const std::string& cmd = peek().text;
+    if (!isUIDSLContainerOrWidgetName(cmd)) return false;
+
+    const GrassToken& t1 = peek(1);
+    if (t1.kind == TOK_LBRACE) return true;
+    if (t1.kind == TOK_STRING) return true;
+    if (t1.kind == TOK_IDENT && peek(2).kind == TOK_ASSIGN) return true;
+    if (t1.kind == TOK_ASSIGN && (cmd == "tab" || cmd == "button" || cmd == "label" ||
+        cmd == "enter" || cmd == "slider" || cmd == "checkbox" || cmd == "progress" ||
+        cmd == "clock" || cmd == "list")) {
+        return true;
+    }
+    if (t1.kind == TOK_LPAREN) {
+        size_t idx = cur + 2;
+        int pdepth = 1;
+        while (idx < tokens.size() && pdepth > 0 && tokens[idx].kind != TOK_EOF) {
+            if (tokens[idx].kind == TOK_LPAREN) pdepth++;
+            else if (tokens[idx].kind == TOK_RPAREN) pdepth--;
+            idx++;
+        }
+        if (idx < tokens.size() && tokens[idx].kind == TOK_LBRACE) return true;
+    }
+    return false;
+}
+
+std::unique_ptr<StmtAST> GrassParser::parseUIDSLBlock(bool is_window) {
+    auto loc = advance().loc(filename); // consume keyword
+    while (!check(TOK_LBRACE) && !check(TOK_SEMI) && !isAtEnd()) {
+        if (match(TOK_LPAREN)) {
+            int pdepth = 1;
+            while (pdepth > 0 && !isAtEnd()) {
+                if (peek().kind == TOK_LPAREN) pdepth++;
+                else if (peek().kind == TOK_RPAREN) pdepth--;
+                advance();
+            }
+        } else {
+            advance();
+        }
+    }
+
+    std::vector<std::unique_ptr<StmtAST>> stmts;
+    if (match(TOK_LBRACE)) {
+        while (!check(TOK_RBRACE) && !isAtEnd()) {
+            if (match(TOK_SEMI)) continue;
+
+            if (peek().kind == TOK_IDENT && isUIDSLCallbackName(peek().text)) {
+                advance();
+                if (match(TOK_LPAREN)) {
+                    int pdepth = 1;
+                    while (pdepth > 0 && !isAtEnd()) {
+                        if (peek().kind == TOK_LPAREN) pdepth++;
+                        else if (peek().kind == TOK_RPAREN) pdepth--;
+                        advance();
+                    }
+                } else if (peek().kind == TOK_NUMBER) {
+                    advance();
+                }
+                if (check(TOK_LBRACE)) {
+                    auto cb_block = parseBlock();
+                    if (cb_block) stmts.push_back(std::move(cb_block));
+                    match(TOK_SEMI);
+                } else {
+                    match(TOK_SEMI);
+                }
+                continue;
+            }
+
+            if (isUIDSLBlockStart()) {
+                bool sub_is_window = checkIdent("window");
+                auto sub = parseUIDSLBlock(sub_is_window);
+                if (sub) stmts.push_back(std::move(sub));
+                continue;
+            }
+
+            if (peek().kind == TOK_IDENT && isUIDSLPropertyName(peek().text)) {
+                std::string prop = advance().text;
+                if (prop == "animate" && match(TOK_MINUS) && peek().kind == TOK_IDENT) {
+                    advance();
+                }
+                if (match(TOK_LPAREN)) {
+                    int pdepth = 1;
+                    while (pdepth > 0 && !isAtEnd()) {
+                        if (peek().kind == TOK_LPAREN) pdepth++;
+                        else if (peek().kind == TOK_RPAREN) pdepth--;
+                        advance();
+                    }
+                }
+                match(TOK_SEMI);
+                continue;
+            }
+
+            auto inner = parseStatement();
+            if (inner) stmts.push_back(std::move(inner));
+        }
+        if (!match(TOK_RBRACE)) {
+            reportError(peek().loc(filename), "Expected '}' at end of UI block", "Close UI block with '}'");
+        }
+        match(TOK_SEMI);
+    } else {
+        match(TOK_SEMI);
+    }
+
+    if (is_window) {
+        std::vector<std::unique_ptr<ExprAST>> args;
+        stmts.push_back(std::make_unique<ExprStmtAST>(loc, std::make_unique<CallExprAST>(loc, "gui_show", std::move(args))));
+    }
+    return std::make_unique<BlockStmtAST>(loc, std::move(stmts));
+}
+
 // Statements & Declarations
 std::unique_ptr<StmtAST> GrassParser::parseStatement() {
     if (match(TOK_SEMI)) return nullptr;
@@ -4852,18 +5043,8 @@ std::unique_ptr<StmtAST> GrassParser::parseStatement() {
         std::vector<std::unique_ptr<ExprAST>> args;
         return std::make_unique<ExprStmtAST>(loc, std::make_unique<CallExprAST>(loc, "not_clear_on", std::move(args)));
     }
-    if (checkIdent("window") && peek(1).kind == TOK_LBRACE) {
-        auto loc = advance().loc(filename);
-        advance(); // '{'
-        int depth = 1;
-        while (depth > 0 && !isAtEnd()) {
-            if (peek().kind == TOK_LBRACE) depth++;
-            else if (peek().kind == TOK_RBRACE) depth--;
-            advance();
-        }
-        match(TOK_SEMI);
-        std::vector<std::unique_ptr<ExprAST>> args;
-        return std::make_unique<ExprStmtAST>(loc, std::make_unique<CallExprAST>(loc, "gui_show", std::move(args)));
+    if (isUIDSLBlockStart()) {
+        return parseUIDSLBlock(checkIdent("window"));
     }
     if (checkIdent("agent") && peek(1).kind == TOK_LBRACE) {
         auto loc = advance().loc(filename);

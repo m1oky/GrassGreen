@@ -207,47 +207,84 @@ void clear(float r, float g, float b) {
 
 void present() {
 #if defined(_WIN32)
-    if (g_hwnd && g_hdc && g_framebuffer && g_width > 0 && g_height > 0) {
+    bool window_visible = (g_hwnd && IsWindow(g_hwnd) && !IsIconic(g_hwnd) && IsWindowVisible(g_hwnd));
+    if (window_visible && g_hdc && g_framebuffer && g_width > 0 && g_height > 0) {
         RECT clientRect;
         GetClientRect(g_hwnd, &clientRect);
         int cw = clientRect.right - clientRect.left;
         int ch = clientRect.bottom - clientRect.top;
 
-        StretchDIBits(
-            g_hdc,
-            0, 0, cw, ch,
-            0, 0, g_width, g_height,
-            g_framebuffer,
-            &g_bmi,
-            DIB_RGB_COLORS,
-            SRCCOPY
-        );
+        if (cw > 0 && ch > 0) {
+            StretchDIBits(
+                g_hdc,
+                0, 0, cw, ch,
+                0, 0, g_width, g_height,
+                g_framebuffer,
+                &g_bmi,
+                DIB_RGB_COLORS,
+                SRCCOPY
+            );
+        }
     }
 #endif
 
-    // High precision ~60 FPS frame limiting and delta time calculation
-    const float target_frame_time = 1.0f / 60.0f; // ~0.016667s
+    // Event-driven ~60 FPS frame pacing without CPU busy-wait
+    const double target_frame_time = 1.0 / 60.0;
     auto now = chrono::high_resolution_clock::now();
-    float elapsed = chrono::duration<float>(now - g_last_time).count();
+    double elapsed = chrono::duration<double>(now - g_last_time).count();
 
-    if (elapsed < target_frame_time) {
-        float remaining = target_frame_time - elapsed;
-        int sleep_ms = (int)(remaining * 1000.0f);
-        if (sleep_ms > 0) {
 #if defined(_WIN32)
-            Sleep((DWORD)sleep_ms);
-#else
-            this_thread::sleep_for(chrono::milliseconds(sleep_ms));
-#endif
-        }
-        while (chrono::duration<float>(chrono::high_resolution_clock::now() - g_last_time).count() < target_frame_time) {
-            // spin wait
-        }
+    if (!window_visible) {
+        MsgWaitForMultipleObjectsEx(0, NULL, 32, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
         now = chrono::high_resolution_clock::now();
-        elapsed = chrono::duration<float>(now - g_last_time).count();
+        elapsed = chrono::duration<double>(now - g_last_time).count();
+    } else
+#endif
+    if (elapsed < target_frame_time) {
+        double remaining_sec = target_frame_time - elapsed;
+#if defined(_WIN32)
+        typedef HANDLE(WINAPI* CreateWaitableTimerExWProc)(LPSECURITY_ATTRIBUTES, LPCWSTR, DWORD, DWORD);
+        thread_local struct HighResWaitTimer {
+            HANDLE h = NULL;
+            HighResWaitTimer() {
+                HMODULE hk32 = GetModuleHandleA("kernel32.dll");
+                auto pCreateEx = hk32 ? (CreateWaitableTimerExWProc)GetProcAddress(hk32, "CreateWaitableTimerExW") : nullptr;
+                if (pCreateEx) {
+                    h = pCreateEx(NULL, NULL, 0x00000002, TIMER_ALL_ACCESS);
+                }
+                if (!h) {
+                    h = CreateWaitableTimerW(NULL, FALSE, NULL);
+                }
+            }
+            ~HighResWaitTimer() {
+                if (h) CloseHandle(h);
+            }
+        } tl_timer;
+
+        if (tl_timer.h) {
+            LARGE_INTEGER due;
+            due.QuadPart = -(LONGLONG)(remaining_sec * 10000000.0);
+            if (due.QuadPart < 0 && SetWaitableTimer(tl_timer.h, &due, 0, NULL, NULL, FALSE)) {
+                WaitForSingleObject(tl_timer.h, INFINITE);
+            } else {
+                DWORD sleep_ms = (DWORD)(remaining_sec * 1000.0);
+                if (sleep_ms > 0) Sleep(sleep_ms);
+            }
+        } else {
+            DWORD sleep_ms = (DWORD)(remaining_sec * 1000.0);
+            if (sleep_ms > 0) Sleep(sleep_ms);
+        }
+#else
+        auto remaining_ns = chrono::duration_cast<chrono::nanoseconds>(chrono::duration<double>(remaining_sec));
+        if (remaining_ns.count() > 0) {
+            this_thread::sleep_for(remaining_ns);
+        }
+#endif
+        now = chrono::high_resolution_clock::now();
+        elapsed = chrono::duration<double>(now - g_last_time).count();
     }
 
-    g_dt = elapsed;
+    g_dt = (float)elapsed;
     if (g_dt > 0.1f) g_dt = 0.1f;
     g_last_time = now;
 }

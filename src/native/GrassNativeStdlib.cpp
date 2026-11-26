@@ -363,7 +363,12 @@ namespace grass::native {
     }
 
     void GrassNativeStdlib::populate_disp(ir::IRContext& ctx) {
-        (void)ctx;
+        ir::IRType* f64_t = ctx.get_f64_type();
+        ir::IRType* str_t = ctx.get_ptr_type(ctx.get_i8_type());
+        register_function({ "grass_float_to_str", "disp", str_t, { f64_t }, { "val" }, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "grass_to_upper", "disp", str_t, { str_t }, { "s" }, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "grass_to_lower", "disp", str_t, { str_t }, { "s" }, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "grass_trim", "disp", str_t, { str_t }, { "s" }, false, false, false, "", backend::TargetABI::Win64 });
     }
 
     void GrassNativeStdlib::populate_game2d(ir::IRContext& ctx) {

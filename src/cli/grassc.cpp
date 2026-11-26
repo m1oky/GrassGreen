@@ -4425,6 +4425,7 @@ struct CompilerOptions {
     string abi_str = "win64";        // --abi win64|sysv64|cdecl32|baremetal64|baremetal32
     uint64_t base_addr = 0x100000;   // --base-addr
     bool no_sema = false;            // --no-sema
+    bool check_only = false;         // --check
     bool use_gcc = false;            // --use-gcc
     string target = "";              // --target <windows|linux>
 };
@@ -4465,6 +4466,7 @@ void PrintHelp(bool lang_ru) {
              << "  --dump-ast       Распечатать дерево токенов (AST) и C-ABI структуры\n"
              << "  -S               Распечатать читаемый дизассемблер байт-кода\n"
              << "  --time           Замерить время каждого этапа компиляции (мс)\n"
+             << "  --check          Выполнить только синтаксический и семантический анализ\n"
              << "  --no-sema        Отключить статический семантический анализ перед сборкой\n\n"
              << "Нативная кодогенерация и контейнеры (G&G Native Backend):\n"
              << "  --native         Скомпилировать напрямую в нативный исполняемый .exe (без VM)\n"
@@ -4503,6 +4505,7 @@ void PrintHelp(bool lang_ru) {
              << "  --dump-ast       Dump syntax tree (AST) and C-ABI struct layouts\n"
              << "  -S               Print disassembled human-readable bytecode\n"
              << "  --time           Display execution time for each compilation stage (ms)\n"
+             << "  --check          Run syntax and semantic analysis only without codegen\n"
              << "  --no-sema        Disable static semantic analysis before compilation\n\n"
              << "Native Backend & Containers (G&G Native Backend):\n"
              << "  --native         Compile directly to native standalone .exe without bytecode VM\n"
@@ -4826,6 +4829,10 @@ bool ProcessCompilation(CompilerOptions& opt) {
             sema.printDiagnostics();
             return false;
         }
+    }
+
+    if (opt.check_only) {
+        return true;
     }
 
     // 2.2. Нативный бэкенд (Native Backend: GrassIR + GrassX86Encoder + GrassObjWriter)
@@ -5221,6 +5228,10 @@ int main(int argc, char* argv[]) {
                 }
             } else if (arg == "--no-sema") {
                 opt.no_sema = true;
+            } else if (arg == "--check") {
+                opt.check_only = true;
+                opt.run_after_build = false;
+                opt.emit_bytecode_only = false;
             } else if (arg == "--emit-ir") {
                 opt.emit_ir = true;
             } else if (arg == "--emit-obj") {
