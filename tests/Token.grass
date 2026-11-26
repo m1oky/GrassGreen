@@ -1,0 +1,30 @@
+!GrassGreen!
+!TokenType!
+
+class BaseNode {
+protected:
+    int id = 7;
+public:
+    int get_id() {
+        return id;
+    }
+}
+
+public final class Token : public BaseNode {
+public:
+    TokenType type;
+    string lexeme;
+    int line;
+
+    Token() : type(TokenType::EOF_TOK), lexeme(""), line(1) {}
+
+    Token(TokenType t, string lex, int l) : type(t), lexeme(lex), line(l) {
+        this.id = l * 10;
+    }
+
+    ~Token() {}
+
+    string summary() {
+        return lexeme;
+    }
+}

@@ -81,7 +81,7 @@
         },
         {
           "name": "keyword.control.import.grass",
-          "match": "\\b(import|include|using)\\b"
+          "match": "\\b(import|include|using|namespace|as)\\b"
         }
       ]
     },
@@ -167,7 +167,15 @@
       "patterns": [
         {
           "name": "keyword.control.grass",
-          "match": "\\b(if|else|while|for|return|break|continue|match|take|struct|enum|fn|fun|func|switch|case|default|async|thread|wait|sleep|exit|clear|cls|not_clear|clearable|virtual_struct|physical_struct|reboot|poweroff|set|var|let|use|utf|tab|this)\\b"
+          "match": "\\b(if|else|while|for|return|break|continue|match|take|switch|case|default|async|thread|wait|sleep|exit|clear|cls|not_clear|clearable|virtual_struct|physical_struct|reboot|poweroff|set|var|let|use|utf|tab|new|delete)\\b"
+        },
+        {
+          "name": "storage.modifier.grass",
+          "match": "\\b(public|private|protected|final|virtual|override|abstract|inline|export|extends|implements)\\b"
+        },
+        {
+          "name": "variable.language.this.grass",
+          "match": "\\b(this|super|self)\\b"
         }
       ]
     },
@@ -175,7 +183,23 @@
       "patterns": [
         {
           "name": "storage.type.grass",
-          "match": "\\b(int|float|double|bool|string|str|void|char|byte|ptr|const|static|volatile|u8|u16|u32|u64|i8|i16|i32|i64|f32|f64|num|auto|array|Vec3|Mat4)\\b"
+          "match": "\\b(class|struct|enum|int|float|double|bool|string|String|str|void|char|byte|ptr|vec|vector|fn|fun|func|alt|const|static|volatile|size_t|u8|u16|u32|u64|i8|i16|i32|i64|f32|f64|num|auto|array|Vec3|Mat4)\\b"
+        },
+        {
+          "match": "\\b(?:class|struct|enum(?:\\s+class|\\s+struct)?)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.class.grass"
+            }
+          }
+        },
+        {
+          "match": "\\bnew\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.class.grass"
+            }
+          }
         }
       ]
     },
@@ -183,7 +207,7 @@
       "patterns": [
         {
           "name": "constant.language.grass",
-          "match": "\\b(true|false|null|nil|endl|gout|gin|cout|cin|BLACK|BLUE|GREEN|CYAN|RED|MAGENTA|BROWN|LIGHT_GRAY|DARK_GRAY|LIGHT_BLUE|LIGHT_GREEN|LIGHT_CYAN|LIGHT_RED|LIGHT_MAGENTA|YELLOW|WHITE)\\b"
+          "match": "\\b(true|false|null|nullptr|nil|endl|gout|gin|cout|cin|BLACK|BLUE|GREEN|CYAN|RED|MAGENTA|BROWN|LIGHT_GRAY|DARK_GRAY|LIGHT_BLUE|LIGHT_GREEN|LIGHT_CYAN|LIGHT_RED|LIGHT_MAGENTA|YELLOW|WHITE)\\b"
         }
       ]
     },
@@ -231,7 +255,7 @@
       "patterns": [
         {
           "name": "keyword.operator.grass",
-          "match": "<<|>>|->|=>|==|!=|<=|>=|&&|\\|\\||\\+=|-=|\\*=|/=|\\+\\+|--|[+\\-*/%&|^~!<>?=]"
+          "match": "::|->|=>|<<|>>|==|!=|<=|>=|&&|\\|\\||\\+=|-=|\\*=|/=|\\+\\+|--|[+\\-*/%&|^~!<>?=]"
         }
       ]
     },

@@ -51,6 +51,135 @@ std::unique_ptr<FunctionDeclAST> GrassParser::parseFunction(const std::string& r
     return std::make_unique<FunctionDeclAST>(loc, ret_type, ret_ptr, name, std::move(params), std::move(body));
 }
 
+std::unique_ptr<FunctionDeclAST> GrassParser::parseConstructor(const std::string& class_name, AccessLevel access) {
+    SourceLocation loc = peek(-1).loc(filename);
+    if (!match(TOK_LPAREN)) {
+        reportError(peek().loc(filename), "Expected '(' in constructor '" + class_name + "'", "Enclose constructor parameters in '(' and ')'");
+    }
+
+    std::vector<ParamDecl> params;
+    if (!check(TOK_RPAREN) && !isAtEnd()) {
+        do {
+            std::string ptype = "var";
+            int pptr = 0;
+            if (isTypeName(peek().text) || isVarKeyword(peek().text) ||
+                (peek().kind == TOK_IDENT && (peek(1).kind == TOK_IDENT || peek(1).kind == TOK_STAR || peek(1).kind == TOK_COLON_COLON))) {
+                parseTypeSpec(ptype, pptr);
+            }
+            if (peek().kind == TOK_IDENT) {
+                auto ptok = advance();
+                params.emplace_back(ptype, ptok.text, pptr, ptok.loc(filename));
+            } else {
+                reportError(peek().loc(filename), "Expected parameter name in constructor '" + class_name + "'", "Provide parameter name");
+            }
+        } while (match(TOK_COMMA));
+    }
+    if (!match(TOK_RPAREN)) {
+        reportError(peek().loc(filename), "Expected ')' closing constructor parameter list", "Close with ')'");
+    }
+
+    // Optional C++ member initializer list: : field1(val1), field2(val2)
+    std::vector<MemberInitAST> inits;
+    if (match(TOK_COLON)) {
+        do {
+            if (peek().kind != TOK_IDENT) {
+                reportError(peek().loc(filename), "Expected member name in constructor initializer list", "Specify field name");
+                break;
+            }
+            MemberInitAST mi;
+            mi.loc = peek().loc(filename);
+            mi.member_name = advance().text;
+            if (match(TOK_LPAREN)) {
+                if (!check(TOK_RPAREN) && !isAtEnd()) {
+                    do {
+                        mi.args.push_back(parseExpression());
+                    } while (match(TOK_COMMA));
+                }
+                if (!match(TOK_RPAREN)) {
+                    reportError(peek().loc(filename), "Expected ')' after member initializer for '" + mi.member_name + "'", "Close with ')'");
+                }
+            }
+            inits.push_back(std::move(mi));
+        } while (match(TOK_COMMA));
+    }
+
+    std::unique_ptr<BlockStmtAST> body = nullptr;
+    if (check(TOK_LBRACE)) {
+        body = parseBlock();
+    } else if (!match(TOK_SEMI)) {
+        reportError(peek().loc(filename), "Expected '{' for constructor body", "Provide constructor body");
+        synchronize();
+    }
+
+    auto ctor = std::make_unique<FunctionDeclAST>(loc, "void", 0, class_name, std::move(params), std::move(body), true, false, false, true, access);
+    ctor->member_inits = std::move(inits);
+    return ctor;
+}
+
+std::unique_ptr<EnumDeclAST> GrassParser::parseEnum() {
+    auto loc = advance().loc(filename); // consume 'enum'
+    bool is_scoped = checkIdent("class") || checkIdent("struct");
+    if (is_scoped) advance();
+
+    if (peek().kind != TOK_IDENT) {
+        reportError(peek().loc(filename), "Expected enum name after 'enum'", "Provide enum identifier");
+        synchronize();
+        return nullptr;
+    }
+    std::string ename = advance().text;
+    custom_types.insert(ename);
+    enum_types.insert(ename);
+
+    if (match(TOK_COLON)) {
+        if (peek().kind == TOK_IDENT) advance(); // underlying type
+    }
+
+    if (!match(TOK_LBRACE)) {
+        reportError(peek().loc(filename), "Expected '{' after enum name '" + ename + "'", "Open enum body with '{'");
+        synchronize();
+        return nullptr;
+    }
+
+    std::vector<EnumEntryAST> entries;
+    int64_t next_val = 0;
+    while (!check(TOK_RBRACE) && !isAtEnd()) {
+        if (match(TOK_COMMA) || match(TOK_SEMI)) continue;
+        if (peek().kind != TOK_IDENT) {
+            reportError(peek().loc(filename), "Expected enum constant identifier in '" + ename + "'", "Provide constant name");
+            synchronize();
+            break;
+        }
+        EnumEntryAST entry;
+        entry.loc = peek().loc(filename);
+        entry.name = advance().text;
+        if (match(TOK_ASSIGN)) {
+            bool neg = match(TOK_MINUS);
+            if (peek().kind == TOK_NUMBER) {
+                int64_t v = static_cast<int64_t>(advance().num_val);
+                next_val = neg ? -v : v;
+            } else {
+                reportError(peek().loc(filename), "Expected integer literal in enum initializer", "Assign integer value");
+            }
+        }
+        entry.value = next_val;
+        next_val++;
+        entries.push_back(std::move(entry));
+        match(TOK_COMMA);
+    }
+
+    if (!match(TOK_RBRACE)) {
+        reportError(peek().loc(filename), "Expected '}' closing enum '" + ename + "'", "Close enum with '}'");
+    }
+    match(TOK_SEMI);
+    return std::make_unique<EnumDeclAST>(loc, ename, is_scoped, std::move(entries));
+}
+
+static bool isDeclModifierToken(const std::string& t) {
+    return t == "public" || t == "private" || t == "protected" ||
+           t == "final" || t == "abstract" || t == "static" ||
+           t == "virtual" || t == "override" || t == "export" || t == "inline";
+}
+
 std::unique_ptr<StructDeclAST> GrassParser::parseStruct() {
     auto loc = advance().loc(filename);
     if (peek().kind != TOK_IDENT) {
@@ -69,8 +198,27 @@ std::unique_ptr<StructDeclAST> GrassParser::parseStruct() {
     std::vector<FieldDecl> fields;
     std::vector<std::unique_ptr<FunctionDeclAST>> methods;
 
+    AccessLevel cur_access = AccessLevel::Public;
     while (!check(TOK_RBRACE) && !isAtEnd()) {
         if (match(TOK_SEMI)) continue;
+        if ((checkIdent("public") || checkIdent("private") || checkIdent("protected")) && peek(1).kind == TOK_COLON) {
+            std::string sec = advance().text;
+            advance(); // ':'
+            cur_access = (sec == "private") ? AccessLevel::Private : (sec == "protected" ? AccessLevel::Protected : AccessLevel::Public);
+            continue;
+        }
+        AccessLevel m_acc = cur_access;
+        bool m_fin = false, m_virt = false, m_stat = false, m_over = false;
+        while (peek().kind == TOK_IDENT && isDeclModifierToken(peek().text)) {
+            std::string mod = advance().text;
+            if (mod == "public") m_acc = AccessLevel::Public;
+            else if (mod == "private") m_acc = AccessLevel::Private;
+            else if (mod == "protected") m_acc = AccessLevel::Protected;
+            else if (mod == "final") m_fin = true;
+            else if (mod == "virtual") m_virt = true;
+            else if (mod == "static") m_stat = true;
+            else if (mod == "override") m_over = true;
+        }
         if (match(TOK_TILDE)) {
             SourceLocation dloc = peek(-1).loc(filename);
             if (peek().kind != TOK_IDENT) {
@@ -83,7 +231,15 @@ std::unique_ptr<StructDeclAST> GrassParser::parseStruct() {
             dtor->loc = dloc;
             dtor->is_method = true;
             dtor->is_destructor = true;
+            dtor->access = m_acc;
             methods.push_back(std::move(dtor));
+            continue;
+        }
+        if (peek().kind == TOK_IDENT && peek().text == sname && peek(1).kind == TOK_LPAREN) {
+            advance(); // class name
+            auto ctor = parseConstructor(sname, m_acc);
+            ctor->is_final = m_fin;
+            methods.push_back(std::move(ctor));
             continue;
         }
         if (checkIdent("fn")) {
@@ -96,6 +252,11 @@ std::unique_ptr<StructDeclAST> GrassParser::parseStruct() {
             std::string fname = advance().text;
             auto fn = parseFunction("auto", 0, fname);
             fn->is_method = true;
+            fn->is_virtual = m_virt;
+            fn->is_final = m_fin;
+            fn->is_override = m_over;
+            fn->is_static = m_stat;
+            fn->access = m_acc;
             methods.push_back(std::move(fn));
             continue;
         }
@@ -105,12 +266,13 @@ std::unique_ptr<StructDeclAST> GrassParser::parseStruct() {
             std::string tname;
             int ptr = 0;
             parseTypeSpec(tname, ptr);
-            fields.emplace_back(tname, fname, ptr, peek(-1).loc(filename));
+            fields.emplace_back(tname, fname, ptr, peek(-1).loc(filename), m_acc, m_fin, m_stat);
             match(TOK_COMMA);
             match(TOK_SEMI);
             continue;
         }
-        if (isTypeName(peek().text)) {
+        if (isTypeName(peek().text) ||
+            (peek().kind == TOK_IDENT && (peek(1).kind == TOK_IDENT || peek(1).kind == TOK_STAR || peek(1).kind == TOK_COLON_COLON))) {
             std::string tname;
             int ptr = 0;
             parseTypeSpec(tname, ptr);
@@ -119,9 +281,17 @@ std::unique_ptr<StructDeclAST> GrassParser::parseStruct() {
                 if (check(TOK_LPAREN)) {
                     auto fn = parseFunction(tname, ptr, fname);
                     fn->is_method = true;
+                    fn->is_virtual = m_virt;
+                    fn->is_final = m_fin;
+                    fn->is_override = m_over;
+                    fn->is_static = m_stat;
+                    fn->access = m_acc;
                     methods.push_back(std::move(fn));
                 } else {
-                    fields.emplace_back(tname, fname, ptr, peek(-1).loc(filename));
+                    fields.emplace_back(tname, fname, ptr, peek(-1).loc(filename), m_acc, m_fin, m_stat);
+                    if (match(TOK_ASSIGN)) {
+                        parseExpression();
+                    }
                     match(TOK_SEMI);
                 }
             } else {
@@ -151,12 +321,30 @@ std::unique_ptr<ClassDeclAST> GrassParser::parseClass() {
     }
     std::string cname = advance().text;
     custom_types.insert(cname);
+    if (checkIdent("final")) advance();
     std::string base_class;
     if (match(TOK_COLON)) {
+        if (checkIdent("public") || checkIdent("private") || checkIdent("protected")) {
+            advance();
+        }
         if (peek().kind == TOK_IDENT) {
             base_class = advance().text;
         } else {
             reportError(peek().loc(filename), "Expected base class name after ':'", "Provide inherited class name");
+        }
+    } else if (checkIdent("extends")) {
+        advance();
+        if (peek().kind == TOK_IDENT) {
+            base_class = advance().text;
+        } else {
+            reportError(peek().loc(filename), "Expected base class name after 'extends'", "Provide inherited class name");
+        }
+    }
+    if (checkIdent("implements")) {
+        advance();
+        while (peek().kind == TOK_IDENT) {
+            advance();
+            if (!match(TOK_COMMA)) break;
         }
     }
 
@@ -168,9 +356,28 @@ std::unique_ptr<ClassDeclAST> GrassParser::parseClass() {
 
     std::vector<FieldDecl> fields;
     std::vector<std::unique_ptr<FunctionDeclAST>> methods;
+    AccessLevel cur_access = AccessLevel::Default;
 
     while (!check(TOK_RBRACE) && !isAtEnd()) {
         if (match(TOK_SEMI)) continue;
+        if ((checkIdent("public") || checkIdent("private") || checkIdent("protected")) && peek(1).kind == TOK_COLON) {
+            std::string sec = advance().text;
+            advance(); // ':'
+            cur_access = (sec == "private") ? AccessLevel::Private : (sec == "protected" ? AccessLevel::Protected : AccessLevel::Public);
+            continue;
+        }
+        AccessLevel m_acc = cur_access;
+        bool m_fin = false, m_virt = false, m_stat = false, m_over = false;
+        while (peek().kind == TOK_IDENT && isDeclModifierToken(peek().text)) {
+            std::string mod = advance().text;
+            if (mod == "public") m_acc = AccessLevel::Public;
+            else if (mod == "private") m_acc = AccessLevel::Private;
+            else if (mod == "protected") m_acc = AccessLevel::Protected;
+            else if (mod == "final") m_fin = true;
+            else if (mod == "virtual") m_virt = true;
+            else if (mod == "static") m_stat = true;
+            else if (mod == "override") m_over = true;
+        }
         if (match(TOK_TILDE)) {
             SourceLocation dloc = peek(-1).loc(filename);
             if (peek().kind != TOK_IDENT) {
@@ -183,19 +390,32 @@ std::unique_ptr<ClassDeclAST> GrassParser::parseClass() {
             dtor->loc = dloc;
             dtor->is_method = true;
             dtor->is_destructor = true;
+            dtor->access = m_acc;
             methods.push_back(std::move(dtor));
+            continue;
+        }
+        if (peek().kind == TOK_IDENT && peek().text == cname && peek(1).kind == TOK_LPAREN) {
+            advance(); // class name
+            auto ctor = parseConstructor(cname, m_acc);
+            ctor->is_final = m_fin;
+            methods.push_back(std::move(ctor));
             continue;
         }
         if (checkIdent("fn")) {
             advance();
             if (peek().kind != TOK_IDENT) {
-                reportError(peek().loc(filename), "Expected method name after 'fn' in struct", "Provide method identifier");
+                reportError(peek().loc(filename), "Expected method name after 'fn' in class", "Provide method identifier");
                 synchronize();
                 continue;
             }
             std::string fname = advance().text;
             auto fn = parseFunction("auto", 0, fname);
             fn->is_method = true;
+            fn->is_virtual = m_virt;
+            fn->is_final = m_fin;
+            fn->is_override = m_over;
+            fn->is_static = m_stat;
+            fn->access = m_acc;
             methods.push_back(std::move(fn));
             continue;
         }
@@ -205,12 +425,13 @@ std::unique_ptr<ClassDeclAST> GrassParser::parseClass() {
             std::string tname;
             int ptr = 0;
             parseTypeSpec(tname, ptr);
-            fields.emplace_back(tname, fname, ptr, peek(-1).loc(filename));
+            fields.emplace_back(tname, fname, ptr, peek(-1).loc(filename), m_acc, m_fin, m_stat);
             match(TOK_COMMA);
             match(TOK_SEMI);
             continue;
         }
-        if (isTypeName(peek().text)) {
+        if (isTypeName(peek().text) ||
+            (peek().kind == TOK_IDENT && (peek(1).kind == TOK_IDENT || peek(1).kind == TOK_STAR || peek(1).kind == TOK_COLON_COLON))) {
             std::string tname;
             int ptr = 0;
             parseTypeSpec(tname, ptr);
@@ -219,9 +440,17 @@ std::unique_ptr<ClassDeclAST> GrassParser::parseClass() {
                 if (check(TOK_LPAREN)) {
                     auto fn = parseFunction(tname, ptr, fname);
                     fn->is_method = true;
+                    fn->is_virtual = m_virt;
+                    fn->is_final = m_fin;
+                    fn->is_override = m_over;
+                    fn->is_static = m_stat;
+                    fn->access = m_acc;
                     methods.push_back(std::move(fn));
                 } else {
-                    fields.emplace_back(tname, fname, ptr, peek(-1).loc(filename));
+                    fields.emplace_back(tname, fname, ptr, peek(-1).loc(filename), m_acc, m_fin, m_stat);
+                    if (match(TOK_ASSIGN)) {
+                        parseExpression();
+                    }
                     match(TOK_SEMI);
                 }
             } else {
@@ -260,12 +489,19 @@ std::unique_ptr<ModuleDeclAST> GrassParser::parseModule() {
 
     while (!check(TOK_RBRACE) && !isAtEnd()) {
         if (match(TOK_SEMI)) continue;
+        while (peek().kind == TOK_IDENT && isDeclModifierToken(peek().text) &&
+               !checkIdent("struct") && !checkIdent("class") && !checkIdent("enum")) {
+            advance();
+        }
         if (checkIdent("struct")) {
             auto st = parseStruct();
             if (st) mod->structs.push_back(std::move(st));
         } else if (checkIdent("class")) {
             auto cls = parseClass();
             if (cls) mod->classes.push_back(std::move(cls));
+        } else if (checkIdent("enum")) {
+            auto en = parseEnum();
+            if (en) mod->enums.push_back(std::move(en));
         } else if (isTypeName(peek().text)) {
             std::string tname;
             int ptr = 0;
@@ -316,6 +552,9 @@ std::unique_ptr<NamespaceDeclAST> GrassParser::parseNamespace() {
 
     while (!check(TOK_RBRACE) && !isAtEnd()) {
         if (match(TOK_SEMI)) continue;
+        while (peek().kind == TOK_IDENT && isDeclModifierToken(peek().text)) {
+            advance();
+        }
         if (peek().kind == TOK_NAMESPACE || checkIdent("namespace")) {
             auto inner_ns = parseNamespace();
             if (inner_ns) decls.push_back(std::move(inner_ns));
@@ -328,6 +567,9 @@ std::unique_ptr<NamespaceDeclAST> GrassParser::parseNamespace() {
         } else if (checkIdent("class")) {
             auto cls = parseClass();
             if (cls) decls.push_back(std::move(cls));
+        } else if (checkIdent("enum")) {
+            auto en = parseEnum();
+            if (en) decls.push_back(std::move(en));
         } else if (checkIdent("module")) {
             auto mod = parseModule();
             if (mod) decls.push_back(std::move(mod));
@@ -399,6 +641,22 @@ std::unique_ptr<UsingDeclAST> GrassParser::parseUsing() {
 std::unique_ptr<ProgramAST> GrassParser::parseProgram() {
     auto program = std::make_unique<ProgramAST>(SourceLocation(filename, 1, 1));
 
+    // Pre-register custom type names so forward references and OOP types parse cleanly
+    for (size_t ti = 0; ti + 1 < tokens.size(); ++ti) {
+        if (tokens[ti].kind == TOK_IDENT &&
+            (tokens[ti].text == "struct" || tokens[ti].text == "class" || tokens[ti].text == "enum")) {
+            size_t ni = ti + 1;
+            if (tokens[ti].text == "enum" && ni < tokens.size() &&
+                tokens[ni].kind == TOK_IDENT && (tokens[ni].text == "class" || tokens[ni].text == "struct")) {
+                ni++;
+            }
+            if (ni < tokens.size() && tokens[ni].kind == TOK_IDENT) {
+                custom_types.insert(tokens[ni].text);
+                if (tokens[ti].text == "enum") enum_types.insert(tokens[ni].text);
+            }
+        }
+    }
+
     while (!isAtEnd()) {
         if (peek().kind == TOK_SEMI) {
             advance();
@@ -425,6 +683,9 @@ std::unique_ptr<ProgramAST> GrassParser::parseProgram() {
         }
 
         try {
+            while (peek().kind == TOK_IDENT && isDeclModifierToken(peek().text)) {
+                advance();
+            }
             if (peek().kind == TOK_NAMESPACE || checkIdent("namespace")) {
                 auto ns = parseNamespace();
                 if (ns) program->declarations.push_back(std::move(ns));
@@ -437,6 +698,9 @@ std::unique_ptr<ProgramAST> GrassParser::parseProgram() {
             } else if (checkIdent("class")) {
                 auto cls = parseClass();
                 if (cls) program->declarations.push_back(std::move(cls));
+            } else if (checkIdent("enum")) {
+                auto en = parseEnum();
+                if (en) program->declarations.push_back(std::move(en));
             } else if (checkIdent("module")) {
                 auto mod = parseModule();
                 if (mod) program->declarations.push_back(std::move(mod));

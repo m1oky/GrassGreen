@@ -448,6 +448,29 @@ std::unique_ptr<ExprAST> GrassParser::parsePrimary() {
             return std::make_unique<SizeofExprAST>(loc, "", 0, std::move(expr));
         }
     }
+    if (checkIdent("new")) {
+        auto loc = advance().loc(filename);
+        if (peek().kind != TOK_IDENT) {
+            reportError(peek().loc(filename), "Expected type name after 'new'", "Specify class or struct name after 'new'");
+            return nullptr;
+        }
+        std::string tname = advance().text;
+        while (match(TOK_COLON_COLON)) {
+            if (peek().kind == TOK_IDENT) tname += "::" + advance().text;
+        }
+        std::vector<std::unique_ptr<ExprAST>> ctor_args;
+        if (match(TOK_LPAREN)) {
+            if (!check(TOK_RPAREN) && !isAtEnd()) {
+                do {
+                    ctor_args.push_back(parseExpression());
+                } while (match(TOK_COMMA));
+            }
+            if (!match(TOK_RPAREN)) {
+                reportError(peek().loc(filename), "Expected ')' after constructor arguments in 'new " + tname + "'", "Close constructor arguments with ')'");
+            }
+        }
+        return std::make_unique<AllocExprAST>(loc, tname, nullptr, std::move(ctor_args), true);
+    }
     if (checkIdent("alloc")) {
         auto loc = advance().loc(filename);
         std::unique_ptr<ExprAST> sz = nullptr;

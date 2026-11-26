@@ -77,6 +77,16 @@ namespace grass::codegen {
             namespace_stack_.pop_back();
             return true;
         }
+        while (peek().kind == TOK_IDENT &&
+               (peek().text == "public" || peek().text == "private" || peek().text == "protected" ||
+                peek().text == "final" || peek().text == "abstract" || peek().text == "virtual" ||
+                peek().text == "override" || peek().text == "static" || peek().text == "inline" ||
+                peek().text == "export")) {
+            advance();
+        }
+        if (peek().kind == TOK_IDENT && peek().text == "enum") {
+            return parse_enum_definition(error);
+        }
         if (peek().kind == TOK_IDENT && (peek().text == "struct" || peek().text == "class")) {
             if (!parse_struct_definition(error)) return false;
             return true;
@@ -91,7 +101,7 @@ namespace grass::codegen {
             }
             while (peek(off).kind == TOK_STAR) off++;
             if (peek(off).kind == TOK_IDENT && peek(off + 1).kind == TOK_LPAREN) is_fn = true;
-        } else if (is_type_or_func_keyword(peek().text) || (oop_mgr_ && oop_mgr_->has_class(peek().text))) {
+        } else if (is_type_or_func_keyword(peek().text) || is_known_user_type(peek().text)) {
             size_t off = 1;
             while (peek(off).kind == TOK_STAR) off++;
             if (peek(off).kind == TOK_IDENT && peek(off + 1).kind == TOK_LPAREN) is_fn = true;
@@ -100,7 +110,7 @@ namespace grass::codegen {
             if (!parse_function(error)) return false;
             return true;
         }
-        if (is_var_keyword(peek().text) || is_type_or_func_keyword(peek().text) || (oop_mgr_ && oop_mgr_->has_class(peek().text))) {
+        if (is_var_keyword(peek().text) || is_type_or_func_keyword(peek().text) || is_known_user_type(peek().text)) {
             std::string tname = advance().text;
             bool is_explicit_ptr = false;
             ir::IRType* dt = (oop_mgr_ && oop_mgr_->has_class(tname))
@@ -211,6 +221,12 @@ namespace grass::codegen {
                s == "f32" || s == "f64" || s == "char" || s == "byte" || s == "size_t";
     }
 
+    bool ASTLowerer::is_known_user_type(const std::string& name) const {
+        if (enum_defs_.count(name) > 0) return true;
+        if (oop_mgr_ && oop_mgr_->has_class(name)) return true;
+        return false;
+    }
+
     ir::IRType* ASTLowerer::parse_type_name(const std::string& name) {
         if (name == "void") return ctx_.get_void_type();
         if (name == "bool") return ctx_.get_i1_type();
@@ -219,9 +235,10 @@ namespace grass::codegen {
         if (name == "i32" || name == "u32" || name == "int32" || name == "uint32" || name == "int") return ctx_.get_i32_type();
         if (name == "i64" || name == "u64" || name == "int64" || name == "uint64" || name == "take" || name == "size_t") return ctx_.get_i64_type();
         if (name == "float" || name == "double" || name == "f32" || name == "f64") return ctx_.get_f64_type();
-        if (name == "string") return ctx_.get_ptr_type(ctx_.get_i8_type());
+        if (name == "string" || name == "String") return ctx_.get_ptr_type(ctx_.get_i8_type());
         if (name == "array") return ctx_.get_ptr_type(ctx_.get_void_type());
         if (name == "nullptr" || name == "null") return ctx_.get_ptr_type(ctx_.get_void_type());
+        if (enum_defs_.count(name)) return ctx_.get_i64_type();
         if (oop_mgr_ && oop_mgr_->has_class(name)) {
             const auto* cd = oop_mgr_->get_class(name);
             return cd ? cd->ir_struct_type : ctx_.get_i64_type();
@@ -229,15 +246,75 @@ namespace grass::codegen {
         return ctx_.get_i64_type();
     }
 
+    bool ASTLowerer::parse_enum_definition(std::string& error) {
+        advance(); // 'enum'
+        bool is_scoped = match_ident("class") || match_ident("struct");
+        if (peek().kind != TOK_IDENT) {
+            error = "Line " + std::to_string(peek().line) + ": Expected enum name!";
+            return false;
+        }
+        std::string ename = advance().text;
+        if (!consume(TOK_LBRACE, "Expected '{' in enum definition!", error)) return false;
+        std::unordered_map<std::string, int64_t> entries;
+        int64_t next_val = 0;
+        while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
+            if (match(TOK_SEMI) || match(TOK_COMMA)) continue;
+            if (peek().kind != TOK_IDENT) {
+                advance();
+                continue;
+            }
+            std::string entry = advance().text;
+            int64_t val = next_val;
+            if (match(TOK_ASSIGN)) {
+                bool neg = match(TOK_MINUS);
+                if (peek().kind == TOK_NUMBER) {
+                    try { val = std::stoll(advance().text, nullptr, 0); } catch (...) {}
+                    if (neg) val = -val;
+                }
+            }
+            entries[entry] = val;
+            if (!is_scoped) unscoped_enum_vals_[entry] = val;
+            next_val = val + 1;
+            match(TOK_COMMA);
+            match(TOK_SEMI);
+        }
+        consume(TOK_RBRACE, "Expected '}' closing enum definition!", error);
+        match(TOK_SEMI);
+        enum_defs_[ename] = std::move(entries);
+        return true;
+    }
+
+    void ASTLowerer::emit_ctor_call(ir::ValueId obj_ptr, const std::string& class_name, const std::vector<ir::ValueId>& args) {
+        if (!oop_mgr_ || obj_ptr == ir::kInvalidValueId) return;
+        const auto* cd = oop_mgr_->get_class(class_name);
+        if (!cd) return;
+        std::string ctor_name = "ctor_" + std::to_string(args.size());
+        if (cd->find_method(ctor_name)) {
+            oop_mgr_->emit_call_method(builder_, obj_ptr, class_name, ctor_name, args);
+        } else if (args.empty() && cd->find_method("ctor")) {
+            oop_mgr_->emit_call_method(builder_, obj_ptr, class_name, "ctor", {});
+        }
+    }
+
+    struct PendingCtorInit {
+        std::string target_name;
+        std::vector<std::pair<size_t, size_t>> arg_spans;
+    };
+
     struct PendingMethod {
         std::string name;
         ir::IRType* ret_type = nullptr;
         std::vector<ir::IRType*> param_types;
         std::vector<std::string> param_names;
         std::vector<std::string> param_struct_names;
+        std::vector<bool> param_is_vec;
+        std::vector<ir::IRType*> param_vec_elem_types;
+        std::vector<std::string> param_vec_elem_structs;
         size_t body_start_pos = 0;
         size_t body_end_pos = 0;
         bool is_dtor = false;
+        bool is_ctor = false;
+        std::vector<PendingCtorInit> ctor_inits;
     };
 
     bool ASTLowerer::parse_struct_definition(std::string& error) {
@@ -249,9 +326,33 @@ namespace grass::codegen {
         std::string struct_name = advance().text;
         std::string base_class = "";
         if (match(TOK_COLON)) {
+            if (peek().kind == TOK_IDENT &&
+                (peek().text == "public" || peek().text == "private" || peek().text == "protected")) {
+                advance();
+            }
             if (peek().kind == TOK_IDENT) {
                 base_class = advance().text;
             }
+            while (match(TOK_COMMA)) {
+                if (peek().kind == TOK_IDENT &&
+                    (peek().text == "public" || peek().text == "private" || peek().text == "protected")) {
+                    advance();
+                }
+                if (peek().kind == TOK_IDENT) advance();
+            }
+        } else if (match_ident("extends")) {
+            if (peek().kind == TOK_IDENT) {
+                base_class = advance().text;
+            }
+        }
+        if (match_ident("implements")) {
+            if (peek().kind == TOK_IDENT) advance();
+            while (match(TOK_COMMA)) {
+                if (peek().kind == TOK_IDENT) advance();
+            }
+        }
+        if (!base_class.empty()) {
+            class_base_names_[struct_name] = base_class;
         }
         if (!consume(TOK_LBRACE, "Expected '{' after name!", error)) return false;
 
@@ -266,9 +367,32 @@ namespace grass::codegen {
         std::vector<ir::IRType*> field_types;
         std::vector<std::string> field_names;
         std::vector<PendingMethod> pending_methods;
+        std::vector<FieldDefaultInit> field_defaults;
+        bool has_ctor_0 = false;
 
         while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
             if (match(TOK_SEMI)) continue;
+
+            // Access section labels: public:, private:, protected:
+            if (peek().kind == TOK_IDENT &&
+                (peek().text == "public" || peek().text == "private" || peek().text == "protected") &&
+                peek(1).kind == TOK_COLON) {
+                advance();
+                advance();
+                continue;
+            }
+
+            // Inline member modifiers: public, private, protected, final, virtual, override, static, inline
+            bool is_virtual_mod = false;
+            bool is_override_mod = false;
+            while (peek().kind == TOK_IDENT &&
+                   (peek().text == "public" || peek().text == "private" || peek().text == "protected" ||
+                    peek().text == "final" || peek().text == "virtual" || peek().text == "override" ||
+                    peek().text == "static" || peek().text == "inline")) {
+                std::string mod = advance().text;
+                if (mod == "virtual") is_virtual_mod = true;
+                if (mod == "override") { is_override_mod = true; is_virtual_mod = true; }
+            }
 
             // Destructor: ~StructName() { ... }
             if (match(TOK_TILDE)) {
@@ -298,9 +422,139 @@ namespace grass::codegen {
                 size_t body_end = pos_;
                 consume(TOK_RBRACE, "Expected '}' closing destructor body!", error);
 
-                pending_methods.push_back({ "dtor", ctx_.get_void_type(), {}, {}, {}, body_start, body_end, true });
+                PendingMethod dm;
+                dm.name = "dtor";
+                dm.ret_type = ctx_.get_void_type();
+                dm.body_start_pos = body_start;
+                dm.body_end_pos = body_end;
+                dm.is_dtor = true;
+                pending_methods.push_back(std::move(dm));
                 if (oop_mgr_) {
                     oop_mgr_->add_destructor();
+                }
+                continue;
+            }
+
+            // Constructor: ClassName(params...) [: member(val), ...] { ... }
+            if (peek().kind == TOK_IDENT && peek().text == struct_name && peek(1).kind == TOK_LPAREN) {
+                advance(); // ClassName
+                advance(); // '('
+                std::vector<ir::IRType*> param_types;
+                std::vector<std::string> param_names;
+                std::vector<std::string> param_struct_names;
+                std::vector<bool> param_is_vec;
+                std::vector<ir::IRType*> param_vec_elem_types;
+                std::vector<std::string> param_vec_elem_structs;
+                if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
+                    while (true) {
+                        ir::IRType* ptype = ctx_.get_i64_type();
+                        std::string p_struct_name = "";
+                        bool p_is_vec = false;
+                        ir::IRType* p_velem = nullptr;
+                        std::string p_vestruct;
+                        if (is_vec_type_start()) {
+                            std::string vsn;
+                            ptype = parse_vec_ir_type(p_velem, p_vestruct, vsn);
+                            p_struct_name = vsn;
+                            p_is_vec = true;
+                            while (match(TOK_STAR)) { ptype = ctx_.get_ptr_type(ptype); }
+                        } else if (peek().kind == TOK_IDENT &&
+                                   (peek(1).kind == TOK_IDENT || peek(1).kind == TOK_STAR || is_known_user_type(peek().text))) {
+                            std::string tname = advance().text;
+                            if (oop_mgr_ && oop_mgr_->has_class(tname)) {
+                                p_struct_name = tname;
+                                ptype = ctx_.get_ptr_type(parse_type_name(tname));
+                                (void)match(TOK_STAR);
+                            } else {
+                                ptype = parse_type_name(tname);
+                            }
+                            while (match(TOK_STAR)) {
+                                ptype = ctx_.get_ptr_type(ptype);
+                            }
+                        } else if (is_type_or_func_keyword(peek().text)) {
+                            ptype = parse_type_name(advance().text);
+                            while (match(TOK_STAR)) {
+                                ptype = ctx_.get_ptr_type(ptype);
+                            }
+                        }
+                        if (peek().kind != TOK_IDENT) {
+                            error = "Line " + std::to_string(peek().line) + ": Expected constructor parameter name!";
+                            return false;
+                        }
+                        std::string pname = advance().text;
+                        param_types.push_back(ptype);
+                        param_names.push_back(pname);
+                        param_struct_names.push_back(p_struct_name);
+                        param_is_vec.push_back(p_is_vec);
+                        param_vec_elem_types.push_back(p_velem);
+                        param_vec_elem_structs.push_back(p_vestruct);
+                        if (!match(TOK_COMMA)) break;
+                    }
+                }
+                if (!consume(TOK_RPAREN, "Expected ')' closing constructor parameters!", error)) return false;
+
+                std::vector<PendingCtorInit> ctor_inits;
+                if (match(TOK_COLON)) {
+                    while (peek().kind == TOK_IDENT) {
+                        PendingCtorInit ci;
+                        ci.target_name = advance().text;
+                        if (match(TOK_LPAREN)) {
+                            while (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
+                                size_t astart = pos_;
+                                int pdepth = 0, bdepth = 0;
+                                while (peek().kind != TOK_EOF) {
+                                    if (peek().kind == TOK_LPAREN || peek().kind == TOK_LBRACKET || peek().kind == TOK_LBRACE) pdepth++;
+                                    else if (peek().kind == TOK_RPAREN || peek().kind == TOK_RBRACKET || peek().kind == TOK_RBRACE) {
+                                        if (pdepth == 0) break;
+                                        pdepth--;
+                                    } else if (peek().kind == TOK_COMMA && pdepth == 0 && bdepth == 0) {
+                                        break;
+                                    }
+                                    advance();
+                                }
+                                size_t aend = pos_;
+                                if (aend > astart) ci.arg_spans.push_back({astart, aend});
+                                if (!match(TOK_COMMA)) break;
+                            }
+                            consume(TOK_RPAREN, "Expected ')' in member initializer!", error);
+                        }
+                        ctor_inits.push_back(std::move(ci));
+                        if (!match(TOK_COMMA)) break;
+                    }
+                }
+
+                if (!consume(TOK_LBRACE, "Expected '{' at start of constructor body!", error)) return false;
+                size_t body_start = pos_;
+                int brace_depth = 1;
+                while (brace_depth > 0 && peek().kind != TOK_EOF) {
+                    if (peek().kind == TOK_LBRACE) brace_depth++;
+                    else if (peek().kind == TOK_RBRACE) {
+                        brace_depth--;
+                        if (brace_depth == 0) break;
+                    }
+                    advance();
+                }
+                size_t body_end = pos_;
+                consume(TOK_RBRACE, "Expected '}' closing constructor body!", error);
+
+                std::string ctor_name = "ctor_" + std::to_string(param_types.size());
+                if (param_types.empty()) has_ctor_0 = true;
+                PendingMethod cm;
+                cm.name = ctor_name;
+                cm.ret_type = ctx_.get_void_type();
+                cm.param_types = param_types;
+                cm.param_names = param_names;
+                cm.param_struct_names = param_struct_names;
+                cm.param_is_vec = param_is_vec;
+                cm.param_vec_elem_types = param_vec_elem_types;
+                cm.param_vec_elem_structs = param_vec_elem_structs;
+                cm.body_start_pos = body_start;
+                cm.body_end_pos = body_end;
+                cm.is_ctor = true;
+                cm.ctor_inits = std::move(ctor_inits);
+                pending_methods.push_back(std::move(cm));
+                if (oop_mgr_) {
+                    oop_mgr_->add_method(ctor_name, ctx_.get_void_type(), param_types, param_names, false, false);
                 }
                 continue;
             }
@@ -329,7 +583,7 @@ namespace grass::codegen {
                 match(TOK_SEMI);
                 continue;
             }
-            bool is_struct_field_or_ret = (oop_mgr_ && oop_mgr_->has_class(peek().text));
+            bool is_struct_field_or_ret = is_known_user_type(peek().text);
             bool is_vec_field_or_ret = is_vec_type_start();
             if (peek().kind == TOK_IDENT && (is_var_keyword(peek().text) || is_type_or_func_keyword(peek().text) || is_struct_field_or_ret || is_vec_field_or_ret)) {
                 ir::IRType* ftype = nullptr;
@@ -364,15 +618,28 @@ namespace grass::codegen {
                     std::vector<ir::IRType*> param_types;
                     std::vector<std::string> param_names;
                     std::vector<std::string> param_struct_names;
+                    std::vector<bool> param_is_vec;
+                    std::vector<ir::IRType*> param_vec_elem_types;
+                    std::vector<std::string> param_vec_elem_structs;
                     if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
                         while (true) {
                             ir::IRType* ptype = ctx_.get_i64_type();
                             std::string p_struct_name = "";
-                            if (peek().kind == TOK_IDENT && (peek(1).kind == TOK_IDENT || peek(1).kind == TOK_STAR)) {
+                            bool p_is_vec = false;
+                            ir::IRType* p_velem = nullptr;
+                            std::string p_vestruct;
+                            if (is_vec_type_start()) {
+                                std::string vsn;
+                                ptype = parse_vec_ir_type(p_velem, p_vestruct, vsn);
+                                p_struct_name = vsn;
+                                p_is_vec = true;
+                                while (match(TOK_STAR)) ptype = ctx_.get_ptr_type(ptype);
+                            } else if (peek().kind == TOK_IDENT && (peek(1).kind == TOK_IDENT || peek(1).kind == TOK_STAR || is_known_user_type(peek().text))) {
                                 std::string tname = advance().text;
                                 if (oop_mgr_ && oop_mgr_->has_class(tname)) {
                                     p_struct_name = tname;
                                     ptype = ctx_.get_ptr_type(parse_type_name(tname));
+                                    (void)match(TOK_STAR);
                                 } else {
                                     ptype = parse_type_name(tname);
                                 }
@@ -393,10 +660,17 @@ namespace grass::codegen {
                             param_types.push_back(ptype);
                             param_names.push_back(pname);
                             param_struct_names.push_back(p_struct_name);
+                            param_is_vec.push_back(p_is_vec);
+                            param_vec_elem_types.push_back(p_velem);
+                            param_vec_elem_structs.push_back(p_vestruct);
                             if (!match(TOK_COMMA)) break;
                         }
                     }
                     if (!consume(TOK_RPAREN, "Expected ')' closing method parameters!", error)) return false;
+                    while (peek().kind == TOK_IDENT && (peek().text == "const" || peek().text == "override" || peek().text == "final")) {
+                        if (peek().text == "override") { is_override_mod = true; is_virtual_mod = true; }
+                        advance();
+                    }
                     if (!consume(TOK_LBRACE, "Expected '{' at start of method body!", error)) return false;
 
                     size_t body_start = pos_;
@@ -412,11 +686,38 @@ namespace grass::codegen {
                     size_t body_end = pos_;
                     consume(TOK_RBRACE, "Expected '}' closing method body!", error);
 
-                    pending_methods.push_back({ mname, ftype, param_types, param_names, param_struct_names, body_start, body_end, false });
+                    PendingMethod pm;
+                    pm.name = mname;
+                    pm.ret_type = ftype;
+                    pm.param_types = param_types;
+                    pm.param_names = param_names;
+                    pm.param_struct_names = param_struct_names;
+                    pm.param_is_vec = param_is_vec;
+                    pm.param_vec_elem_types = param_vec_elem_types;
+                    pm.param_vec_elem_structs = param_vec_elem_structs;
+                    pm.body_start_pos = body_start;
+                    pm.body_end_pos = body_end;
+                    pending_methods.push_back(std::move(pm));
                     if (oop_mgr_) {
-                        oop_mgr_->add_method(mname, ftype, param_types, param_names);
+                        oop_mgr_->add_method(mname, ftype, param_types, param_names, is_virtual_mod, is_override_mod);
                     }
                 } else {
+                    if (match(TOK_ASSIGN)) {
+                        size_t dstart = pos_;
+                        int depth = 0;
+                        while (peek().kind != TOK_EOF) {
+                            if (peek().kind == TOK_LPAREN || peek().kind == TOK_LBRACKET || peek().kind == TOK_LBRACE) depth++;
+                            else if (peek().kind == TOK_RPAREN || peek().kind == TOK_RBRACKET || peek().kind == TOK_RBRACE) {
+                                if (depth == 0) break;
+                                depth--;
+                            } else if (peek().kind == TOK_SEMI && depth == 0) {
+                                break;
+                            }
+                            advance();
+                        }
+                        size_t dend = pos_;
+                        if (dend > dstart) field_defaults.push_back({ mname, dstart, dend });
+                    }
                     match(TOK_SEMI);
                     if (!ftype->is_struct() && !ftype->is_pointer() &&
                         (mname == "name" || mname == "title" || mname == "msg" || mname == "text" || mname == "path" || mname == "str")) {
@@ -435,14 +736,29 @@ namespace grass::codegen {
         consume(TOK_RBRACE, "Expected '}' closing struct definition!", error);
         match(TOK_SEMI);
 
+        class_field_defaults_[struct_name] = field_defaults;
+        bool has_base_ctor_0 = false;
+        if (!base_class.empty() && oop_mgr_) {
+            const auto* bcd = oop_mgr_->get_class(base_class);
+            if (bcd && (bcd->find_method("ctor_0") || bcd->find_method("ctor"))) has_base_ctor_0 = true;
+        }
+        if (oop_mgr_ && !has_ctor_0 && (!field_defaults.empty() || has_base_ctor_0)) {
+            PendingMethod sc;
+            sc.name = "ctor_0";
+            sc.ret_type = ctx_.get_void_type();
+            sc.is_ctor = true;
+            pending_methods.push_back(std::move(sc));
+            oop_mgr_->add_method("ctor_0", ctx_.get_void_type(), {}, {}, false, false);
+        }
+
         ctx_.get_struct_type(struct_name, field_types, field_names);
         if (oop_mgr_) {
             oop_mgr_->finalize_class();
         }
 
-        bool generated_explicit_dtor = false;
+        std::vector<ir::IRFunction*> method_fns;
+        method_fns.reserve(pending_methods.size());
         for (const auto& pm : pending_methods) {
-            if (pm.is_dtor) generated_explicit_dtor = true;
             ir::IRFunction* fn = nullptr;
             if (oop_mgr_) {
                 fn = oop_mgr_->create_method_function(struct_name, pm.name);
@@ -456,12 +772,24 @@ namespace grass::codegen {
                     fn->add_argument(pm.param_names[i], pm.param_types[i]);
                 }
             }
+            method_fns.push_back(fn);
+        }
+
+        bool generated_explicit_dtor = false;
+        for (size_t mi = 0; mi < pending_methods.size(); ++mi) {
+            const auto& pm = pending_methods[mi];
+            if (pm.is_dtor) generated_explicit_dtor = true;
+            ir::IRFunction* fn = method_fns[mi];
 
             ir::IRFunction* prev_fn = builder_.get_function();
             std::string prev_dtor_struct = current_dtor_struct_;
+            std::string prev_class_ctx = current_class_context_;
             builder_.set_function(fn);
             if (pm.is_dtor) current_dtor_struct_ = struct_name;
+            current_class_context_ = struct_name;
             scopes_.clear();
+            expr_array_elem_types_.clear();
+            expr_array_elem_structs_.clear();
             push_scope();
 
             ir::BasicBlock* entry_bb = builder_.create_block("entry");
@@ -474,17 +802,81 @@ namespace grass::codegen {
             for (size_t i = 1; i < fn->arguments.size(); ++i) {
                 ir::ValueId p_alloca = builder_.create_alloca(fn->arguments[i].type, 1, 0, fn->arguments[i].name);
                 builder_.create_store(fn->arguments[i].id, p_alloca);
-                std::string sname = (i - 1 < pm.param_struct_names.size()) ? pm.param_struct_names[i - 1] : "";
-                declare_var(fn->arguments[i].name, p_alloca, fn->arguments[i].type, sname, false);
+                size_t pi = i - 1;
+                std::string sname = (pi < pm.param_struct_names.size()) ? pm.param_struct_names[pi] : "";
+                bool pvec = (pi < pm.param_is_vec.size()) ? pm.param_is_vec[pi] : false;
+                ir::IRType* pve = (pi < pm.param_vec_elem_types.size()) ? pm.param_vec_elem_types[pi] : nullptr;
+                std::string pves = (pi < pm.param_vec_elem_structs.size()) ? pm.param_vec_elem_structs[pi] : "";
+                declare_var(fn->arguments[i].name, p_alloca, fn->arguments[i].type, sname, false, pvec, pve, pves);
             }
 
             size_t saved_pos = pos_;
-            pos_ = pm.body_start_pos;
-            while (pos_ < pm.body_end_pos && peek().kind != TOK_EOF) {
-                if (!parse_statement(error)) {
-                    pos_ = saved_pos;
-                    current_dtor_struct_ = prev_dtor_struct;
-                    return false;
+            if (pm.is_ctor && oop_mgr_) {
+                ir::ValueId this_val = builder_.create_load(this_alloca, "this_ctor");
+                bool explicit_base_ctor = false;
+                for (const auto& ci : pm.ctor_inits) {
+                    if (!base_class.empty() && ci.target_name == base_class) {
+                        explicit_base_ctor = true;
+                        std::vector<ir::ValueId> bargs;
+                        for (const auto& span : ci.arg_spans) {
+                            pos_ = span.first;
+                            ir::ValueId av = parse_expression(error);
+                            if (av == ir::kInvalidValueId) { pos_ = saved_pos; current_dtor_struct_ = prev_dtor_struct; current_class_context_ = prev_class_ctx; return false; }
+                            bargs.push_back(av);
+                        }
+                        emit_ctor_call(this_val, base_class, bargs);
+                        break;
+                    }
+                }
+                if (!explicit_base_ctor && !base_class.empty()) {
+                    emit_ctor_call(this_val, base_class, {});
+                }
+                for (const auto& fdef : field_defaults) {
+                    pos_ = fdef.expr_start;
+                    ir::ValueId dv = parse_expression(error);
+                    if (dv == ir::kInvalidValueId) { pos_ = saved_pos; current_dtor_struct_ = prev_dtor_struct; current_class_context_ = prev_class_ctx; return false; }
+                    const auto* cd = oop_mgr_->get_class(struct_name);
+                    if (cd) {
+                        auto fit = cd->field_indices.find(fdef.field_name);
+                        if (fit != cd->field_indices.end()) {
+                            dv = coerce_type(dv, cd->fields[fit->second].type);
+                            oop_mgr_->emit_store_field(builder_, this_val, struct_name, fdef.field_name, dv);
+                        }
+                    }
+                }
+                for (const auto& ci : pm.ctor_inits) {
+                    if (!base_class.empty() && ci.target_name == base_class) continue;
+                    const auto* cd = oop_mgr_->get_class(struct_name);
+                    if (!cd) continue;
+                    auto fit = cd->field_indices.find(ci.target_name);
+                    if (fit == cd->field_indices.end()) continue;
+                    const auto& fld = cd->fields[fit->second];
+                    std::vector<ir::ValueId> fargs;
+                    for (const auto& span : ci.arg_spans) {
+                        pos_ = span.first;
+                        ir::ValueId av = parse_expression(error);
+                        if (av == ir::kInvalidValueId) { pos_ = saved_pos; current_dtor_struct_ = prev_dtor_struct; current_class_context_ = prev_class_ctx; return false; }
+                        fargs.push_back(av);
+                    }
+                    if (fld.type && fld.type->is_struct() && oop_mgr_->has_class(fld.type->struct_name) && !vec_struct_meta_.count(fld.type->struct_name)) {
+                        ir::ValueId fptr = oop_mgr_->emit_field_gep(builder_, this_val, struct_name, ci.target_name);
+                        emit_ctor_call(fptr, fld.type->struct_name, fargs);
+                    } else if (!fargs.empty()) {
+                        ir::ValueId fv = coerce_type(fargs[0], fld.type);
+                        oop_mgr_->emit_store_field(builder_, this_val, struct_name, ci.target_name, fv);
+                    }
+                }
+            }
+
+            if (pm.body_end_pos > pm.body_start_pos) {
+                pos_ = pm.body_start_pos;
+                while (pos_ < pm.body_end_pos && peek().kind != TOK_EOF) {
+                    if (!parse_statement(error)) {
+                        pos_ = saved_pos;
+                        current_dtor_struct_ = prev_dtor_struct;
+                        current_class_context_ = prev_class_ctx;
+                        return false;
+                    }
                 }
             }
             pos_ = saved_pos;
@@ -511,6 +903,7 @@ namespace grass::codegen {
 
             fn->rebuild_cfg();
             current_dtor_struct_ = prev_dtor_struct;
+            current_class_context_ = prev_class_ctx;
             builder_.set_function(prev_fn);
         }
 
@@ -593,7 +986,7 @@ namespace grass::codegen {
                     struct_name = vsn;
                     p_is_vec = true;
                 } else if (peek().kind == TOK_IDENT &&
-                    (peek(1).kind == TOK_IDENT || peek(1).kind == TOK_STAR || (oop_mgr_ && oop_mgr_->has_class(peek().text)))) {
+                    (peek(1).kind == TOK_IDENT || peek(1).kind == TOK_STAR || is_known_user_type(peek().text))) {
                     std::string tname = advance().text;
                     if (oop_mgr_ && oop_mgr_->has_class(tname)) {
                         struct_name = tname;

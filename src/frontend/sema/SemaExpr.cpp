@@ -63,12 +63,34 @@ SemaType GrassSema::checkVariableExpr(const VariableExprAST* var) {
         }
     }
     if (var->name == "proc_mem") return SemaType::Int();
+
+    size_t col_pos = var->name.rfind("::");
+    if (col_pos != std::string::npos) {
+        std::string prefix = var->name.substr(0, col_pos);
+        std::string entry = var->name.substr(col_pos + 2);
+        const EnumSymbol* es = findEnum(prefix);
+        if (es) {
+            if (es->values.count(entry)) {
+                return SemaType::Int();
+            }
+            reportError(var->loc, "Enum '" + prefix + "' has no enumerator named '" + entry + "'.", "Check enum member name");
+            return SemaType::Int();
+        }
+    }
+
     VariableSymbol* sym = current_scope_->lookupVariable(var->name);
     if (!sym) {
-        // Check if it's a field of 'this' when inside a method
-        if (current_struct_) {
-            auto fit = current_struct_->fields.find(var->name);
-            if (fit != current_struct_->fields.end()) return fit->second;
+        // Check if it's a field of 'this' (or inherited base class) when inside a method
+        for (const StructSymbol* cur = current_struct_; cur != nullptr;
+             cur = cur->base_class.empty() ? nullptr : findStruct(cur->base_class)) {
+            auto fit = cur->fields.find(var->name);
+            if (fit != cur->fields.end()) return fit->second;
+        }
+        // Check unscoped enums
+        for (const auto& kv : enums_) {
+            if (!kv.second.is_scoped && kv.second.values.count(var->name)) {
+                return SemaType::Int();
+            }
         }
         // Check if passing a function reference (e.g. thread(fn, ...), attach_sound(fn, ...))
         if (functions_.count(var->name)) {
@@ -289,10 +311,48 @@ SemaType GrassSema::checkCallExpr(const CallExprAST* call) {
     }
 
     const FunctionSymbol* func = findFunction(call->callee);
+    if (!func && current_struct_) {
+        for (const StructSymbol* cur = current_struct_; cur != nullptr;
+             cur = cur->base_class.empty() ? nullptr : findStruct(cur->base_class)) {
+            auto mit = cur->methods.find(call->callee);
+            if (mit != cur->methods.end()) {
+                func = &mit->second;
+                break;
+            }
+        }
+    }
     if (!func) {
-        // Check if it's a struct constructor: Point()
-        if (structs_.count(call->callee)) {
-            return SemaType::CustomStruct(call->callee);
+        // Check if it's a struct/class constructor call: Token(...)
+        const StructSymbol* st_ctor = findStruct(call->callee);
+        if (st_ctor) {
+            if (!st_ctor->constructors.empty()) {
+                const FunctionSymbol* matched = nullptr;
+                for (const auto& cs : st_ctor->constructors) {
+                    if (cs.params.size() == call->args.size()) {
+                        matched = &cs;
+                        break;
+                    }
+                }
+                if (!matched) {
+                    reportError(call->loc,
+                        "No matching constructor for '" + call->callee + "' taking " +
+                        std::to_string(call->args.size()) + " arguments.",
+                        "Match constructor parameter count");
+                } else {
+                    for (size_t i = 0; i < call->args.size(); ++i) {
+                        SemaType arg_t = checkExpr(call->args[i].get());
+                        if (!arg_t.is_assignable_to(matched->params[i].second, strict_mode_)) {
+                            reportError(call->args[i]->loc,
+                                "Constructor argument " + std::to_string(i + 1) + " of '" + call->callee +
+                                "' expected '" + matched->params[i].second.toString() + "', got '" + arg_t.toString() + "'.");
+                        }
+                    }
+                    return SemaType::CustomStruct(st_ctor->name);
+                }
+            } else {
+                for (const auto& a : call->args) checkExpr(a.get());
+            }
+            return SemaType::CustomStruct(st_ctor->name);
         }
         reportError(call->loc, "Call to undeclared function '" + call->callee + "'.", "Check spelling or declare function before calling");
         return SemaType::Unknown();
@@ -331,7 +391,19 @@ SemaType GrassSema::checkCallExpr(const CallExprAST* call) {
 
 SemaType GrassSema::checkMemberAccessExpr(const MemberAccessExprAST* mem) {
     if (!mem || !mem->object) return SemaType::Unknown();
+    if (!mem->is_arrow && !mem->is_method_call && mem->object->node_kind == NodeKind::VariableExpr) {
+        auto vobj = static_cast<const VariableExprAST*>(mem->object.get());
+        if (const EnumSymbol* es = findEnum(vobj->name)) {
+            if (es->values.count(mem->member)) {
+                return SemaType::Int();
+            }
+            reportError(mem->loc, "Enum '" + vobj->name + "' has no enumerator named '" + mem->member + "'.", "Check enum constant name");
+            return SemaType::Int();
+        }
+    }
     SemaType obj_type = checkExpr(mem->object.get());
+    bool is_this_ptr = (mem->object->node_kind == NodeKind::VariableExpr &&
+                        static_cast<const VariableExprAST*>(mem->object.get())->name == "this");
 
     if (mem->is_arrow) {
         if (!obj_type.is_pointer()) {
@@ -347,7 +419,7 @@ SemaType GrassSema::checkMemberAccessExpr(const MemberAccessExprAST* mem) {
         }
     } else {
         if (obj_type.is_pointer()) {
-            if (strict_mode_) {
+            if (strict_mode_ && !is_this_ptr) {
                 reportError(mem->loc,
                     "Cannot use '.' on pointer type '" + obj_type.toString() + "'.",
                     "Use '->' for pointer member access");
@@ -489,13 +561,49 @@ SemaType GrassSema::checkMemberAccessExpr(const MemberAccessExprAST* mem) {
     std::unordered_set<std::string> visited_fields;
     std::unordered_set<std::string> visited_methods;
 
+    auto is_derived_or_same = [this](const std::string& derived_name, const std::string& owner_name) -> bool {
+        const StructSymbol* cur = findStruct(derived_name);
+        std::unordered_set<std::string> seen;
+        while (cur && !seen.count(cur->name)) {
+            if (cur->name == owner_name) return true;
+            seen.insert(cur->name);
+            cur = cur->base_class.empty() ? nullptr : findStruct(cur->base_class);
+        }
+        return false;
+    };
+
     if (mem->is_method_call) {
-        const FunctionSymbol* method = find_method(st, mem->member, visited_methods, find_method);
+        std::string owner_name;
+        const FunctionSymbol* method = nullptr;
+        {
+            const StructSymbol* cur = st;
+            while (cur && !visited_methods.count(cur->name)) {
+                visited_methods.insert(cur->name);
+                auto mit = cur->methods.find(mem->member);
+                if (mit != cur->methods.end()) {
+                    method = &mit->second;
+                    owner_name = cur->name;
+                    break;
+                }
+                cur = cur->base_class.empty() ? nullptr : findStruct(cur->base_class);
+            }
+        }
         if (!method) {
             reportError(mem->loc,
                 "Struct/Class '" + obj_type.name + "' has no method named '" + mem->member + "'.",
                 "Check method name or declare method in struct");
             return SemaType::Unknown();
+        }
+        if (const StructSymbol* owner_st = findStruct(owner_name)) {
+            auto acc_it = owner_st->method_access.find(mem->member);
+            if (acc_it != owner_st->method_access.end()) {
+                if (acc_it->second == AccessLevel::Private && (!current_struct_ || current_struct_->name != owner_st->name)) {
+                    reportError(mem->loc, "Method '" + mem->member + "' of '" + owner_st->name + "' is private.");
+                } else if (acc_it->second == AccessLevel::Protected &&
+                           (!current_struct_ || !is_derived_or_same(current_struct_->name, owner_st->name))) {
+                    reportError(mem->loc, "Method '" + mem->member + "' of '" + owner_st->name + "' is protected.");
+                }
+            }
         }
 
         if (mem->method_args.size() != method->params.size()) {
@@ -519,12 +627,37 @@ SemaType GrassSema::checkMemberAccessExpr(const MemberAccessExprAST* mem) {
 
         return method->return_type;
     } else {
-        const SemaType* ftype = find_field(st, mem->member, visited_fields, find_field);
+        std::string owner_name;
+        const SemaType* ftype = nullptr;
+        {
+            const StructSymbol* cur = st;
+            while (cur && !visited_fields.count(cur->name)) {
+                visited_fields.insert(cur->name);
+                auto fit = cur->fields.find(mem->member);
+                if (fit != cur->fields.end()) {
+                    ftype = &fit->second;
+                    owner_name = cur->name;
+                    break;
+                }
+                cur = cur->base_class.empty() ? nullptr : findStruct(cur->base_class);
+            }
+        }
         if (!ftype) {
             reportError(mem->loc,
                 "Struct '" + obj_type.name + "' has no field named '" + mem->member + "'.",
                 "Check struct declaration for available fields");
             return SemaType::Unknown();
+        }
+        if (const StructSymbol* owner_st = findStruct(owner_name)) {
+            auto acc_it = owner_st->field_access.find(mem->member);
+            if (acc_it != owner_st->field_access.end()) {
+                if (acc_it->second == AccessLevel::Private && (!current_struct_ || current_struct_->name != owner_st->name)) {
+                    reportError(mem->loc, "Field '" + mem->member + "' of '" + owner_st->name + "' is private.");
+                } else if (acc_it->second == AccessLevel::Protected &&
+                           (!current_struct_ || !is_derived_or_same(current_struct_->name, owner_st->name))) {
+                    reportError(mem->loc, "Field '" + mem->member + "' of '" + owner_st->name + "' is protected.");
+                }
+            }
         }
         return *ftype;
     }
@@ -582,6 +715,35 @@ SemaType GrassSema::checkAllocExpr(const AllocExprAST* alloc) {
         SemaType sz_type = checkExpr(alloc->size_expr.get());
         if (!sz_type.is_integral() && !sz_type.is_any() && !sz_type.is_unknown()) {
             reportError(alloc->loc, "Argument to 'alloc()' must be an integer, got '" + sz_type.toString() + "'.", "Pass size in bytes as an integer");
+        }
+    }
+    if (alloc->is_new) {
+        std::vector<SemaType> arg_types;
+        for (const auto& a : alloc->ctor_args) {
+            arg_types.push_back(checkExpr(a.get()));
+        }
+        const StructSymbol* st = findStruct(alloc->type_name);
+        if (st && !st->constructors.empty()) {
+            const FunctionSymbol* matched = nullptr;
+            for (const auto& cs : st->constructors) {
+                if (cs.params.size() == arg_types.size()) {
+                    matched = &cs;
+                    break;
+                }
+            }
+            if (!matched) {
+                reportError(alloc->loc,
+                    "No matching constructor for 'new " + alloc->type_name + "' taking " +
+                    std::to_string(arg_types.size()) + " arguments.");
+            } else {
+                for (size_t i = 0; i < arg_types.size(); ++i) {
+                    if (!arg_types[i].is_assignable_to(matched->params[i].second, strict_mode_)) {
+                        reportError(alloc->ctor_args[i]->loc,
+                            "Constructor argument " + std::to_string(i + 1) + " of 'new " + alloc->type_name +
+                            "' expected '" + matched->params[i].second.toString() + "', got '" + arg_types[i].toString() + "'.");
+                    }
+                }
+            }
         }
     }
     return SemaType::Ptr(resolveType(alloc->type_name, 0, alloc->loc));

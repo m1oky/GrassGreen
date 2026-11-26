@@ -298,7 +298,10 @@ vector<GrassToken> Lexer::tokenize() {
             default: break;
         }
     }
-    tokens.push_back(GrassToken(TOK_EOF, "", 0.0, line, get_col(pos)));
+    tokens.push_back(GrassToken(TOK_EOF, "", 0.0, line, get_col(pos), filename));
+    for (auto& t : tokens) {
+        if (t.file.empty()) t.file = filename;
+    }
     return tokens;
 }
 

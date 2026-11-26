@@ -468,12 +468,13 @@ struct GrassToken {
     double num_val;
     int line;
     int col;
+    std::string file;
 
-    GrassToken(GrassTokenKind k = TOK_EOF, const std::string& t = "", double n = 0.0, int l = 1, int c = 1)
-        : kind(k), text(t), num_val(n), line(l), col(c) {}
+    GrassToken(GrassTokenKind k = TOK_EOF, const std::string& t = "", double n = 0.0, int l = 1, int c = 1, const std::string& f = "")
+        : kind(k), text(t), num_val(n), line(l), col(c), file(f) {}
 
     SourceLocation loc(const std::string& fname = "") const {
-        return SourceLocation(fname, line, col);
+        return SourceLocation(file.empty() ? fname : file, line, col);
     }
 };
 
@@ -548,6 +549,9 @@ class BytecodeCompiler {
     std::string current_dtor_struct_;
     std::unordered_map<std::string, bool> dtor_structs_;
     std::unordered_map<std::string, std::string> var_vec_types_;
+    std::unordered_map<std::string, std::unordered_map<std::string, int64_t>> enum_types_;
+    std::unordered_map<std::string, std::unordered_map<std::string, std::string>> struct_field_vecs_;
+    std::unordered_map<std::string, std::unordered_set<size_t>> ctor_arities_;
 
     void pushVMScope();
     void popVMScope(bool emit_cleanups = true);
@@ -656,6 +660,7 @@ enum class NodeKind : uint8_t {
     FunctionDecl,
     StructDecl,
     ClassDecl,
+    EnumDecl,
     ModuleDecl,
     NamespaceDecl,
     UsingDecl,
@@ -796,9 +801,13 @@ struct ArrayLiteralExprAST : public ExprAST {
 struct AllocExprAST : public ExprAST {
     std::string type_name;
     std::unique_ptr<ExprAST> size_expr;
+    std::vector<std::unique_ptr<ExprAST>> ctor_args;
+    bool is_new = false;
 
-    AllocExprAST(const SourceLocation& l, const std::string& tname, std::unique_ptr<ExprAST> sz = nullptr)
-        : ExprAST(NodeKind::AllocExpr, l), type_name(tname), size_expr(std::move(sz)) {}
+    AllocExprAST(const SourceLocation& l, const std::string& tname, std::unique_ptr<ExprAST> sz = nullptr,
+                 std::vector<std::unique_ptr<ExprAST>> args = {}, bool nw = false)
+        : ExprAST(NodeKind::AllocExpr, l), type_name(tname), size_expr(std::move(sz)),
+          ctor_args(std::move(args)), is_new(nw) {}
 };
 
 struct FreeExprAST : public ExprAST {
@@ -826,11 +835,15 @@ struct VarDeclStmtAST : public StmtAST {
     int pointer_depth = 0;
     bool is_const = false;
     std::unique_ptr<ExprAST> init_expr;
+    bool is_direct_ctor = false;
+    std::vector<std::unique_ptr<ExprAST>> ctor_args;
     mutable std::string inferred_type;
 
     VarDeclStmtAST(const SourceLocation& l, const std::string& tname, const std::string& vname,
-                   int ptr_depth = 0, bool c = false, std::unique_ptr<ExprAST> init = nullptr)
-        : StmtAST(NodeKind::VarDeclStmt, l), type_name(tname), var_name(vname), pointer_depth(ptr_depth), is_const(c), init_expr(std::move(init)) {}
+                   int ptr_depth = 0, bool c = false, std::unique_ptr<ExprAST> init = nullptr,
+                   bool direct_ctor = false, std::vector<std::unique_ptr<ExprAST>> cargs = {})
+        : StmtAST(NodeKind::VarDeclStmt, l), type_name(tname), var_name(vname), pointer_depth(ptr_depth),
+          is_const(c), init_expr(std::move(init)), is_direct_ctor(direct_ctor), ctor_args(std::move(cargs)) {}
 };
 
 struct AssignStmtAST : public StmtAST {
@@ -913,18 +926,35 @@ struct ParamDecl {
         : type_name(t), name(n), pointer_depth(ptr), loc(l) {}
 };
 
+enum class AccessLevel : uint8_t {
+    Default,
+    Public,
+    Private,
+    Protected
+};
+
 struct FieldDecl {
     std::string type_name;
     std::string name;
     int pointer_depth = 0;
     SourceLocation loc;
+    AccessLevel access = AccessLevel::Default;
+    bool is_final = false;
+    bool is_static = false;
 
-    FieldDecl(const std::string& t, const std::string& n, int ptr, const SourceLocation& l)
-        : type_name(t), name(n), pointer_depth(ptr), loc(l) {}
+    FieldDecl(const std::string& t, const std::string& n, int ptr, const SourceLocation& l,
+              AccessLevel acc = AccessLevel::Default, bool fin = false, bool st = false)
+        : type_name(t), name(n), pointer_depth(ptr), loc(l), access(acc), is_final(fin), is_static(st) {}
 };
 
 struct DeclAST : public ASTNode {
     explicit DeclAST(NodeKind k, const SourceLocation& l = SourceLocation()) : ASTNode(k, l) {}
+};
+
+struct MemberInitAST {
+    std::string member_name;
+    std::vector<std::unique_ptr<ExprAST>> args;
+    SourceLocation loc;
 };
 
 struct FunctionDeclAST : public DeclAST {
@@ -936,14 +966,35 @@ struct FunctionDeclAST : public DeclAST {
     bool is_method = false;
     bool is_virtual = false;
     bool is_destructor = false;
+    bool is_constructor = false;
+    bool is_final = false;
+    bool is_override = false;
+    bool is_static = false;
+    AccessLevel access = AccessLevel::Default;
+    std::vector<MemberInitAST> member_inits;
 
     FunctionDeclAST(const SourceLocation& l, const std::string& ret_type, int ret_ptr,
                     const std::string& n, std::vector<ParamDecl> p,
                     std::unique_ptr<BlockStmtAST> b, bool method = false, bool virt = false,
-                    bool dtor = false)
+                    bool dtor = false, bool ctor = false, AccessLevel acc = AccessLevel::Default)
         : DeclAST(NodeKind::FunctionDecl, l), return_type(ret_type), return_pointer_depth(ret_ptr),
           name(n), params(std::move(p)), body(std::move(b)),
-          is_method(method), is_virtual(virt), is_destructor(dtor) {}
+          is_method(method), is_virtual(virt), is_destructor(dtor), is_constructor(ctor), access(acc) {}
+};
+
+struct EnumEntryAST {
+    std::string name;
+    int64_t value = 0;
+    SourceLocation loc;
+};
+
+struct EnumDeclAST : public DeclAST {
+    std::string name;
+    bool is_scoped = false;
+    std::vector<EnumEntryAST> entries;
+
+    EnumDeclAST(const SourceLocation& l, const std::string& n, bool scoped, std::vector<EnumEntryAST> e)
+        : DeclAST(NodeKind::EnumDecl, l), name(n), is_scoped(scoped), entries(std::move(e)) {}
 };
 
 struct StructDeclAST : public DeclAST {
@@ -972,6 +1023,7 @@ struct ModuleDeclAST : public DeclAST {
     std::vector<std::unique_ptr<FunctionDeclAST>> functions;
     std::vector<std::unique_ptr<StructDeclAST>> structs;
     std::vector<std::unique_ptr<ClassDeclAST>> classes;
+    std::vector<std::unique_ptr<EnumDeclAST>> enums;
 
     ModuleDeclAST(const SourceLocation& l, const std::string& n)
         : DeclAST(NodeKind::ModuleDecl, l), name(n) {}
@@ -1017,6 +1069,7 @@ private:
     std::string filename;
     std::vector<SyntaxDiagnostic> diagnostics;
     std::unordered_set<std::string> custom_types;
+    std::unordered_set<std::string> enum_types;
     int error_count = 0;
     int parser_depth_ = 0;
     static constexpr int MAX_ERRORS = 100;
@@ -1064,8 +1117,10 @@ private:
 
     std::unique_ptr<DeclAST> parseDeclaration();
     std::unique_ptr<FunctionDeclAST> parseFunction(const std::string& ret_type, int ret_ptr, const std::string& name);
+    std::unique_ptr<FunctionDeclAST> parseConstructor(const std::string& class_name, AccessLevel access);
     std::unique_ptr<StructDeclAST> parseStruct();
     std::unique_ptr<ClassDeclAST> parseClass();
+    std::unique_ptr<EnumDeclAST> parseEnum();
     std::unique_ptr<ModuleDeclAST> parseModule();
     std::unique_ptr<NamespaceDeclAST> parseNamespace();
     std::unique_ptr<UsingDeclAST> parseUsing();

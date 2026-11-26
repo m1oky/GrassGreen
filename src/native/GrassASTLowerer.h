@@ -90,6 +90,17 @@ namespace grass::codegen {
         std::vector<std::string> using_namespaces_;
         std::unordered_map<std::string, std::string> using_symbols_;
 
+        std::unordered_map<std::string, std::unordered_map<std::string, int64_t>> enum_defs_;
+        std::unordered_map<std::string, int64_t> unscoped_enum_vals_;
+        std::string current_class_context_;
+        std::unordered_map<std::string, std::string> class_base_names_;
+        struct FieldDefaultInit {
+            std::string field_name;
+            size_t expr_start = 0;
+            size_t expr_end = 0;
+        };
+        std::unordered_map<std::string, std::vector<FieldDefaultInit>> class_field_defaults_;
+
         std::string current_namespace() const;
         std::string qualify_name(const std::string& name) const;
         std::string resolve_callee(const std::string& callee) const;
@@ -151,7 +162,10 @@ namespace grass::codegen {
     private:
         static bool is_type_or_func_keyword(const std::string& s);
         static bool is_var_keyword(const std::string& s);
+        bool is_known_user_type(const std::string& name) const;
         ir::IRType* parse_type_name(const std::string& name);
+        bool parse_enum_definition(std::string& error);
+        void emit_ctor_call(ir::ValueId obj_ptr, const std::string& class_name, const std::vector<ir::ValueId>& args);
         bool parse_struct_definition(std::string& error);
         bool parse_function(std::string& error);
         bool parse_statement(std::string& error);

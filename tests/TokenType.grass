@@ -1,0 +1,8 @@
+!GrassGreen!
+
+enum TokenType {
+    NUMBER,
+    IDENT = 10,
+    PLUS,
+    EOF_TOK
+};

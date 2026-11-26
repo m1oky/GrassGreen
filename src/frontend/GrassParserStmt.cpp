@@ -239,6 +239,16 @@ std::unique_ptr<StmtAST> GrassParser::parseStatement() {
     if (checkIdent("for") || checkIdent("again")) return parseFor();
     if (checkIdent("return")) return parseReturn();
 
+    if (checkIdent("delete") && !(peek(1).kind == TOK_LPAREN && peek(2).kind == TOK_STRING)) {
+        auto loc = advance().loc(filename);
+        auto tgt = parseExpression();
+        if (!match(TOK_SEMI)) {
+            reportError(peek().loc(filename), "Expected ';' after delete statement", "Insert ';'");
+            synchronize();
+        }
+        return std::make_unique<ExprStmtAST>(loc, std::make_unique<FreeExprAST>(loc, std::move(tgt)));
+    }
+
     if (checkIdent("break")) {
         auto loc = advance().loc(filename);
         if (!match(TOK_SEMI)) {
@@ -350,9 +360,22 @@ std::unique_ptr<StmtAST> GrassParser::parseVarDecl(const std::string& type_name,
     auto tok = advance();
     std::string vname = tok.text;
     std::unique_ptr<ExprAST> init = nullptr;
+    bool is_direct_ctor = false;
+    std::vector<std::unique_ptr<ExprAST>> ctor_args;
 
     if (match(TOK_ASSIGN)) {
         init = parseExpression();
+    } else if (ptr_depth == 0 && check(TOK_LPAREN)) {
+        advance(); // '('
+        if (!check(TOK_RPAREN) && !isAtEnd()) {
+            do {
+                ctor_args.push_back(parseExpression());
+            } while (match(TOK_COMMA));
+        }
+        if (!match(TOK_RPAREN)) {
+            reportError(peek().loc(filename), "Expected ')' after constructor arguments for '" + vname + "'", "Close constructor arguments with ')'");
+        }
+        is_direct_ctor = true;
     }
 
     if (!match(TOK_SEMI)) {
@@ -360,7 +383,7 @@ std::unique_ptr<StmtAST> GrassParser::parseVarDecl(const std::string& type_name,
         synchronize();
     }
 
-    return std::make_unique<VarDeclStmtAST>(tok.loc(filename), type_name, vname, ptr_depth, is_const, std::move(init));
+    return std::make_unique<VarDeclStmtAST>(tok.loc(filename), type_name, vname, ptr_depth, is_const, std::move(init), is_direct_ctor, std::move(ctor_args));
 }
 
 std::unique_ptr<StmtAST> GrassParser::parseIf() {
@@ -408,10 +431,16 @@ std::unique_ptr<StmtAST> GrassParser::parseFor() {
             init = parseVarDecl(tname, ptr, false);
         } else {
             auto e = parseExpression();
-            if (e) {
+            if (e && (peek().kind == TOK_ASSIGN || peek().kind == TOK_PLUS_ASSIGN ||
+                      peek().kind == TOK_MINUS_ASSIGN || peek().kind == TOK_MUL_ASSIGN ||
+                      peek().kind == TOK_DIV_ASSIGN)) {
+                auto op_tok = advance();
+                auto val = parseExpression();
+                init = std::make_unique<AssignStmtAST>(loc, std::move(e), op_tok.kind, op_tok.text, std::move(val));
+            } else if (e) {
                 init = std::make_unique<ExprStmtAST>(loc, std::move(e));
-                match(TOK_SEMI);
             }
+            match(TOK_SEMI);
         }
     } else {
         advance();
@@ -426,7 +455,15 @@ std::unique_ptr<StmtAST> GrassParser::parseFor() {
     std::unique_ptr<StmtAST> step = nullptr;
     if (!check(TOK_RPAREN)) {
         auto e = parseExpression();
-        if (e) step = std::make_unique<ExprStmtAST>(loc, std::move(e));
+        if (e && (peek().kind == TOK_ASSIGN || peek().kind == TOK_PLUS_ASSIGN ||
+                  peek().kind == TOK_MINUS_ASSIGN || peek().kind == TOK_MUL_ASSIGN ||
+                  peek().kind == TOK_DIV_ASSIGN)) {
+            auto op_tok = advance();
+            auto val = parseExpression();
+            step = std::make_unique<AssignStmtAST>(loc, std::move(e), op_tok.kind, op_tok.text, std::move(val));
+        } else if (e) {
+            step = std::make_unique<ExprStmtAST>(loc, std::move(e));
+        }
     }
     if (!match(TOK_RPAREN)) {
         reportError(peek().loc(filename), "Expected ')' after for-loop clauses", "Close for-loop clauses with ')'");

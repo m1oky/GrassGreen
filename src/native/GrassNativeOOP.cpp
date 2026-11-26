@@ -68,6 +68,14 @@ namespace grass::native {
                     current_class_.field_indices[inherited_f.name] = current_class_.fields.size();
                     current_class_.fields.push_back(inherited_f);
                 }
+                // Inherit non-constructor, non-destructor methods from base class
+                for (const auto& bm : base.methods) {
+                    if (bm.is_destructor || bm.is_constructor || bm.name == "dtor" || bm.name.rfind("ctor", 0) == 0) {
+                        continue;
+                    }
+                    current_class_.method_indices[bm.name] = current_class_.methods.size();
+                    current_class_.methods.push_back(bm);
+                }
             }
         }
     }

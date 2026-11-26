@@ -245,6 +245,41 @@ void BytecodeCompiler::parsePrimary() {
         emitDouble(0.0);
         return;
     }
+    if (peek().kind == TOK_IDENT && peek().text == "new" && peek(1).kind == TOK_IDENT) {
+        advance(); // consume 'new'
+        string cname = advance().text;
+        while (match(TOK_COLON_COLON)) {
+            if (peek().kind == TOK_IDENT) cname += "::" + advance().text;
+        }
+        if (g_struct_registry.count(cname)) {
+            emitByte(OP_NEW_STRUCT);
+            emitString(cname);
+            size_t argc = 0;
+            if (match(TOK_LPAREN)) {
+                if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
+                    do {
+                        parseExpression();
+                        argc++;
+                    } while (match(TOK_COMMA));
+                }
+                consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')' в 'new " + cname + "'!");
+            }
+            string ctor_fn = cname + "__ctor_" + to_string(argc);
+            if (user_functions.count(ctor_fn)) {
+                emitByte(OP_CALL_USER);
+                emitU32(user_functions[ctor_fn].entry_ip);
+            } else {
+                for (size_t k = 0; k < argc; ++k) emitByte(OP_POP);
+            }
+        } else {
+            if (match(TOK_LPAREN)) {
+                while (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) advance();
+                match(TOK_RPAREN);
+            }
+            emitByte(OP_CONST_NUM); emitDouble(0.0);
+        }
+        return;
+    }
     if (peek().kind == TOK_IDENT) {
         int tok_line = peek().line;
         string name = advance().text;
@@ -253,6 +288,39 @@ void BytecodeCompiler::parsePrimary() {
                 name += "::" + advance().text;
             }
         }
+        // Check enum constant: EnumName::Entry
+        {
+            size_t col_pos = name.rfind("::");
+            if (col_pos != string::npos) {
+                string ename = name.substr(0, col_pos);
+                string entry = name.substr(col_pos + 2);
+                auto eit = enum_types_.find(ename);
+                if (eit != enum_types_.end() && eit->second.count(entry)) {
+                    emitByte(OP_CONST_NUM);
+                    emitDouble(static_cast<double>(eit->second.at(entry)));
+                    return;
+                }
+            }
+        }
+        auto is_implicit_field = [&](const string& id) -> bool {
+            if (current_struct_context.empty() || id == "this") return false;
+            if (!g_struct_registry.count(current_struct_context)) return false;
+            if (!g_struct_registry[current_struct_context].field_indices.count(id)) return false;
+            for (const auto& sc : vm_scopes_) {
+                for (const auto& dv : sc.declared_var_types) {
+                    if (dv == id) return false;
+                }
+            }
+            return true;
+        };
+        auto emit_load_ident = [&](const string& id) {
+            if (is_implicit_field(id)) {
+                emitByte(OP_LOAD_VAR); emitString("this");
+                emitByte(OP_GET_FIELD); emitString(id);
+            } else {
+                emitByte(OP_LOAD_VAR); emitString(id);
+            }
+        };
         if (name == "true")  { emitByte(OP_CONST_NUM); emitDouble(1.0); return; }
         if (name == "false") { emitByte(OP_CONST_NUM); emitDouble(0.0); return; }
         if (name == "endl")  { emitByte(OP_CONST_STR); emitString("\n"); return; }
@@ -280,12 +348,16 @@ void BytecodeCompiler::parsePrimary() {
         if (match(TOK_LBRACKET)) {
             parseExpression();
             match(TOK_RBRACKET);
-            emitByte(OP_LOAD_VAR); emitString(name);
+            emit_load_ident(name);
             emitByte(OP_GET_INDEX);
             string cur_struct;
             auto vit = var_vec_types_.find(name);
             if (vit != var_vec_types_.end() && g_struct_registry.count(vit->second)) {
                 cur_struct = vit->second;
+            } else if (is_implicit_field(name) && struct_field_vecs_.count(current_struct_context) &&
+                       struct_field_vecs_[current_struct_context].count(name)) {
+                string fe = struct_field_vecs_[current_struct_context][name];
+                if (g_struct_registry.count(fe)) cur_struct = fe;
             }
             while (match(TOK_DOT) || match(TOK_ARROW)) {
                 string member = advance().text;
@@ -379,10 +451,21 @@ void BytecodeCompiler::parsePrimary() {
             }
         }
 
-        // Точка или стрелка как отдельный токен: obj.member / outer.inner.val / obj.method(args)
+        // Точка или стрелка как отдельный токен: Enum.VAL, obj.member, obj.vec_field.push(...), obj.method()
         if (match(TOK_DOT) || match(TOK_ARROW)) {
             string member = advance().text;
-            bool is_vec_var = (var_vec_types_.count(name) > 0);
+            if (enum_types_.count(name) && enum_types_[name].count(member)) {
+                emitByte(OP_CONST_NUM);
+                emitDouble(static_cast<double>(enum_types_[name][member]));
+                return;
+            }
+            bool is_vec_var = (var_vec_types_.count(name) > 0) ||
+                              (is_implicit_field(name) && struct_field_vecs_.count(current_struct_context) &&
+                               struct_field_vecs_[current_struct_context].count(name) > 0);
+            string direct_vec_elem;
+            if (var_vec_types_.count(name)) direct_vec_elem = var_vec_types_[name];
+            else if (is_vec_var) direct_vec_elem = struct_field_vecs_[current_struct_context][name];
+
             bool struct_has_method = false;
             if (var_struct_types.count(name) && g_struct_registry.count(var_struct_types[name])) {
                 const auto& mlist = g_struct_registry[var_struct_types[name]].methods;
@@ -393,7 +476,7 @@ void BytecodeCompiler::parsePrimary() {
             if ((is_vec_var || !struct_has_method) && peek().kind == TOK_LPAREN) {
                 if (member == "push" || member == "push_back") {
                     advance(); // (
-                    emitByte(OP_LOAD_VAR); emitString(name);
+                    emit_load_ident(name);
                     parseExpression();
                     consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
                     emitByte(OP_CALL_BUILTIN); emitString("__vec_push"); emitByte(2);
@@ -402,42 +485,42 @@ void BytecodeCompiler::parsePrimary() {
                     advance(); // (
                     consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
                     if (!is_vec_var && member == "pop") {
-                        emitByte(OP_LOAD_VAR); emitString(name);
+                        emit_load_ident(name);
                         emitByte(OP_ARRAY_POP);
                         return;
                     }
-                    if (is_vec_var) emitVMVecPopElemDtor(name, var_vec_types_[name]);
-                    emitByte(OP_LOAD_VAR); emitString(name);
+                    if (!direct_vec_elem.empty()) emitVMVecPopElemDtor(name, direct_vec_elem);
+                    emit_load_ident(name);
                     emitByte(OP_CALL_BUILTIN); emitString("__vec_pop"); emitByte(1);
                     return;
                 } else if (member == "size" || member == "len") {
                     advance(); // (
                     consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
-                    emitByte(OP_LOAD_VAR); emitString(name);
+                    emit_load_ident(name);
                     emitByte(OP_CALL_BUILTIN); emitString("__vec_size"); emitByte(1);
                     return;
                 } else if (member == "capacity") {
                     advance(); // (
                     consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
-                    emitByte(OP_LOAD_VAR); emitString(name);
+                    emit_load_ident(name);
                     emitByte(OP_CALL_BUILTIN); emitString("__vec_capacity"); emitByte(1);
                     return;
                 } else if (member == "empty") {
                     advance(); // (
                     consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
-                    emitByte(OP_LOAD_VAR); emitString(name);
+                    emit_load_ident(name);
                     emitByte(OP_CALL_BUILTIN); emitString("__vec_empty"); emitByte(1);
                     return;
                 } else if (member == "clear") {
                     advance(); // (
                     consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
-                    if (is_vec_var) emitVMVecElemDtorLoop(name, var_vec_types_[name]);
-                    emitByte(OP_LOAD_VAR); emitString(name);
+                    if (!direct_vec_elem.empty()) emitVMVecElemDtorLoop(name, direct_vec_elem);
+                    emit_load_ident(name);
                     emitByte(OP_CALL_BUILTIN); emitString("__vec_clear"); emitByte(1);
                     return;
                 } else if (member == "reserve") {
                     advance(); // (
-                    emitByte(OP_LOAD_VAR); emitString(name);
+                    emit_load_ident(name);
                     parseExpression();
                     consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
                     emitByte(OP_CALL_BUILTIN); emitString("__vec_reserve"); emitByte(2);
@@ -445,7 +528,7 @@ void BytecodeCompiler::parsePrimary() {
                 } else if (member == "data") {
                     advance(); // (
                     consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
-                    emitByte(OP_LOAD_VAR); emitString(name);
+                    emit_load_ident(name);
                     emitByte(OP_CALL_BUILTIN); emitString("__vec_data"); emitByte(1);
                     if (match(TOK_LBRACKET)) {
                         string tmp_ptr = "__vec_dp_" + to_string(vm_temp_counter_++);
@@ -459,55 +542,114 @@ void BytecodeCompiler::parsePrimary() {
                 }
             }
 
-            emitByte(OP_LOAD_VAR); emitString(name);
+            emit_load_ident(name);
             string cur_struct;
+            string cur_vec_elem;
             if (var_struct_types.count(name)) {
                 cur_struct = var_struct_types[name];
             } else if (name == "this" && !current_struct_context.empty()) {
                 cur_struct = current_struct_context;
+            } else if (is_implicit_field(name) && g_struct_registry.count(current_struct_context)) {
+                const auto& sdef = g_struct_registry[current_struct_context];
+                auto fit = sdef.field_indices.find(name);
+                if (fit != sdef.field_indices.end()) {
+                    const string& sn = sdef.fields[fit->second].struct_name;
+                    if (sn.rfind("__vec__:", 0) == 0) cur_vec_elem = sn.substr(8);
+                    else cur_struct = sn;
+                }
             }
 
             while (true) {
                 if (match(TOK_LPAREN)) {
-                    uint8_t argc = 1;
-                    if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
-                        do {
+                    if (!cur_vec_elem.empty()) {
+                        if (member == "push" || member == "push_back") {
                             parseExpression();
-                            argc++;
-                        } while (match(TOK_COMMA));
-                    }
-                    consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')' у метода '" + member + "'!");
-                    (void)argc;
-
-                    string target_fn;
-                    if (!cur_struct.empty()) {
-                        target_fn = cur_struct + "_" + member;
-                    } else if (method_to_structs.count(member) && !method_to_structs[member].empty()) {
-                        target_fn = method_to_structs[member][0] + "_" + member;
+                            consume(TOK_RPAREN, "Ожидалась ')' у push!");
+                            emitByte(OP_CALL_BUILTIN); emitString("__vec_push"); emitByte(2);
+                        } else if (member == "pop" || member == "pop_back") {
+                            consume(TOK_RPAREN, "Ожидалась ')' у pop!");
+                            emitByte(OP_CALL_BUILTIN); emitString("__vec_pop"); emitByte(1);
+                        } else if (member == "size" || member == "len") {
+                            consume(TOK_RPAREN, "Ожидалась ')' у size!");
+                            emitByte(OP_CALL_BUILTIN); emitString("__vec_size"); emitByte(1);
+                        } else if (member == "capacity") {
+                            consume(TOK_RPAREN, "Ожидалась ')' у capacity!");
+                            emitByte(OP_CALL_BUILTIN); emitString("__vec_capacity"); emitByte(1);
+                        } else if (member == "empty") {
+                            consume(TOK_RPAREN, "Ожидалась ')' у empty!");
+                            emitByte(OP_CALL_BUILTIN); emitString("__vec_empty"); emitByte(1);
+                        } else if (member == "clear") {
+                            consume(TOK_RPAREN, "Ожидалась ')' у clear!");
+                            emitByte(OP_CALL_BUILTIN); emitString("__vec_clear"); emitByte(1);
+                        } else if (member == "reserve") {
+                            parseExpression();
+                            consume(TOK_RPAREN, "Ожидалась ')' у reserve!");
+                            emitByte(OP_CALL_BUILTIN); emitString("__vec_reserve"); emitByte(2);
+                        } else if (member == "data") {
+                            consume(TOK_RPAREN, "Ожидалась ')' у data!");
+                            emitByte(OP_CALL_BUILTIN); emitString("__vec_data"); emitByte(1);
+                        }
+                        cur_vec_elem.clear();
+                        cur_struct.clear();
                     } else {
-                        target_fn = name + "_" + member;
-                    }
+                        uint8_t argc = 1;
+                        if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
+                            do {
+                                parseExpression();
+                                argc++;
+                            } while (match(TOK_COMMA));
+                        }
+                        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')' у метода '" + member + "'!");
+                        (void)argc;
 
-                    if (user_functions.count(target_fn)) {
-                        emitByte(OP_CALL_USER);
-                        emitU32(user_functions[target_fn].entry_ip);
-                    } else {
-                        emitByte(OP_CALL_USER);
-                        method_call_fixups.push_back({code.size(), target_fn});
-                        emitU32(0);
+                        string target_fn;
+                        if (!cur_struct.empty()) {
+                            target_fn = cur_struct + "_" + member;
+                        } else if (method_to_structs.count(member) && !method_to_structs[member].empty()) {
+                            target_fn = method_to_structs[member][0] + "_" + member;
+                        } else {
+                            target_fn = name + "_" + member;
+                        }
+
+                        if (user_functions.count(target_fn)) {
+                            emitByte(OP_CALL_USER);
+                            emitU32(user_functions[target_fn].entry_ip);
+                        } else {
+                            emitByte(OP_CALL_USER);
+                            method_call_fixups.push_back({code.size(), target_fn});
+                            emitU32(0);
+                        }
+                        cur_struct.clear();
                     }
-                    cur_struct.clear();
                 } else {
                     emitByte(OP_GET_FIELD); emitString(member);
+                    cur_vec_elem.clear();
                     string next_struct;
                     if (!cur_struct.empty() && g_struct_registry.count(cur_struct)) {
                         const auto& sdef = g_struct_registry[cur_struct];
                         auto fit = sdef.field_indices.find(member);
                         if (fit != sdef.field_indices.end()) {
-                            next_struct = sdef.fields[fit->second].struct_name;
+                            const string& sn = sdef.fields[fit->second].struct_name;
+                            if (sn.rfind("__vec__:", 0) == 0) cur_vec_elem = sn.substr(8);
+                            else next_struct = sn;
                         }
                     }
                     cur_struct = next_struct;
+                    if (match(TOK_LBRACKET)) {
+                        string idx_tmp = "__ch_idx_" + to_string(vm_temp_counter_++);
+                        string obj_tmp = "__ch_obj_" + to_string(vm_temp_counter_++);
+                        emitByte(OP_DEF_VAR); emitString(obj_tmp);
+                        parseExpression();
+                        consume(TOK_RBRACKET, "Ожидалась ']' в индексации члена!");
+                        emitByte(OP_DEF_VAR); emitString(idx_tmp);
+                        emitByte(OP_LOAD_VAR); emitString(idx_tmp);
+                        emitByte(OP_LOAD_VAR); emitString(obj_tmp);
+                        emitByte(OP_GET_INDEX);
+                        if (!cur_vec_elem.empty()) {
+                            cur_struct = cur_vec_elem;
+                            cur_vec_elem.clear();
+                        }
+                    }
                 }
                 if (match(TOK_DOT) || match(TOK_ARROW)) {
                     member = advance().text;
@@ -518,11 +660,25 @@ void BytecodeCompiler::parsePrimary() {
             return;
         }
 
-        // Конструктор структуры: Player()
+        // Конструктор структуры/класса: Token(...)
         if (g_struct_registry.count(name) && match(TOK_LPAREN)) {
-            consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
             emitByte(OP_NEW_STRUCT);
             emitString(name);
+            size_t argc = 0;
+            if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
+                do {
+                    parseExpression();
+                    argc++;
+                } while (match(TOK_COMMA));
+            }
+            consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
+            string ctor_fn = name + "__ctor_" + to_string(argc);
+            if (user_functions.count(ctor_fn)) {
+                emitByte(OP_CALL_USER);
+                emitU32(user_functions[ctor_fn].entry_ip);
+            } else {
+                for (size_t k = 0; k < argc; ++k) emitByte(OP_POP);
+            }
             return;
         }
 
@@ -554,6 +710,28 @@ void BytecodeCompiler::parsePrimary() {
         }
 
         if (match(TOK_LPAREN)) {
+            if (!current_struct_context.empty() && g_struct_registry.count(current_struct_context)) {
+                const auto& mlist = g_struct_registry[current_struct_context].methods;
+                if (std::find(mlist.begin(), mlist.end(), name) != mlist.end()) {
+                    emitByte(OP_LOAD_VAR); emitString("this");
+                    if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
+                        do {
+                            parseExpression();
+                        } while (match(TOK_COMMA));
+                    }
+                    consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
+                    string target_fn = current_struct_context + "_" + name;
+                    if (user_functions.count(target_fn)) {
+                        emitByte(OP_CALL_USER);
+                        emitU32(user_functions[target_fn].entry_ip);
+                    } else {
+                        emitByte(OP_CALL_USER);
+                        method_call_fixups.push_back({code.size(), target_fn});
+                        emitU32(0);
+                    }
+                    return;
+                }
+            }
             uint8_t argc = 0;
             if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
                 do {
@@ -602,8 +780,7 @@ void BytecodeCompiler::parsePrimary() {
             return;
         }
 
-        emitByte(OP_LOAD_VAR);
-        emitString(name);
+        emit_load_ident(name);
         return;
     }
 

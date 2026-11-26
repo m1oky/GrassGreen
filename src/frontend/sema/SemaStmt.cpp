@@ -145,9 +145,28 @@ void GrassSema::checkStructDecl(const StructDeclAST* st) {
                     "Remove parameters from '~" + st->name + "()'");
             }
         }
-        auto mit = current_struct_->methods.find(m->name);
-        if (mit == current_struct_->methods.end()) continue;
-        const FunctionSymbol& msym = mit->second;
+        const FunctionSymbol* msym_ptr = nullptr;
+        if (m->is_constructor) {
+            for (const auto& cs : current_struct_->constructors) {
+                if (cs.params.size() == m->params.size()) {
+                    bool same = true;
+                    for (size_t pi = 0; pi < cs.params.size(); ++pi) {
+                        if (cs.params[pi].first != m->params[pi].name) { same = false; break; }
+                    }
+                    if (same) { msym_ptr = &cs; break; }
+                }
+            }
+            if (!msym_ptr && !current_struct_->constructors.empty()) {
+                for (const auto& cs : current_struct_->constructors) {
+                    if (cs.params.size() == m->params.size()) { msym_ptr = &cs; break; }
+                }
+            }
+        } else {
+            auto mit = current_struct_->methods.find(m->name);
+            if (mit != current_struct_->methods.end()) msym_ptr = &mit->second;
+        }
+        if (!msym_ptr) continue;
+        const FunctionSymbol& msym = *msym_ptr;
 
         current_function_ = &msym;
         enterScope(Scope::Kind::Function);
@@ -155,7 +174,7 @@ void GrassSema::checkStructDecl(const StructDeclAST* st) {
         // Add 'this' pointer in struct method scope
         VariableSymbol this_sym;
         this_sym.name = "this";
-        this_sym.type = SemaType::CustomStruct(st->name);
+        this_sym.type = SemaType::Ptr(SemaType::CustomStruct(st->name));
         this_sym.loc = m->loc;
         this_sym.is_initialized = true;
         current_scope_->declareVariable(this_sym);
@@ -169,9 +188,13 @@ void GrassSema::checkStructDecl(const StructDeclAST* st) {
             current_scope_->declareVariable(vsym);
         }
 
+        for (const auto& mi : m->member_inits) {
+            for (const auto& a : mi.args) checkExpr(a.get());
+        }
+
         if (m->body) {
             checkBlockStmt(m->body.get());
-            if (!msym.return_type.is_void() && !msym.return_type.is_any()) {
+            if (!m->is_constructor && !m->is_destructor && !msym.return_type.is_void() && !msym.return_type.is_any()) {
                 if (!returnsOnAllPaths(m->body.get())) {
                     reportError(m->loc,
                         "Not all control paths return a value in method '" + m->name + "'.",
@@ -233,16 +256,35 @@ void GrassSema::checkClassDecl(const ClassDeclAST* cls) {
                     "Remove parameters from '~" + cls->name + "()'");
             }
         }
-        auto mit = current_struct_->methods.find(m->name);
-        if (mit == current_struct_->methods.end()) continue;
-        const FunctionSymbol& msym = mit->second;
+        const FunctionSymbol* msym_ptr = nullptr;
+        if (m->is_constructor) {
+            for (const auto& cs : current_struct_->constructors) {
+                if (cs.params.size() == m->params.size()) {
+                    bool same = true;
+                    for (size_t pi = 0; pi < cs.params.size(); ++pi) {
+                        if (cs.params[pi].first != m->params[pi].name) { same = false; break; }
+                    }
+                    if (same) { msym_ptr = &cs; break; }
+                }
+            }
+            if (!msym_ptr && !current_struct_->constructors.empty()) {
+                for (const auto& cs : current_struct_->constructors) {
+                    if (cs.params.size() == m->params.size()) { msym_ptr = &cs; break; }
+                }
+            }
+        } else {
+            auto mit = current_struct_->methods.find(m->name);
+            if (mit != current_struct_->methods.end()) msym_ptr = &mit->second;
+        }
+        if (!msym_ptr) continue;
+        const FunctionSymbol& msym = *msym_ptr;
 
         current_function_ = &msym;
         enterScope(Scope::Kind::Function);
 
         VariableSymbol this_sym;
         this_sym.name = "this";
-        this_sym.type = SemaType::CustomStruct(cls->name);
+        this_sym.type = SemaType::Ptr(SemaType::CustomStruct(cls->name));
         this_sym.loc = m->loc;
         this_sym.is_initialized = true;
         current_scope_->declareVariable(this_sym);
@@ -256,9 +298,13 @@ void GrassSema::checkClassDecl(const ClassDeclAST* cls) {
             current_scope_->declareVariable(vsym);
         }
 
+        for (const auto& mi : m->member_inits) {
+            for (const auto& a : mi.args) checkExpr(a.get());
+        }
+
         if (m->body) {
             checkBlockStmt(m->body.get());
-            if (!msym.return_type.is_void() && !msym.return_type.is_any()) {
+            if (!m->is_constructor && !m->is_destructor && !msym.return_type.is_void() && !msym.return_type.is_any()) {
                 if (!returnsOnAllPaths(m->body.get())) {
                     reportError(m->loc,
                         "Not all control paths return a value in method '" + m->name + "'.",
@@ -378,6 +424,38 @@ void GrassSema::checkVarDeclStmt(const VarDeclStmtAST* vdecl) {
                 "Use a pointer '&" + vdecl->var_name + "' instead of copying a RAII vec");
         }
         decl_type = init_type;
+    } else if (vdecl->is_direct_ctor) {
+        std::vector<SemaType> arg_types;
+        for (const auto& arg : vdecl->ctor_args) {
+            arg_types.push_back(checkExpr(arg.get()));
+        }
+        if (decl_type.is_struct()) {
+            const StructSymbol* st_sym = findStruct(decl_type.name);
+            if (st_sym && !st_sym->constructors.empty()) {
+                const FunctionSymbol* matched_ctor = nullptr;
+                for (const auto& cs : st_sym->constructors) {
+                    if (cs.params.size() == arg_types.size()) {
+                        matched_ctor = &cs;
+                        break;
+                    }
+                }
+                if (!matched_ctor) {
+                    reportError(vdecl->loc,
+                        "No matching constructor for '" + decl_type.name + "' taking " +
+                        std::to_string(arg_types.size()) + " arguments.",
+                        "Provide constructor arguments matching declaration");
+                } else {
+                    for (size_t ai = 0; ai < arg_types.size(); ++ai) {
+                        if (!arg_types[ai].is_assignable_to(matched_ctor->params[ai].second, strict_mode_)) {
+                            reportError(vdecl->ctor_args[ai]->loc,
+                                "Constructor argument " + std::to_string(ai + 1) + " for '" + decl_type.name +
+                                "' expected '" + matched_ctor->params[ai].second.toString() +
+                                "', got '" + arg_types[ai].toString() + "'.");
+                        }
+                    }
+                }
+            }
+        }
     } else if (vdecl->init_expr) {
         SemaType init_type = checkExpr(vdecl->init_expr.get());
         if (decl_type.is_vec() || init_type.is_vec()) {
@@ -399,7 +477,7 @@ void GrassSema::checkVarDeclStmt(const VarDeclStmtAST* vdecl) {
     sym.type = decl_type;
     sym.loc = vdecl->loc;
     sym.is_const = vdecl->is_const;
-    sym.is_initialized = (vdecl->init_expr != nullptr);
+    sym.is_initialized = (vdecl->init_expr != nullptr || vdecl->is_direct_ctor);
     vdecl->inferred_type = decl_type.toString();
     current_scope_->declareVariable(sym);
 
@@ -426,15 +504,17 @@ void GrassSema::checkAssignStmt(const AssignStmtAST* assign) {
         auto var = static_cast<const VariableExprAST*>(assign->target.get());
         VariableSymbol* sym = current_scope_->lookupVariable(var->name);
         if (!sym) {
-            if (current_struct_) {
-                auto fit = current_struct_->fields.find(var->name);
-                if (fit != current_struct_->fields.end()) {
+            bool found_field = false;
+            for (const StructSymbol* cur = current_struct_; cur != nullptr;
+                 cur = cur->base_class.empty() ? nullptr : findStruct(cur->base_class)) {
+                auto fit = cur->fields.find(var->name);
+                if (fit != cur->fields.end()) {
                     tgt_type = fit->second;
-                } else {
-                    reportError(var->loc, "Undeclared variable '" + var->name + "'.", "Declare variable with type before using it");
-                    tgt_type = SemaType::Unknown();
+                    found_field = true;
+                    break;
                 }
-            } else {
+            }
+            if (!found_field) {
                 reportError(var->loc, "Undeclared variable '" + var->name + "'.", "Declare variable with type before using it");
                 tgt_type = SemaType::Unknown();
             }

@@ -162,7 +162,7 @@ bool ProcessCompilation(CompilerOptions& opt) {
 
     // 2. Этап Лексера: Токенизация
     auto t_lex_start = chrono::high_resolution_clock::now();
-    Lexer lexer(source_code);
+    Lexer lexer(source_code, input_path);
     vector<GrassToken> tokens = lexer.tokenize();
 
     // 2.1. Разрешение директив импорта (Import Pass)

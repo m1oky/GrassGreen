@@ -253,6 +253,26 @@ namespace grass::codegen {
             return true;
         }
 
+        // Local enum definition
+        if (peek().kind == TOK_IDENT && peek().text == "enum") {
+            return parse_enum_definition(error);
+        }
+
+        // OOP Heap Destructor: delete ptr; (keep !baremetal! delete("path") as function call)
+        if (peek().kind == TOK_IDENT && peek().text == "delete" && peek(1).kind != TOK_LPAREN) {
+            advance(); // 'delete'
+            last_struct_name_.clear();
+            ir::ValueId target_ptr = parse_expression(error);
+            if (!target_ptr) return false;
+            match(TOK_SEMI);
+            if (oop_mgr_ && !last_struct_name_.empty() && oop_mgr_->has_class(last_struct_name_)) {
+                oop_mgr_->emit_delete_object(builder_, target_ptr, last_struct_name_);
+            } else {
+                builder_.create_call("grass_free", ctx_.get_void_type(), { coerce_type(target_ptr, ctx_.get_ptr_type()) });
+            }
+            return true;
+        }
+
         // Dynamic Vector Declaration: vec<T> v; / vector<T> v; / vec<T>* vp = &v;
         if (is_vec_type_start()) {
             ir::IRType* elem_t = nullptr;
@@ -291,8 +311,9 @@ namespace grass::codegen {
 
         // Variable Declaration
         bool is_struct_decl = (oop_mgr_ && oop_mgr_->has_class(peek().text));
+        bool is_enum_decl = (enum_defs_.count(peek().text) > 0);
         bool is_vdecl = false;
-        if (is_var_keyword(peek().text) || is_type_or_func_keyword(peek().text) || is_struct_decl) {
+        if (is_var_keyword(peek().text) || is_type_or_func_keyword(peek().text) || is_struct_decl || is_enum_decl) {
             size_t off = 1;
             while (peek(off).kind == TOK_STAR) off++;
             if (peek(off).kind == TOK_IDENT) {
@@ -363,6 +384,26 @@ namespace grass::codegen {
                     ir::ValueId alloca_id = builder_.create_alloca(cur_vtype, 1, 0, var_name);
                     declare_var(var_name, alloca_id, cur_vtype, struct_name, raii, false, nullptr, "", is_arr, arr_et, arr_es);
                     builder_.create_store(init_val, alloca_id);
+                } else if (is_struct_decl && !cur_explicit_ptr && match(TOK_LPAREN)) {
+                    std::vector<ir::ValueId> ctor_args;
+                    if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
+                        while (true) {
+                            ir::ValueId arg = parse_expression(error);
+                            if (!arg) return false;
+                            ctor_args.push_back(arg);
+                            if (!match(TOK_COMMA)) break;
+                        }
+                    }
+                    if (!consume(TOK_RPAREN, "Expected ')' closing constructor arguments!", error)) return false;
+                    bool raii = has_raii_dtor(struct_name, false);
+                    ir::ValueId alloca_id = builder_.create_alloca(cur_vtype, 1, 0, var_name);
+                    declare_var(var_name, alloca_id, cur_vtype, struct_name, raii);
+                    emit_zero_struct(alloca_id, cur_vtype);
+                    const auto* cd = oop_mgr_ ? oop_mgr_->get_class(struct_name) : nullptr;
+                    if (cd && cd->has_vtable) {
+                        oop_mgr_->emit_vtable_init(builder_, alloca_id, struct_name);
+                    }
+                    emit_ctor_call(alloca_id, struct_name, ctor_args);
                 } else if (match(TOK_ASSIGN)) {
                     last_struct_name_.clear();
                     last_expr_is_borrowed_ptr_ = false;
@@ -402,6 +443,13 @@ namespace grass::codegen {
                     declare_var(var_name, alloca_id, cur_vtype, struct_name, raii);
                     if (cur_vtype && cur_vtype->is_struct()) {
                         emit_zero_struct(alloca_id, cur_vtype);
+                        if (!struct_name.empty() && !cur_explicit_ptr && oop_mgr_) {
+                            const auto* cd = oop_mgr_->get_class(struct_name);
+                            if (cd && cd->has_vtable) {
+                                oop_mgr_->emit_vtable_init(builder_, alloca_id, struct_name);
+                            }
+                            emit_ctor_call(alloca_id, struct_name, {});
+                        }
                     } else {
                         ir::ValueId default_val = builder_.create_const_int(cur_vtype, 0);
                         builder_.create_store(default_val, alloca_id);

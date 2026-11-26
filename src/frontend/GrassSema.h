@@ -176,12 +176,22 @@ struct FunctionSymbol {
 struct StructSymbol {
     std::string name;
     std::unordered_map<std::string, SemaType> fields;
+    std::unordered_map<std::string, AccessLevel> field_access;
     std::vector<std::string> field_order;
     std::unordered_map<std::string, FunctionSymbol> methods;
+    std::unordered_map<std::string, AccessLevel> method_access;
+    std::vector<FunctionSymbol> constructors;
     SourceLocation loc;
     std::string base_class;
     bool has_destructor = false;
     bool has_explicit_destructor = false;
+};
+
+struct EnumSymbol {
+    std::string name;
+    bool is_scoped = false;
+    std::unordered_map<std::string, int64_t> values;
+    SourceLocation loc;
 };
 
 struct ModuleSymbol {
@@ -251,6 +261,7 @@ class GrassSema {
 private:
     std::unordered_map<std::string, FunctionSymbol> functions_;
     std::unordered_map<std::string, StructSymbol> structs_;
+    std::unordered_map<std::string, EnumSymbol> enums_;
     std::unordered_map<std::string, ModuleSymbol> modules_;
     std::vector<std::unique_ptr<Scope>> scope_pool_;
     Scope* current_scope_ = nullptr;
@@ -329,6 +340,7 @@ public:
 
     const FunctionSymbol* findFunction(const std::string& name) const;
     const StructSymbol* findStruct(const std::string& name) const;
+    const EnumSymbol* findEnum(const std::string& name) const;
 };
 
 } // namespace grass::sema

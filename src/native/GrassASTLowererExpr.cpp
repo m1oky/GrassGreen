@@ -110,15 +110,34 @@ namespace grass::codegen {
                  tokens_[look].kind == TOK_DIV_ASSIGN)) {
                 std::string obj_name = advance().text;
                 const VarBinding* obj_var = lookup_var(obj_name);
-                if (!obj_var) {
+                ir::ValueId inst_ptr = 0;
+                std::string sname;
+                if (obj_var) {
+                    inst_ptr = obj_var->alloca_id;
+                    if (obj_var->type && obj_var->type->is_pointer()) {
+                        inst_ptr = builder_.create_load(obj_var->alloca_id, obj_name + "_ptr");
+                    }
+                    sname = obj_var->struct_type_name;
+                } else if (!current_class_context_.empty() && oop_mgr_) {
+                    const VarBinding* this_var = lookup_var("this");
+                    const auto* cd = oop_mgr_->get_class(current_class_context_);
+                    auto fit = cd ? cd->field_indices.find(obj_name) : cd->field_indices.end();
+                    if (this_var && cd && fit != cd->field_indices.end()) {
+                        ir::ValueId this_ptr = builder_.create_load(this_var->alloca_id, "this_ptr");
+                        const auto& fld = cd->fields[fit->second];
+                        if (fld.type && fld.type->is_struct()) {
+                            inst_ptr = oop_mgr_->emit_field_gep(builder_, this_ptr, current_class_context_, obj_name);
+                            sname = fld.type->struct_name;
+                        } else if (fld.type && fld.type->is_pointer() && fld.type->element_type && fld.type->element_type->is_struct()) {
+                            inst_ptr = oop_mgr_->emit_load_field(builder_, this_ptr, current_class_context_, obj_name);
+                            sname = fld.type->element_type->struct_name;
+                        }
+                    }
+                }
+                if (!inst_ptr) {
                     error = "Undeclared object: " + obj_name;
                     return 0;
                 }
-                ir::ValueId inst_ptr = obj_var->alloca_id;
-                if (obj_var->type && obj_var->type->is_pointer()) {
-                    inst_ptr = builder_.create_load(obj_var->alloca_id, obj_name + "_ptr");
-                }
-                std::string sname = obj_var->struct_type_name;
 
                 std::vector<std::string> member_chain;
                 while ((peek().kind == TOK_DOT || peek().kind == TOK_ARROW) && peek(1).kind == TOK_IDENT) {
@@ -335,6 +354,48 @@ namespace grass::codegen {
 
             VarBinding* var = lookup_var_mut(var_name);
             if (!var) {
+                if (!current_class_context_.empty() && oop_mgr_) {
+                    const auto* cd = oop_mgr_->get_class(current_class_context_);
+                    const VarBinding* this_var = lookup_var("this");
+                    if (cd && this_var) {
+                        auto fit = cd->field_indices.find(var_name);
+                        if (fit != cd->field_indices.end()) {
+                            const auto& fld = cd->fields[fit->second];
+                            ir::ValueId rhs = parse_assignment(error);
+                            if (!rhs) return 0;
+                            ir::ValueId this_ptr = builder_.create_load(this_var->alloca_id, "this_ptr");
+                            if (op == TOK_ASSIGN) {
+                                ir::IRType* rhs_t = builder_.get_function()->has_value(rhs) ? builder_.get_function()->get_value(rhs).type : nullptr;
+                                if (fld.type && fld.type->is_struct() && rhs_t && rhs_t->is_pointer()) {
+                                    ir::ValueId fptr = oop_mgr_->emit_field_gep(builder_, this_ptr, current_class_context_, var_name);
+                                    emit_copy_struct(fptr, rhs, fld.type);
+                                } else {
+                                    rhs = coerce_type(rhs, fld.type);
+                                    oop_mgr_->emit_store_field(builder_, this_ptr, current_class_context_, var_name, rhs);
+                                }
+                                return rhs;
+                            } else {
+                                ir::ValueId cur = oop_mgr_->emit_load_field(builder_, this_ptr, current_class_context_, var_name);
+                                match_types(cur, rhs);
+                                ir::IRType* lt = builder_.get_function()->get_value(cur).type;
+                                ir::ValueId computed = 0;
+                                if (lt && lt->is_floating_point()) {
+                                    if (op == TOK_PLUS_ASSIGN) computed = builder_.create_fadd(cur, rhs);
+                                    else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_fsub(cur, rhs);
+                                    else if (op == TOK_MUL_ASSIGN) computed = builder_.create_fmul(cur, rhs);
+                                    else if (op == TOK_DIV_ASSIGN) computed = builder_.create_fdiv(cur, rhs);
+                                } else {
+                                    if (op == TOK_PLUS_ASSIGN) computed = builder_.create_add(cur, rhs);
+                                    else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_sub(cur, rhs);
+                                    else if (op == TOK_MUL_ASSIGN) computed = builder_.create_mul(cur, rhs);
+                                    else if (op == TOK_DIV_ASSIGN) computed = builder_.create_sdiv(cur, rhs);
+                                }
+                                if (computed) oop_mgr_->emit_store_field(builder_, this_ptr, current_class_context_, var_name, computed);
+                                return computed;
+                            }
+                        }
+                    }
+                }
                 error = "Undeclared variable: " + var_name;
                 return 0;
             }

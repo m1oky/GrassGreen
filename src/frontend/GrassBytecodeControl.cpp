@@ -247,7 +247,24 @@ bool BytecodeCompiler::parseStatementControlAndVars() {
         }
     }
 
-    // Объявление экземпляра структуры: Player player; или Player* player = ...;
+    // Объявление перечисления (enum) или экземпляра структуры/класса: TokenType t; Player player; Token tok(args...);
+    if (peek().kind == TOK_IDENT && enum_types_.count(peek().text)) {
+        size_t off = 1;
+        while (peek(off).kind == TOK_STAR) off++;
+        if (peek(off).kind == TOK_IDENT) {
+            advance(); // enum type name
+            while (match(TOK_STAR)) {}
+            string v_name = advance().text;
+            if (match(TOK_ASSIGN)) {
+                parseExpression();
+            } else {
+                emitByte(OP_CONST_NUM); emitDouble(0.0);
+            }
+            emitByte(OP_DEF_VAR); emitString(v_name);
+            match(TOK_SEMI);
+            return true;
+        }
+    }
     if (peek().kind == TOK_IDENT && g_struct_registry.count(peek().text)) {
         size_t off = 1;
         while (peek(off).kind == TOK_STAR) off++;
@@ -259,9 +276,34 @@ bool BytecodeCompiler::parseStatementControlAndVars() {
             registerVMVarType(v_name, s_name);
             if (match(TOK_ASSIGN)) {
                 parseExpression();
+            } else if (!is_explicit_ptr && match(TOK_LPAREN)) {
+                emitByte(OP_NEW_STRUCT);
+                emitString(s_name);
+                size_t argc = 0;
+                if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
+                    do {
+                        parseExpression();
+                        argc++;
+                    } while (match(TOK_COMMA));
+                }
+                consume(TOK_RPAREN, "Ожидалась закрывающая скобка ')' в конструкторе '" + s_name + "'!");
+                string ctor_fn = s_name + "__ctor_" + to_string(argc);
+                if (user_functions.count(ctor_fn)) {
+                    emitByte(OP_CALL_USER);
+                    emitU32(user_functions[ctor_fn].entry_ip);
+                } else {
+                    for (size_t k = 0; k < argc; ++k) emitByte(OP_POP);
+                }
             } else {
                 emitByte(OP_NEW_STRUCT);
                 emitString(s_name);
+                if (!is_explicit_ptr) {
+                    string ctor0 = s_name + "__ctor_0";
+                    if (user_functions.count(ctor0)) {
+                        emitByte(OP_CALL_USER);
+                        emitU32(user_functions[ctor0].entry_ip);
+                    }
+                }
             }
             emitByte(OP_DEF_VAR);
             emitString(v_name);
@@ -311,7 +353,11 @@ bool BytecodeCompiler::parseStatementControlAndVars() {
                         peek_off = off + 1;
                     }
                 }
-                if (peek(peek_off).kind == TOK_AMP && peek(peek_off + 1).kind == TOK_IDENT &&
+                if (peek(peek_off).kind == TOK_IDENT && peek(peek_off).text == "new" &&
+                    peek(peek_off + 1).kind == TOK_IDENT && g_struct_registry.count(peek(peek_off + 1).text)) {
+                    inferred_struct = peek(peek_off + 1).text;
+                    borrowed_ptr = true;
+                } else if (peek(peek_off).kind == TOK_AMP && peek(peek_off + 1).kind == TOK_IDENT &&
                     var_struct_types.count(peek(peek_off + 1).text)) {
                     inferred_struct = var_struct_types[peek(peek_off + 1).text];
                     borrowed_ptr = true;
@@ -682,6 +728,19 @@ bool BytecodeCompiler::parseStatementControlAndVars() {
         }
     }
 
+    // Helper: check if identifier is an implicit field of 'this' in the current method
+    auto is_implicit_this_field = [&](const string& id) -> bool {
+        if (current_struct_context.empty() || id == "this") return false;
+        if (!g_struct_registry.count(current_struct_context)) return false;
+        if (!g_struct_registry[current_struct_context].field_indices.count(id)) return false;
+        for (const auto& sc : vm_scopes_) {
+            for (const auto& dv : sc.declared_var_types) {
+                if (dv == id) return false;
+            }
+        }
+        return true;
+    };
+
     // 11. ПРИСВАИВАНИЯ И ИНКРЕМЕНТЫ
     if (peek().kind == TOK_IDENT) {
         string ident_text = peek().text;
@@ -725,6 +784,7 @@ bool BytecodeCompiler::parseStatementControlAndVars() {
                  op == TOK_MINUS_ASSIGN || op == TOK_MUL_ASSIGN ||
                  op == TOK_DIV_ASSIGN)) {
                 string obj_name = advance().text;
+                bool obj_is_this_fld = is_implicit_this_field(obj_name);
                 vector<string> member_chain;
                 while ((peek().kind == TOK_DOT || peek().kind == TOK_ARROW) && peek(1).kind == TOK_IDENT) {
                     advance();
@@ -732,16 +792,24 @@ bool BytecodeCompiler::parseStatementControlAndVars() {
                 }
                 advance(); // consume assignment op
                 const string& last_field = member_chain.back();
+                auto load_root_obj = [&]() {
+                    if (obj_is_this_fld) {
+                        emitByte(OP_LOAD_VAR); emitString("this");
+                        emitByte(OP_GET_FIELD); emitString(obj_name);
+                    } else {
+                        emitByte(OP_LOAD_VAR); emitString(obj_name);
+                    }
+                };
                 if (op == TOK_ASSIGN) {
                     parseExpression(); // value
                     match(TOK_SEMI);
-                    emitByte(OP_LOAD_VAR); emitString(obj_name);
+                    load_root_obj();
                     for (size_t ci = 0; ci + 1 < member_chain.size(); ++ci) {
                         emitByte(OP_GET_FIELD); emitString(member_chain[ci]);
                     }
                     emitByte(OP_SET_FIELD); emitString(last_field);
                 } else {
-                    emitByte(OP_LOAD_VAR); emitString(obj_name);
+                    load_root_obj();
                     for (size_t ci = 0; ci + 1 < member_chain.size(); ++ci) {
                         emitByte(OP_GET_FIELD); emitString(member_chain[ci]);
                     }
@@ -752,7 +820,7 @@ bool BytecodeCompiler::parseStatementControlAndVars() {
                     else if (op == TOK_MUL_ASSIGN) emitByte(OP_MUL);
                     else emitByte(OP_DIV);
                     match(TOK_SEMI);
-                    emitByte(OP_LOAD_VAR); emitString(obj_name);
+                    load_root_obj();
                     for (size_t ci = 0; ci + 1 < member_chain.size(); ++ci) {
                         emitByte(OP_GET_FIELD); emitString(member_chain[ci]);
                     }
@@ -764,6 +832,13 @@ bool BytecodeCompiler::parseStatementControlAndVars() {
         if (peek(1).kind == TOK_ASSIGN) {
             string var_name = advance().text;
             advance();
+            if (is_implicit_this_field(var_name)) {
+                parseExpression();
+                match(TOK_SEMI);
+                emitByte(OP_LOAD_VAR); emitString("this");
+                emitByte(OP_SET_FIELD); emitString(var_name);
+                return true;
+            }
             string old_raii_struct;
             for (auto sit = vm_scopes_.rbegin(); sit != vm_scopes_.rend(); ++sit) {
                 for (auto vit = sit->raii_vars.rbegin(); vit != sit->raii_vars.rend(); ++vit) {
@@ -801,6 +876,19 @@ bool BytecodeCompiler::parseStatementControlAndVars() {
             peek(1).kind == TOK_MUL_ASSIGN  || peek(1).kind == TOK_DIV_ASSIGN) {
             string var_name = advance().text;
             GrassTokenKind op = advance().kind;
+            if (is_implicit_this_field(var_name)) {
+                emitByte(OP_LOAD_VAR); emitString("this");
+                emitByte(OP_GET_FIELD); emitString(var_name);
+                parseExpression();
+                if (op == TOK_PLUS_ASSIGN) emitByte(OP_ADD);
+                else if (op == TOK_MINUS_ASSIGN) emitByte(OP_SUB);
+                else if (op == TOK_MUL_ASSIGN) emitByte(OP_MUL);
+                else emitByte(OP_DIV);
+                match(TOK_SEMI);
+                emitByte(OP_LOAD_VAR); emitString("this");
+                emitByte(OP_SET_FIELD); emitString(var_name);
+                return true;
+            }
             emitByte(OP_LOAD_VAR);
             emitString(var_name);
             parseExpression();
@@ -817,6 +905,15 @@ bool BytecodeCompiler::parseStatementControlAndVars() {
             string var_name = advance().text;
             GrassTokenKind op = advance().kind;
             match(TOK_SEMI);
+            if (is_implicit_this_field(var_name)) {
+                emitByte(OP_LOAD_VAR); emitString("this");
+                emitByte(OP_GET_FIELD); emitString(var_name);
+                emitByte(OP_CONST_NUM); emitDouble(1.0);
+                emitByte(op == TOK_INC ? OP_ADD : OP_SUB);
+                emitByte(OP_LOAD_VAR); emitString("this");
+                emitByte(OP_SET_FIELD); emitString(var_name);
+                return true;
+            }
             emitByte(OP_LOAD_VAR); emitString(var_name);
             emitByte(OP_CONST_NUM); emitDouble(1.0);
             emitByte(op == TOK_INC ? OP_ADD : OP_SUB);

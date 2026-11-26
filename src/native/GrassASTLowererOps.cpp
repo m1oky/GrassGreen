@@ -517,10 +517,11 @@ namespace grass::codegen {
                         push_args.insert(push_args.end(), args.begin(), args.end());
                         builder_.create_call("grass_array_push", ctx_.get_void_type(), push_args);
                         last_struct_name_.clear();
-                        return base;
+                        continue;
                     } else if (member_name == "len" || member_name == "size") {
                         last_struct_name_.clear();
-                        return builder_.create_call("grass_array_len", ctx_.get_i64_type(), { base });
+                        base = builder_.create_call("grass_array_len", ctx_.get_i64_type(), { base });
+                        continue;
                     } else if (oop_mgr_ && !receiver_struct.empty()) {
                         const auto* cd = oop_mgr_->get_class(receiver_struct);
                         const auto* md = cd ? cd->find_method(member_name) : nullptr;
@@ -532,7 +533,7 @@ namespace grass::codegen {
                         } else {
                             last_struct_name_.clear();
                         }
-                        return base;
+                        continue;
                     }
                 } else {
                     if (oop_mgr_ && !receiver_struct.empty()) {

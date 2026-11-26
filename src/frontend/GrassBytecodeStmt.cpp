@@ -438,14 +438,36 @@ bool BytecodeCompiler::parseStatementHeaderAndOS() {
         return true;
     }
     if (peek().kind == TOK_IDENT && peek().text == "delete") {
-        int del_line = peek().line;
-        advance();
-        requireLib("baremetal", "!baremetal!", "delete", del_line);
-        match(TOK_LPAREN);
+        if (peek(1).kind == TOK_LPAREN && peek(2).kind == TOK_STRING) {
+            int del_line = peek().line;
+            advance();
+            requireLib("baremetal", "!baremetal!", "delete", del_line);
+            match(TOK_LPAREN);
+            parseExpression();
+            consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
+            match(TOK_SEMI);
+            emitByte(OP_CALL_BUILTIN); emitString("delete"); emitByte(1); emitByte(OP_POP);
+            return true;
+        }
+        advance(); // delete
+        std::string tgt_struct;
+        if (peek().kind == TOK_IDENT && var_struct_types.count(peek().text)) {
+            tgt_struct = var_struct_types[peek().text];
+        }
         parseExpression();
-        consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
         match(TOK_SEMI);
-        emitByte(OP_CALL_BUILTIN); emitString("delete"); emitByte(1); emitByte(OP_POP);
+        if (!tgt_struct.empty() && dtor_structs_.count(tgt_struct)) {
+            std::string dtor_fn = tgt_struct + "__dtor";
+            if (user_functions.count(dtor_fn)) {
+                emitByte(OP_CALL_USER);
+                emitU32(user_functions[dtor_fn].entry_ip);
+            } else {
+                emitByte(OP_CALL_USER);
+                method_call_fixups.push_back({ code.size(), dtor_fn });
+                emitU32(0);
+            }
+        }
+        emitByte(OP_POP);
         return true;
     }
     if (peek().kind == TOK_IDENT && peek().text == "copy") {
@@ -497,13 +519,60 @@ bool BytecodeCompiler::parseStatementHeaderAndOS() {
         return true;
     }
 
-    // 1. ОБЪЯВЛЕНИЕ ФУНКЦИЙ (int main() {}, take my_func() {}, void my_func() {}, int64* get_ptr() {})
+    // Top-level modifiers (public, private, protected, final, abstract, export)
+    while (!inside_function && peek().kind == TOK_IDENT &&
+           (peek().text == "public" || peek().text == "private" || peek().text == "protected" ||
+            peek().text == "final" || peek().text == "abstract" || peek().text == "export")) {
+        advance();
+    }
+
+    // Enum declarations: enum [class] Name { A, B = 1, ... };
+    if (matchIdent("enum")) {
+        if (matchIdent("class") || matchIdent("struct")) {}
+        if (peek().kind == TOK_IDENT) {
+            std::string ename = advance().text;
+            if (match(TOK_COLON) && peek().kind == TOK_IDENT) advance();
+            if (match(TOK_LBRACE)) {
+                int64_t next_val = 0;
+                auto& emap = enum_types_[ename];
+                while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
+                    if (match(TOK_COMMA) || match(TOK_SEMI)) continue;
+                    if (peek().kind != TOK_IDENT) { advance(); continue; }
+                    std::string mname = advance().text;
+                    if (match(TOK_ASSIGN)) {
+                        bool neg = match(TOK_MINUS);
+                        if (peek().kind == TOK_NUMBER) {
+                            int64_t v = static_cast<int64_t>(advance().num_val);
+                            next_val = neg ? -v : v;
+                        }
+                    }
+                    emap[mname] = next_val++;
+                    match(TOK_COMMA);
+                }
+                consume(TOK_RBRACE, "Ожидалась закрывающая фигурная скобка '}' у enum!");
+                match(TOK_SEMI);
+            }
+        }
+        return true;
+    }
+
+    // 1. ОБЪЯВЛЕНИЕ ФУНКЦИЙ (int main() {}, take my_func() {}, void my_func() {}, Token* make() {})
     bool is_func_decl = false;
-    if (peek().kind == TOK_IDENT && (isTypeOrFuncKeyword(peek().text) || g_struct_registry.count(peek().text))) {
+    if (!inside_function && peek().kind == TOK_IDENT &&
+        (isTypeOrFuncKeyword(peek().text) || g_struct_registry.count(peek().text) || enum_types_.count(peek().text))) {
         size_t off = 1;
         while (peek(off).kind == TOK_STAR) off++;
         if (peek(off).kind == TOK_IDENT && peek(off + 1).kind == TOK_LPAREN) {
-            is_func_decl = true;
+            size_t scan = off + 2;
+            int pdepth = 1;
+            while (peek(scan).kind != TOK_EOF && pdepth > 0) {
+                if (peek(scan).kind == TOK_LPAREN) pdepth++;
+                else if (peek(scan).kind == TOK_RPAREN) pdepth--;
+                scan++;
+            }
+            if (pdepth == 0 && peek(scan).kind == TOK_LBRACE) {
+                is_func_decl = true;
+            }
         }
     }
     if (is_func_decl) {
@@ -535,7 +604,7 @@ bool BytecodeCompiler::parseStatementHeaderAndOS() {
                 if (isVMVecTypeStart()) {
                     pvec_elem = parseVMVecInnerType();
                     while (match(TOK_STAR)) {}
-                } else if (isTypeOrFuncKeyword(peek().text) || g_struct_registry.count(peek().text)) {
+                } else if (isTypeOrFuncKeyword(peek().text) || g_struct_registry.count(peek().text) || enum_types_.count(peek().text)) {
                     ptype = advance().text;
                     while (match(TOK_STAR)) {}
                 }

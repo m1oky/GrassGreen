@@ -482,7 +482,7 @@ __attribute__((constructor)) static void grass_auto_init_sig(void) {
     }
 
     NativeCodegenResult NativeCompiler::compile_source(const std::string& source_code, const std::string& source_path) {
-        Lexer lexer(source_code);
+        Lexer lexer(source_code, source_path);
         std::vector<GrassToken> tokens = lexer.tokenize();
         GrassImport::ImportStats import_stats;
         tokens = GrassImport::resolveImports(tokens, source_path, &import_stats);

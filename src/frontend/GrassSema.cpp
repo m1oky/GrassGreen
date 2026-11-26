@@ -167,6 +167,26 @@ const StructSymbol* GrassSema::findStruct(const std::string& name) const {
     return nullptr;
 }
 
+const EnumSymbol* GrassSema::findEnum(const std::string& name) const {
+    auto it = enums_.find(name);
+    if (it != enums_.end()) return &it->second;
+    std::string mangled = mangleName(name);
+    it = enums_.find(mangled);
+    if (it != enums_.end()) return &it->second;
+    if (name.find("::") == std::string::npos) {
+        std::string cur_ns = currentNamespace();
+        if (!cur_ns.empty()) {
+            it = enums_.find(cur_ns + "::" + name);
+            if (it != enums_.end()) return &it->second;
+        }
+        for (const auto& ns : using_namespaces_) {
+            it = enums_.find(ns + "::" + name);
+            if (it != enums_.end()) return &it->second;
+        }
+    }
+    return nullptr;
+}
+
 SemaType GrassSema::resolveType(const std::string& type_name, int ptr_depth, const SourceLocation& loc) {
     SemaType base;
     if ((type_name.rfind("vec<", 0) == 0 || type_name.rfind("vector<", 0) == 0) &&
@@ -215,11 +235,15 @@ SemaType GrassSema::resolveType(const std::string& type_name, int ptr_depth, con
                type_name == "invent" || type_name.empty()) {
         base = SemaType::Any();
     } else {
-        const StructSymbol* st = findStruct(type_name);
-        if (st) {
-            base = SemaType::CustomStruct(st->name);
+        if (findEnum(type_name)) {
+            base = SemaType::Int();
         } else {
-            base = SemaType::CustomStruct(type_name);
+            const StructSymbol* st = findStruct(type_name);
+            if (st) {
+                base = SemaType::CustomStruct(st->name);
+            } else {
+                base = SemaType::CustomStruct(type_name);
+            }
         }
     }
 
@@ -237,6 +261,7 @@ bool GrassSema::analyze(const ProgramAST& program) {
     diagnostics_.clear();
     scope_pool_.clear();
     scope_pool_.reserve(program.declarations.size() + 16);
+    enums_.clear();
     functions_.reserve(program.declarations.size() + 16);
     namespace_stack_.clear();
     using_namespaces_.clear();
@@ -258,7 +283,21 @@ bool GrassSema::analyze(const ProgramAST& program) {
 void GrassSema::pass1_registerDeclarations(const ProgramAST& program) {
     auto register_decl = [&](auto& self, const DeclAST* decl) -> void {
         if (!decl) return;
-        if (decl->node_kind == NodeKind::StructDecl) {
+        if (decl->node_kind == NodeKind::EnumDecl) {
+            auto en = static_cast<const EnumDeclAST*>(decl);
+            std::string qname = qualifyName(en->name);
+            std::string mname = mangleName(qname);
+            EnumSymbol esym;
+            esym.name = qname;
+            esym.is_scoped = en->is_scoped;
+            esym.loc = en->loc;
+            for (const auto& entry : en->entries) {
+                esym.values[entry.name] = entry.value;
+            }
+            enums_[qname] = esym;
+            if (qname != mname) enums_[mname] = esym;
+            if (en->name != qname && !enums_.count(en->name)) enums_[en->name] = esym;
+        } else if (decl->node_kind == NodeKind::StructDecl) {
             auto st = static_cast<const StructDeclAST*>(decl);
             std::string qname = qualifyName(st->name);
             std::string mname = mangleName(qname);
@@ -267,12 +306,15 @@ void GrassSema::pass1_registerDeclarations(const ProgramAST& program) {
             sym.loc = st->loc;
             for (const auto& f : st->fields) {
                 sym.fields[f.name] = resolveType(f.type_name, f.pointer_depth, f.loc);
+                sym.field_access[f.name] = f.access;
                 sym.field_order.push_back(f.name);
             }
             for (const auto& m : st->methods) {
                 FunctionSymbol msym;
                 msym.name = m->name;
-                msym.return_type = m->is_destructor ? SemaType::Void() : resolveType(m->return_type, m->return_pointer_depth, m->loc);
+                msym.return_type = (m->is_destructor || m->is_constructor)
+                    ? SemaType::Void()
+                    : resolveType(m->return_type, m->return_pointer_depth, m->loc);
                 msym.loc = m->loc;
                 msym.is_method = true;
                 msym.is_destructor = m->is_destructor;
@@ -285,7 +327,12 @@ void GrassSema::pass1_registerDeclarations(const ProgramAST& program) {
                     sym.has_explicit_destructor = true;
                     sym.has_destructor = true;
                 }
-                sym.methods[m->name] = msym;
+                if (m->is_constructor) {
+                    sym.constructors.push_back(msym);
+                } else {
+                    sym.methods[m->name] = msym;
+                    sym.method_access[m->name] = m->access;
+                }
             }
             structs_[qname] = sym;
             if (qname != mname) structs_[mname] = sym;
@@ -300,12 +347,15 @@ void GrassSema::pass1_registerDeclarations(const ProgramAST& program) {
             sym.base_class = cls->base_class;
             for (const auto& f : cls->fields) {
                 sym.fields[f.name] = resolveType(f.type_name, f.pointer_depth, f.loc);
+                sym.field_access[f.name] = f.access;
                 sym.field_order.push_back(f.name);
             }
             for (const auto& m : cls->methods) {
                 FunctionSymbol msym;
                 msym.name = m->name;
-                msym.return_type = m->is_destructor ? SemaType::Void() : resolveType(m->return_type, m->return_pointer_depth, m->loc);
+                msym.return_type = (m->is_destructor || m->is_constructor)
+                    ? SemaType::Void()
+                    : resolveType(m->return_type, m->return_pointer_depth, m->loc);
                 msym.loc = m->loc;
                 msym.is_method = true;
                 msym.is_destructor = m->is_destructor;
@@ -318,7 +368,12 @@ void GrassSema::pass1_registerDeclarations(const ProgramAST& program) {
                     sym.has_explicit_destructor = true;
                     sym.has_destructor = true;
                 }
-                sym.methods[m->name] = msym;
+                if (m->is_constructor) {
+                    sym.constructors.push_back(msym);
+                } else {
+                    sym.methods[m->name] = msym;
+                    sym.method_access[m->name] = m->access;
+                }
             }
             structs_[qname] = sym;
             if (qname != mname) structs_[mname] = sym;
@@ -356,6 +411,7 @@ void GrassSema::pass1_registerDeclarations(const ProgramAST& program) {
             }
         } else if (decl->node_kind == NodeKind::ModuleDecl) {
             auto mod = static_cast<const ModuleDeclAST*>(decl);
+            for (const auto& en : mod->enums) self(self, en.get());
             for (const auto& st : mod->structs) self(self, st.get());
             for (const auto& cls : mod->classes) self(self, cls.get());
             for (const auto& fn : mod->functions) self(self, fn.get());

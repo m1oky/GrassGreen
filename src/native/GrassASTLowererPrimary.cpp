@@ -147,6 +147,55 @@ namespace grass::codegen {
             }
         }
 
+        // Heap allocation: new ClassName(args...) or new ClassName
+        if (match_ident("new")) {
+            if (peek().kind != TOK_IDENT) {
+                error = "Expected class or type name after 'new'!";
+                return 0;
+            }
+            std::string cname = advance().text;
+            while (match(TOK_COLON_COLON)) {
+                if (peek().kind == TOK_IDENT) cname += "::" + advance().text;
+            }
+            std::vector<ir::ValueId> args;
+            if (match(TOK_LPAREN)) {
+                if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
+                    while (true) {
+                        ir::ValueId arg = parse_expression(error);
+                        if (!arg) return 0;
+                        args.push_back(arg);
+                        if (!match(TOK_COMMA)) break;
+                    }
+                }
+                consume(TOK_RPAREN, "Expected ')' closing 'new' arguments!", error);
+            }
+            if (oop_mgr_ && oop_mgr_->has_class(cname)) {
+                const auto* cd = oop_mgr_->get_class(cname);
+                ir::ValueId raw_obj = mem_mgr_
+                    ? mem_mgr_->emit_alloc_const(builder_, cd->total_size, cname + "_new_raw")
+                    : builder_.create_call("grass_alloc", ctx_.get_ptr_type(), { builder_.create_const_i64(static_cast<int64_t>(cd->total_size)) });
+                ir::IRType* ptr_t = ctx_.get_ptr_type(cd->ir_struct_type);
+                ir::ValueId obj_ptr = builder_.create_bitcast(raw_obj, ptr_t, cname + "_new");
+                emit_zero_struct(obj_ptr, cd->ir_struct_type);
+                if (cd->has_vtable) {
+                    oop_mgr_->emit_vtable_init(builder_, obj_ptr, cname);
+                }
+                emit_ctor_call(obj_ptr, cname, args);
+                last_struct_name_ = cname;
+                last_expr_is_borrowed_ptr_ = true;
+                return obj_ptr;
+            }
+            ir::IRType* pt = parse_type_name(cname);
+            uint64_t sz = get_ir_type_size_bytes(pt);
+            if (sz < 8) sz = 8;
+            ir::ValueId raw_ptr = mem_mgr_
+                ? mem_mgr_->emit_alloc_const(builder_, sz, "new_raw")
+                : builder_.create_call("grass_alloc", ctx_.get_ptr_type(), { builder_.create_const_i64(static_cast<int64_t>(sz)) });
+            last_struct_name_.clear();
+            last_expr_is_borrowed_ptr_ = true;
+            return builder_.create_bitcast(raw_ptr, ctx_.get_ptr_type(pt), "new_ptr");
+        }
+
         // Identifier or Function Call
         if (peek().kind == TOK_IDENT) {
             std::string ident = advance().text;
@@ -156,19 +205,63 @@ namespace grass::codegen {
                 }
             }
 
+            size_t enum_sep = ident.rfind("::");
+            if (enum_sep != std::string::npos) {
+                std::string ename = ident.substr(0, enum_sep);
+                std::string entry = ident.substr(enum_sep + 2);
+                auto eit = enum_defs_.find(ename);
+                if (eit != enum_defs_.end()) {
+                    auto vit = eit->second.find(entry);
+                    if (vit != eit->second.end()) {
+                        last_struct_name_.clear();
+                        return builder_.create_const_i64(vit->second);
+                    }
+                }
+            }
+
+            if (peek().kind == TOK_DOT && peek(1).kind == TOK_IDENT && enum_defs_.count(ident)) {
+                auto vit = enum_defs_[ident].find(peek(1).text);
+                if (vit != enum_defs_[ident].end()) {
+                    advance(); // '.'
+                    advance(); // entry
+                    last_struct_name_.clear();
+                    return builder_.create_const_i64(vit->second);
+                }
+            }
+
             // Member access ahead? (e.g. hero.name or ptr->name)
             if (peek().kind == TOK_DOT || peek().kind == TOK_ARROW) {
                 const VarBinding* var = lookup_var(ident);
-                if (!var) {
-                    error = "Undeclared identifier: " + ident;
-                    return 0;
+                if (var) {
+                    last_struct_name_ = var->struct_type_name;
+                    ir::ValueId inst_ptr = var->alloca_id;
+                    if (var->type && var->type->is_pointer()) {
+                        inst_ptr = builder_.create_load(var->alloca_id, ident + "_ptr");
+                    }
+                    return inst_ptr;
                 }
-                last_struct_name_ = var->struct_type_name;
-                ir::ValueId inst_ptr = var->alloca_id;
-                if (var->type && var->type->is_pointer()) {
-                    inst_ptr = builder_.create_load(var->alloca_id, ident + "_ptr");
+                if (!current_class_context_.empty() && oop_mgr_) {
+                    const VarBinding* this_var = lookup_var("this");
+                    const auto* cd = oop_mgr_->get_class(current_class_context_);
+                    if (this_var && cd) {
+                        auto fit = cd->field_indices.find(ident);
+                        if (fit != cd->field_indices.end()) {
+                            ir::ValueId this_ptr = builder_.create_load(this_var->alloca_id, "this_ptr");
+                            const auto& fld = cd->fields[fit->second];
+                            if (fld.type && fld.type->is_struct()) {
+                                last_struct_name_ = fld.type->struct_name;
+                                return oop_mgr_->emit_field_gep(builder_, this_ptr, current_class_context_, ident);
+                            } else if (fld.type && fld.type->is_pointer() && fld.type->element_type && fld.type->element_type->is_struct()) {
+                                last_struct_name_ = fld.type->element_type->struct_name;
+                                return oop_mgr_->emit_load_field(builder_, this_ptr, current_class_context_, ident);
+                            }
+                            last_struct_name_.clear();
+                            return oop_mgr_->emit_load_field(builder_, this_ptr, current_class_context_, ident);
+                        }
+                    }
                 }
-                return inst_ptr;
+                error = "Undeclared identifier: " + ident;
+                return 0;
             }
 
             // Function call: ident(args)
@@ -230,8 +323,34 @@ namespace grass::codegen {
                 }
 
                 if (oop_mgr_ && oop_mgr_->has_class(ident)) {
+                    const auto* cd = oop_mgr_->get_class(ident);
+                    ir::ValueId obj_ptr = builder_.create_alloca(cd->ir_struct_type, 1, static_cast<uint32_t>(cd->alignment), ident + "_tmp");
+                    emit_zero_struct(obj_ptr, cd->ir_struct_type);
+                    if (cd->has_vtable) {
+                        oop_mgr_->emit_vtable_init(builder_, obj_ptr, ident);
+                    }
+                    emit_ctor_call(obj_ptr, ident, args);
                     last_struct_name_ = ident;
-                    return oop_mgr_->emit_new_object(builder_, ident, args);
+                    return obj_ptr;
+                }
+
+                // Implicit 'this' method call inside class method: foo(args) -> this->foo(args)
+                if (!module_.get_function(target_call_name) && !current_class_context_.empty() && oop_mgr_) {
+                    const auto* cd = oop_mgr_->get_class(current_class_context_);
+                    const auto* md = cd ? cd->find_method(ident) : nullptr;
+                    const VarBinding* this_var = lookup_var("this");
+                    if (md && this_var) {
+                        ir::ValueId this_ptr = builder_.create_load(this_var->alloca_id, "this_ptr");
+                        ir::ValueId res = oop_mgr_->emit_call_method(builder_, this_ptr, current_class_context_, ident, args);
+                        if (md->return_type && md->return_type->is_struct()) {
+                            last_struct_name_ = md->return_type->struct_name;
+                        } else if (md->return_type && md->return_type->is_pointer() && md->return_type->element_type && md->return_type->element_type->is_struct()) {
+                            last_struct_name_ = md->return_type->element_type->struct_name;
+                        } else {
+                            last_struct_name_.clear();
+                        }
+                        return res;
+                    }
                 }
 
                 // Overload / arity normalization for 3D Math, Gfx3D, and Physics
@@ -479,6 +598,31 @@ namespace grass::codegen {
             }
             const VarBinding* var = lookup_var(ident);
             if (!var) {
+                if (!current_class_context_.empty() && oop_mgr_) {
+                    const VarBinding* this_var = lookup_var("this");
+                    const auto* cd = oop_mgr_->get_class(current_class_context_);
+                    if (this_var && cd) {
+                        auto fit = cd->field_indices.find(ident);
+                        if (fit != cd->field_indices.end()) {
+                            ir::ValueId this_ptr = builder_.create_load(this_var->alloca_id, "this_ptr");
+                            const auto& fld = cd->fields[fit->second];
+                            if (fld.type && fld.type->is_struct()) {
+                                last_struct_name_ = fld.type->struct_name;
+                                return oop_mgr_->emit_field_gep(builder_, this_ptr, current_class_context_, ident);
+                            } else if (fld.type && fld.type->is_pointer() && fld.type->element_type && fld.type->element_type->is_struct()) {
+                                last_struct_name_ = fld.type->element_type->struct_name;
+                                return oop_mgr_->emit_load_field(builder_, this_ptr, current_class_context_, ident);
+                            }
+                            last_struct_name_.clear();
+                            return oop_mgr_->emit_load_field(builder_, this_ptr, current_class_context_, ident);
+                        }
+                    }
+                }
+                auto ueit = unscoped_enum_vals_.find(ident);
+                if (ueit != unscoped_enum_vals_.end()) {
+                    last_struct_name_.clear();
+                    return builder_.create_const_i64(ueit->second);
+                }
                 if (ident == "BLACK")         return builder_.create_const_i64(0);
                 if (ident == "BLUE")          return builder_.create_const_i64(1);
                 if (ident == "GREEN")         return builder_.create_const_i64(2);
