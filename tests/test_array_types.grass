@@ -1,0 +1,21 @@
+!GrassGreen!
+
+take g_strs = ["gx", "gy"];
+take g_nums = [3.5, 4.5];
+
+int main() {
+    take strs = ["a", "b", "c"];
+    take nums = [1.5, 2.5];
+    take ints = [10, 20, 30];
+
+    gout << strs[0] << "," << strs[1] << "," << strs[2] << "\n";
+    gout << nums[0] << "," << nums[1] << "\n";
+    gout << ints[0] + ints[2] << "\n";
+
+    strs[1] = "bb";
+    nums[0] = 9.5;
+    gout << strs[1] << " " << nums[0] + nums[1] << "\n";
+
+    gout << g_strs[0] << "," << g_strs[1] << " " << g_nums[0] + g_nums[1] << "\n";
+    return 0;
+}
