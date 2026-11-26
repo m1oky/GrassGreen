@@ -95,15 +95,20 @@ namespace grass::backend {
     }
 
     bool GrassElfWriter::inject_missing_syscalls(CompiledUnit& unit) {
-        for (const auto& rel : unit.relocations) {
-            bool defined = false;
-            for (const auto& s : unit.symbols) {
-                if (s.name == rel.symbol_name) {
-                    defined = true;
-                    break;
+        bool injected_any = true;
+        while (injected_any) {
+            injected_any = false;
+            std::vector<RelocEntry> rels_snapshot = unit.relocations;
+            for (const auto& rel : rels_snapshot) {
+                bool defined = false;
+                for (const auto& s : unit.symbols) {
+                    if (s.name == rel.symbol_name) {
+                        defined = true;
+                        break;
+                    }
                 }
-            }
-            if (!defined) {
+                if (defined) continue;
+                injected_any = true;
                 if (rel.symbol_name == "sys_write" || rel.symbol_name == "write") {
                     inject_syscall_wrapper(unit, LinuxSyscall::SysWrite, rel.symbol_name);
                 } else if (rel.symbol_name == "sys_open" || rel.symbol_name == "open") {
@@ -228,6 +233,104 @@ namespace grass::backend {
                     unit.relocations.push_back({ SectionKind::Text, fn_off + rel_sh1, "__grass_sh_path", RelocType::Rel32, -4 });
                     unit.relocations.push_back({ SectionKind::Text, fn_off + rel_sh2, "__grass_sh_path", RelocType::Rel32, -4 });
                     unit.relocations.push_back({ SectionKind::Text, fn_off + rel_c,   "__grass_sh_c",    RelocType::Rel32, -4 });
+                } else if (rel.symbol_name == "grass_alloc" || rel.symbol_name == "alloc" || rel.symbol_name == "memory_alloc") {
+                    std::vector<uint8_t> code;
+                    auto emit = [&](std::initializer_list<uint8_t> b) { code.insert(code.end(), b); };
+                    emit({0x48, 0x85, 0xFF});                                     // test rdi, rdi
+                    emit({0x7E, 0x00}); size_t jle_err = code.size() - 1;         // jle .err
+                    emit({0x48, 0xB8, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x7F, 0x00, 0x00}); // mov rax, 0x7FFFFFFF0000
+                    emit({0x48, 0x39, 0xC7});                                     // cmp rdi, rax
+                    emit({0x77, 0x00}); size_t ja_err = code.size() - 1;          // ja .err
+                    emit({0x53});                                                 // push rbx
+                    emit({0x48, 0x89, 0xFB});                                     // mov rbx, rdi (size)
+                    emit({0x48, 0x8D, 0x77, 0x10});                               // lea rsi, [rdi + 16]
+                    emit({0x31, 0xFF});                                           // xor edi, edi
+                    emit({0xBA, 0x03, 0x00, 0x00, 0x00});                         // mov edx, 3 (PROT_READ|PROT_WRITE)
+                    emit({0x41, 0xBA, 0x22, 0x00, 0x00, 0x00});                   // mov r10d, 0x22 (MAP_PRIVATE|MAP_ANONYMOUS)
+                    emit({0x49, 0xC7, 0xC0, 0xFF, 0xFF, 0xFF, 0xFF});             // mov r8, -1
+                    emit({0x45, 0x31, 0xC9});                                     // xor r9d, r9d
+                    emit({0xB8, 0x09, 0x00, 0x00, 0x00});                         // mov eax, 9 (sys_mmap)
+                    emit({0x0F, 0x05});                                           // syscall
+                    emit({0x48, 0x3D, 0x01, 0xF0, 0xFF, 0xFF});                   // cmp rax, -4095
+                    emit({0x73, 0x00}); size_t jae_perr = code.size() - 1;        // jae .pop_err
+                    emit({0x48, 0x8D, 0x4B, 0x10});                               // lea rcx, [rbx + 16]
+                    emit({0x48, 0x89, 0x08});                                     // mov [rax], rcx (total_bytes)
+                    emit({0x48, 0x89, 0x58, 0x08});                               // mov [rax + 8], rbx (req_size)
+                    emit({0x48, 0x83, 0xC0, 0x10});                               // add rax, 16
+                    emit({0x5B, 0xC3});                                           // pop rbx; ret
+
+                    size_t pop_err = code.size();
+                    code[jae_perr] = static_cast<uint8_t>(pop_err - (jae_perr + 1));
+                    emit({0x31, 0xC0, 0x5B, 0xC3});                               // xor eax, eax; pop rbx; ret
+
+                    size_t err_lbl = code.size();
+                    code[jle_err] = static_cast<uint8_t>(err_lbl - (jle_err + 1));
+                    code[ja_err]  = static_cast<uint8_t>(err_lbl - (ja_err + 1));
+                    emit({0x31, 0xC0, 0xC3});                                     // xor eax, eax; ret
+
+                    while (unit.text.size() % 16 != 0) unit.text.push_back(0x90);
+                    uint64_t off = unit.text.size();
+                    unit.text.insert(unit.text.end(), code.begin(), code.end());
+                    unit.symbols.push_back({ rel.symbol_name, SectionKind::Text, off, code.size(), true, false });
+                } else if (rel.symbol_name == "grass_free" || rel.symbol_name == "free") {
+                    std::vector<uint8_t> code = {
+                        0x48, 0x85, 0xFF,                   // test rdi, rdi
+                        0x74, 0x0E,                         // jz +14
+                        0x48, 0x83, 0xEF, 0x10,             // sub rdi, 16
+                        0x48, 0x8B, 0x37,                   // mov rsi, [rdi]
+                        0xB8, 0x0B, 0x00, 0x00, 0x00,       // mov eax, 11 (sys_munmap)
+                        0x0F, 0x05,                         // syscall
+                        0xC3                                // ret
+                    };
+                    while (unit.text.size() % 16 != 0) unit.text.push_back(0x90);
+                    uint64_t off = unit.text.size();
+                    unit.text.insert(unit.text.end(), code.begin(), code.end());
+                    unit.symbols.push_back({ rel.symbol_name, SectionKind::Text, off, code.size(), true, false });
+                } else if (rel.symbol_name == "grass_realloc" || rel.symbol_name == "realloc") {
+                    std::vector<uint8_t> code;
+                    auto emit = [&](std::initializer_list<uint8_t> b) { code.insert(code.end(), b); };
+                    emit({0x48, 0x85, 0xF6});                                     // test rsi, rsi
+                    emit({0x7F, 0x03});                                           // jg +3
+                    emit({0x31, 0xC0, 0xC3});                                     // xor eax, eax; ret
+                    emit({0x48, 0x85, 0xFF});                                     // test rdi, rdi
+                    emit({0x75, 0x08});                                           // jnz +8
+                    emit({0x48, 0x89, 0xF7});                                     // mov rdi, rsi
+                    size_t rel_alloc_jmp = code.size() + 1;
+                    emit({0xE9, 0x00, 0x00, 0x00, 0x00});                         // jmp grass_alloc
+                    emit({0x48, 0x8B, 0x47, 0xF8});                               // mov rax, [rdi - 8] (old_size)
+                    emit({0x48, 0x39, 0xC6});                                     // cmp rsi, rax
+                    emit({0x77, 0x04});                                           // ja +4
+                    emit({0x48, 0x89, 0xF8, 0xC3});                               // mov rax, rdi; ret
+                    emit({0x53, 0x41, 0x54, 0x41, 0x55});                         // push rbx; push r12; push r13
+                    emit({0x48, 0x89, 0xFB});                                     // mov rbx, rdi (old_ptr)
+                    emit({0x49, 0x89, 0xC4});                                     // mov r12, rax (old_size)
+                    emit({0x48, 0x89, 0xF7});                                     // mov rdi, rsi (new_size)
+                    size_t rel_alloc_call = code.size() + 1;
+                    emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call grass_alloc
+                    emit({0x48, 0x85, 0xC0});                                     // test rax, rax
+                    emit({0x74, 0x00}); size_t jz_fail = code.size() - 1;         // jz .done
+                    emit({0x49, 0x89, 0xC5});                                     // mov r13, rax (new_ptr)
+                    emit({0x48, 0x89, 0xC7});                                     // mov rdi, rax
+                    emit({0x48, 0x89, 0xDE});                                     // mov rsi, rbx
+                    emit({0x4C, 0x89, 0xE1});                                     // mov rcx, r12
+                    emit({0xF3, 0xA4});                                           // rep movsb
+                    emit({0x48, 0x89, 0xDF});                                     // mov rdi, rbx
+                    size_t rel_free_call = code.size() + 1;
+                    emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call grass_free
+                    emit({0x4C, 0x89, 0xE8});                                     // mov rax, r13
+                    size_t done_lbl = code.size();
+                    code[jz_fail] = static_cast<uint8_t>(done_lbl - (jz_fail + 1));
+                    emit({0x41, 0x5D, 0x41, 0x5C, 0x5B, 0xC3});                   // pop r13; pop r12; pop rbx; ret
+
+                    while (unit.text.size() % 16 != 0) unit.text.push_back(0x90);
+                    uint64_t off = unit.text.size();
+                    unit.text.insert(unit.text.end(), code.begin(), code.end());
+                    unit.symbols.push_back({ rel.symbol_name, SectionKind::Text, off, code.size(), true, false });
+                    unit.relocations.push_back({ SectionKind::Text, off + rel_alloc_jmp, "grass_alloc", RelocType::Rel32, -4 });
+                    unit.relocations.push_back({ SectionKind::Text, off + rel_alloc_call, "grass_alloc", RelocType::Rel32, -4 });
+                    unit.relocations.push_back({ SectionKind::Text, off + rel_free_call, "grass_free", RelocType::Rel32, -4 });
+                } else {
+                    injected_any = false;
                 }
             }
         }

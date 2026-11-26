@@ -262,6 +262,8 @@ struct GrassVMPtr {
 // ── Определение структур и массивов GrassGreen 4.0 ──
 struct GrassArray {
     std::vector<GrassValue> elements;
+    bool is_vec = false;
+    size_t vec_capacity = 0;
 };
 
 enum class GrassFieldType {
@@ -545,6 +547,7 @@ class BytecodeCompiler {
     int vm_temp_counter_ = 0;
     std::string current_dtor_struct_;
     std::unordered_map<std::string, bool> dtor_structs_;
+    std::unordered_map<std::string, std::string> var_vec_types_;
 
     void pushVMScope();
     void popVMScope(bool emit_cleanups = true);
@@ -553,6 +556,10 @@ class BytecodeCompiler {
     void emitVMDtorCall(const std::string& var_name, const std::string& struct_name);
     void emitVMScopesCleanupTo(size_t target_depth);
     void emitVMFieldDtors(const std::string& struct_name);
+    bool isVMVecTypeStart(int offset = 0);
+    std::string parseVMVecInnerType();
+    void emitVMVecElemDtorLoop(const std::string& var_name, const std::string& elem_struct);
+    void emitVMVecPopElemDtor(const std::string& var_name, const std::string& elem_struct);
 
     std::string resolveUserFunc(const std::string& name) const;
 
@@ -1057,6 +1064,8 @@ private:
     std::unique_ptr<UsingDeclAST> parseUsing();
 
     bool isTypeName(const std::string& s) const;
+    bool isTypeStart(size_t offset = 0) const;
+    bool parseTypeSpec(std::string& out_type, int& out_ptr_depth);
     static bool isVarKeyword(const std::string& s);
 
 public:

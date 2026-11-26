@@ -1,0 +1,103 @@
+!GrassGreen!
+
+struct Tracker {
+    int id;
+    int* destroyed_counter;
+
+    ~Tracker() {
+        int* p = this.destroyed_counter;
+        if (p != nullptr) {
+            *p = *p + 1;
+        }
+    }
+}
+
+void push_three(vec<int>* v) {
+    v->push_back(100);
+    v->push_back(200);
+    v->push_back(300);
+}
+
+int test_early_return(int* dtor_count) {
+    vec<Tracker> items;
+    Tracker a;
+    a.id = 10;
+    a.destroyed_counter = dtor_count;
+    Tracker b;
+    b.id = 20;
+    b.destroyed_counter = dtor_count;
+    Tracker c;
+    c.id = 30;
+    c.destroyed_counter = dtor_count;
+    items.push_back(a);
+    items.push_back(b);
+    items.push_back(c);
+
+    // pop_back destroys 3rd element immediately (+1)
+    items.pop_back();
+
+    if (items.size() == 2) {
+        return items[0].id + items[1].id;
+    }
+    return 0;
+}
+
+int main() {
+    // 1. vec<int>: push, push_back, pop, pop_back, reserve, clear, empty, indexing, pointer borrow
+    vec<int> vi;
+    gout << "init_empty=" << vi.empty() << " sz=" << vi.size() << " cap=" << vi.capacity() << endl;
+
+    vi.push(10);
+    gout << "after_push1 sz=" << vi.size() << " cap=" << vi.capacity() << " empty=" << vi.empty() << endl;
+
+    for (int i = 0; i < 8; i++) {
+        vi.push_back(i * 5);
+    }
+    gout << "after_push9 sz=" << vi.size() << " cap=" << vi.capacity() << endl;
+
+    vi[0] = 777;
+    vi[1] += 33;
+    vi.pop();
+    vi.pop_back();
+    gout << "after_pops sz=" << vi.size() << " v0=" << vi[0] << " v1=" << vi[1] << endl;
+
+    push_three(&vi);
+    gout << "after_ptr_fn sz=" << vi.size() << " last=" << vi[vi.size() - 1] << endl;
+
+    vi.reserve(64);
+    take cap_reserved = vi.capacity();
+    vi.clear();
+    gout << "after_clear sz=" << vi.size() << " cap=" << cap_reserved << " cap_after=" << vi.capacity() << " empty=" << vi.empty() << endl;
+
+    // 2. RAII test on early return with Tracker struct
+    int dtor_count = 0;
+    take early_sum = test_early_return(&dtor_count);
+    gout << "early_sum=" << early_sum << " dtor_count=" << dtor_count << endl;
+
+    // 3. vector<float>: data() pointer & 100,000-element addition loop (SIMD compatible)
+    int n = 100000;
+    vector<float> a;
+    vector<float> b;
+    vector<float> c;
+    a.reserve(n);
+    b.reserve(n);
+    c.reserve(n);
+
+    for (int i = 0; i < n; i++) {
+        a.push_back(1.5 + i * 0.01);
+        b.push_back(2.5 + i * 0.02);
+        c.push_back(0.0);
+    }
+
+    float* cp = c.data();
+    cp[0] = 999.0;
+
+    for (int i = 0; i < a.size(); i++) {
+        c[i] = a[i] + b[i];
+    }
+
+    float checksum = c[0] + c[50000] + c[99999];
+    gout << "vec_float_sz=" << c.size() << " c0=" << c[0] << " c99999=" << c[99999] << " checksum=" << checksum << endl;
+
+    return 0;
+}

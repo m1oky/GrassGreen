@@ -510,7 +510,26 @@ const StructSymbol* GrassSema::findStruct(const std::string& name) const {
 
 SemaType GrassSema::resolveType(const std::string& type_name, int ptr_depth, const SourceLocation& loc) {
     SemaType base;
-    if (type_name == "int" || type_name == "int32" || type_name == "int64" ||
+    if ((type_name.rfind("vec<", 0) == 0 || type_name.rfind("vector<", 0) == 0) &&
+        type_name.size() >= 6 && type_name.back() == '>') {
+        size_t lt = type_name.find('<');
+        std::string inner = type_name.substr(lt + 1, type_name.size() - lt - 2);
+        auto trim = [](std::string s) {
+            size_t b = s.find_first_not_of(" \t\r\n");
+            if (b == std::string::npos) return std::string();
+            size_t e = s.find_last_not_of(" \t\r\n");
+            return s.substr(b, e - b + 1);
+        };
+        inner = trim(inner);
+        int inner_ptrs = 0;
+        while (!inner.empty() && inner.back() == '*') {
+            inner_ptrs++;
+            inner.pop_back();
+            inner = trim(inner);
+        }
+        SemaType elem_t = resolveType(inner, inner_ptrs, loc);
+        base = SemaType::Vec(elem_t);
+    } else if (type_name == "int" || type_name == "int32" || type_name == "int64" ||
         type_name == "i32" || type_name == "i64" ||
         type_name == "int32_t" || type_name == "int64_t" ||
         type_name == "uint32_t" || type_name == "uint64_t" ||
@@ -700,11 +719,17 @@ void GrassSema::pass1_registerDeclarations(const ProgramAST& program) {
             if (!need_dtor) {
                 for (const auto& fname : kv.second.field_order) {
                     auto fit = kv.second.fields.find(fname);
-                    if (fit != kv.second.fields.end() && fit->second.is_struct()) {
-                        const StructSymbol* fstruct = findStruct(fit->second.name);
-                        if (fstruct && fstruct->has_destructor) {
+                    if (fit != kv.second.fields.end()) {
+                        if (fit->second.is_vec()) {
                             need_dtor = true;
                             break;
+                        }
+                        if (fit->second.is_struct()) {
+                            const StructSymbol* fstruct = findStruct(fit->second.name);
+                            if (fstruct && fstruct->has_destructor) {
+                                need_dtor = true;
+                                break;
+                            }
                         }
                     }
                 }
@@ -799,6 +824,12 @@ void GrassSema::checkFunctionDecl(const FunctionDeclAST* func) {
 
     // Declare parameters in function scope
     for (const auto& param : sym.params) {
+        if (param.second.is_vec()) {
+            reportError(func->loc,
+                "Parameter '" + param.first + "' of type '" + param.second.toString() +
+                "' cannot be passed by value (implicit shallow copy is forbidden to prevent double-free).",
+                "Pass by pointer '" + param.second.toString() + "*' instead");
+        }
         VariableSymbol vsym;
         vsym.name = param.first;
         vsym.type = param.second;
@@ -1080,10 +1111,19 @@ void GrassSema::checkVarDeclStmt(const VarDeclStmtAST* vdecl) {
                 "Initializer expression must return a non-void value");
             return;
         }
+        if (init_type.is_vec()) {
+            reportError(vdecl->loc,
+                "Cannot shallow-copy '" + init_type.toString() + "' into 'take " + vdecl->var_name + "'.",
+                "Use a pointer '&" + vdecl->var_name + "' instead of copying a RAII vec");
+        }
         decl_type = init_type;
     } else if (vdecl->init_expr) {
         SemaType init_type = checkExpr(vdecl->init_expr.get());
-        if (decl_type.is_any()) {
+        if (decl_type.is_vec() || init_type.is_vec()) {
+            reportError(vdecl->loc,
+                "Cannot shallow-copy initialize '" + decl_type.toString() + " " + vdecl->var_name + "'.",
+                "Declare 'vec<T>' without initializer or borrow via '" + decl_type.toString() + "*'");
+        } else if (decl_type.is_any()) {
             decl_type = init_type;
         } else if (!init_type.is_assignable_to(decl_type, strict_mode_)) {
             reportError(vdecl->loc,
@@ -1101,7 +1141,9 @@ void GrassSema::checkVarDeclStmt(const VarDeclStmtAST* vdecl) {
     sym.is_initialized = (vdecl->init_expr != nullptr);
     current_scope_->declareVariable(sym);
 
-    if (decl_type.is_struct()) {
+    if (decl_type.is_vec()) {
+        current_scope_->registerRAIIVariable(sym);
+    } else if (decl_type.is_struct()) {
         const StructSymbol* st_sym = findStruct(decl_type.name);
         if (st_sym && st_sym->has_destructor) {
             current_scope_->registerRAIIVariable(sym);
@@ -1145,7 +1187,11 @@ void GrassSema::checkAssignStmt(const AssignStmtAST* assign) {
     }
 
     SemaType val_type = checkExpr(assign->value.get());
-    if (!val_type.is_assignable_to(tgt_type)) {
+    if (tgt_type.is_vec() || val_type.is_vec()) {
+        reportError(assign->loc,
+            "Cannot shallow-copy assign value of type '" + val_type.toString() + "' to '" + tgt_type.toString() + "'.",
+            "Use pointers 'vec<T>*' instead of copying RAII vec containers");
+    } else if (!val_type.is_assignable_to(tgt_type)) {
         reportError(assign->loc,
             "Cannot assign value of type '" + val_type.toString() + "' to variable of type '" + tgt_type.toString() + "'.",
             "Ensure types match in assignment");
@@ -1524,7 +1570,11 @@ SemaType GrassSema::checkCallExpr(const CallExprAST* call) {
     for (size_t i = 0; i < count; ++i) {
         SemaType arg_type = checkExpr(call->args[i].get());
         const SemaType& param_type = func->params[i].second;
-        if (!arg_type.is_assignable_to(param_type, strict_mode_)) {
+        if (arg_type.is_vec() && !param_type.is_pointer()) {
+            reportError(call->args[i]->loc,
+                "Cannot pass '" + arg_type.toString() + "' by value to function '" + call->callee + "' (implicit shallow copy is forbidden to prevent double-free).",
+                "Pass a pointer using '&' and declare parameter as '" + arg_type.toString() + "*'");
+        } else if (!arg_type.is_assignable_to(param_type, strict_mode_)) {
             reportError(call->args[i]->loc,
                 "Argument " + std::to_string(i + 1) + " of function '" + call->callee + "' expected type '" +
                 param_type.toString() + "', but got '" + arg_type.toString() + "'.",
@@ -1581,6 +1631,71 @@ SemaType GrassSema::checkMemberAccessExpr(const MemberAccessExprAST* mem) {
             }
         }
         reportError(mem->loc, "Member access '" + mem->member + "' on array type is not supported.", "Use .push(), .pop(), or .len()");
+        return SemaType::Unknown();
+    }
+
+    // Built-in vec<T> / vector<T> methods
+    if (obj_type.kind == SemaTypeKind::Vec) {
+        SemaType elem_t = obj_type.element_type ? *obj_type.element_type : SemaType::Any();
+        if (!mem->is_method_call) {
+            reportError(mem->loc,
+                "Direct field access '" + mem->member + "' on '" + obj_type.toString() + "' is not supported.",
+                "Use methods .size(), .capacity(), .empty(), .data(), .push(), .pop(), .clear(), .reserve()");
+            return SemaType::Unknown();
+        }
+        const std::string& m = mem->member;
+        if (m == "push" || m == "push_back") {
+            if (mem->method_args.size() != 1) {
+                reportError(mem->loc, "Method '" + m + "' on '" + obj_type.toString() + "' expects 1 argument.", "Pass element of type '" + elem_t.toString() + "'");
+                return SemaType::Void();
+            }
+            SemaType arg_t = checkExpr(mem->method_args[0].get());
+            if (arg_t.is_vec()) {
+                reportError(mem->method_args[0]->loc, "Cannot shallow-copy push '" + arg_t.toString() + "' into vector.", "Store pointers or structs");
+            } else if (!arg_t.is_assignable_to(elem_t, strict_mode_)) {
+                reportError(mem->method_args[0]->loc,
+                    "Argument 1 of '" + m + "' expected type '" + elem_t.toString() + "', but got '" + arg_t.toString() + "'.",
+                    "Ensure pushed value matches element type");
+            }
+            return SemaType::Void();
+        }
+        if (m == "pop" || m == "pop_back" || m == "clear") {
+            if (!mem->method_args.empty()) {
+                reportError(mem->loc, "Method '" + m + "' expects 0 arguments.", "Remove arguments");
+            }
+            return SemaType::Void();
+        }
+        if (m == "size" || m == "capacity") {
+            if (!mem->method_args.empty()) {
+                reportError(mem->loc, "Method '" + m + "' expects 0 arguments.", "Remove arguments");
+            }
+            return SemaType::Int();
+        }
+        if (m == "empty") {
+            if (!mem->method_args.empty()) {
+                reportError(mem->loc, "Method 'empty' expects 0 arguments.", "Remove arguments");
+            }
+            return SemaType::Bool();
+        }
+        if (m == "reserve") {
+            if (mem->method_args.size() != 1) {
+                reportError(mem->loc, "Method 'reserve' expects 1 integer argument.", "Pass new capacity");
+                return SemaType::Void();
+            }
+            SemaType arg_t = checkExpr(mem->method_args[0].get());
+            if (!arg_t.is_integral() && !arg_t.is_any() && !arg_t.is_unknown()) {
+                reportError(mem->method_args[0]->loc, "Argument to 'reserve' must be an integer, got '" + arg_t.toString() + "'.", "Pass integer capacity");
+            }
+            return SemaType::Void();
+        }
+        if (m == "data") {
+            if (!mem->method_args.empty()) {
+                reportError(mem->loc, "Method 'data' expects 0 arguments.", "Remove arguments");
+            }
+            return SemaType::Ptr(elem_t);
+        }
+        reportError(mem->loc, "'" + obj_type.toString() + "' has no method named '" + m + "'.",
+            "Available methods: push, push_back, pop, pop_back, size, capacity, empty, clear, reserve, data");
         return SemaType::Unknown();
     }
 
@@ -1680,6 +1795,9 @@ SemaType GrassSema::checkIndexExpr(const IndexExprAST* idx) {
         reportError(idx->loc, "Array index must be integer, got '" + idx_type.toString() + "'.", "Use integer value for indexing");
     }
 
+    if (target_type.is_vec()) {
+        return target_type.element_type ? *target_type.element_type : SemaType::Any();
+    }
     if (target_type.is_pointer() && target_type.element_type) {
         if (target_type.element_type->is_void()) {
             return SemaType::Int();

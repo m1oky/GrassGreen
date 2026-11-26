@@ -664,14 +664,121 @@ void BytecodeCompiler::registerVMVarType(const std::string& var_name, const std:
 
 void BytecodeCompiler::registerVMRAIIVar(const std::string& var_name, const std::string& struct_name) {
     if (struct_name.empty()) return;
-    auto it = g_struct_registry.find(struct_name);
-    if (it == g_struct_registry.end() || !it->second.has_destructor) return;
+    bool is_vec_raii = (struct_name.rfind("__vec__:", 0) == 0);
+    if (!is_vec_raii) {
+        auto it = g_struct_registry.find(struct_name);
+        if (it == g_struct_registry.end() || !it->second.has_destructor) return;
+    }
     if (vm_scopes_.empty()) pushVMScope();
     vm_scopes_.back().raii_vars.push_back({ var_name, struct_name });
 }
 
+bool BytecodeCompiler::isVMVecTypeStart(int offset) {
+    return (peek(offset).text == "vec" || peek(offset).text == "vector") && peek(offset + 1).kind == TOK_LT;
+}
+
+std::string BytecodeCompiler::parseVMVecInnerType() {
+    advance(); // vec / vector
+    advance(); // <
+    std::string inner;
+    if (isVMVecTypeStart()) {
+        inner = "vec<" + parseVMVecInnerType() + ">";
+    } else {
+        inner = advance().text;
+        while (match(TOK_COLON_COLON)) {
+            if (peek().kind == TOK_IDENT) inner += "::" + advance().text;
+        }
+    }
+    while (match(TOK_STAR)) inner += "*";
+    consume(TOK_GT, "Ожидалась '>' в типе vec<T>!");
+    return inner;
+}
+
+void BytecodeCompiler::emitVMVecElemDtorLoop(const std::string& var_name, const std::string& elem_struct) {
+    if (elem_struct.empty()) return;
+    auto it = g_struct_registry.find(elem_struct);
+    if (it == g_struct_registry.end() || !it->second.has_destructor) return;
+    std::string idx_var = "__vec_dtor_i_" + std::to_string(vm_temp_counter_++);
+    emitByte(OP_LOAD_VAR); emitString(var_name);
+    emitByte(OP_CALL_BUILTIN); emitString("__vec_size"); emitByte(1);
+    emitByte(OP_CONST_NUM); emitDouble(1.0);
+    emitByte(OP_SUB);
+    emitByte(OP_DEF_VAR); emitString(idx_var);
+
+    size_t loop_top = code.size();
+    emitByte(OP_LOAD_VAR); emitString(idx_var);
+    emitByte(OP_CONST_NUM); emitDouble(0.0);
+    emitByte(OP_CMP_GTE);
+    emitByte(OP_JMP_IF_FALSE);
+    size_t exit_patch = code.size();
+    emitU32(0);
+
+    emitByte(OP_LOAD_VAR); emitString(idx_var);
+    emitByte(OP_LOAD_VAR); emitString(var_name);
+    emitByte(OP_GET_INDEX);
+    std::string target_fn = elem_struct + "__dtor";
+    if (user_functions.count(target_fn)) {
+        emitByte(OP_CALL_USER);
+        emitU32(user_functions[target_fn].entry_ip);
+    } else {
+        emitByte(OP_CALL_USER);
+        method_call_fixups.push_back({ code.size(), target_fn });
+        emitU32(0);
+    }
+    emitByte(OP_POP);
+
+    emitByte(OP_LOAD_VAR); emitString(idx_var);
+    emitByte(OP_CONST_NUM); emitDouble(1.0);
+    emitByte(OP_SUB);
+    emitByte(OP_STORE_VAR); emitString(idx_var);
+    emitByte(OP_JMP); emitU32((uint32_t)loop_top);
+    patchU32(exit_patch, (uint32_t)code.size());
+}
+
+void BytecodeCompiler::emitVMVecPopElemDtor(const std::string& var_name, const std::string& elem_struct) {
+    if (elem_struct.empty()) return;
+    auto it = g_struct_registry.find(elem_struct);
+    if (it == g_struct_registry.end() || !it->second.has_destructor) return;
+    std::string sz_var = "__vec_pop_sz_" + std::to_string(vm_temp_counter_++);
+    emitByte(OP_LOAD_VAR); emitString(var_name);
+    emitByte(OP_CALL_BUILTIN); emitString("__vec_size"); emitByte(1);
+    emitByte(OP_DEF_VAR); emitString(sz_var);
+
+    emitByte(OP_LOAD_VAR); emitString(sz_var);
+    emitByte(OP_CONST_NUM); emitDouble(0.0);
+    emitByte(OP_CMP_GT);
+    emitByte(OP_JMP_IF_FALSE);
+    size_t skip_patch = code.size();
+    emitU32(0);
+
+    emitByte(OP_LOAD_VAR); emitString(sz_var);
+    emitByte(OP_CONST_NUM); emitDouble(1.0);
+    emitByte(OP_SUB);
+    emitByte(OP_LOAD_VAR); emitString(var_name);
+    emitByte(OP_GET_INDEX);
+    std::string target_fn = elem_struct + "__dtor";
+    if (user_functions.count(target_fn)) {
+        emitByte(OP_CALL_USER);
+        emitU32(user_functions[target_fn].entry_ip);
+    } else {
+        emitByte(OP_CALL_USER);
+        method_call_fixups.push_back({ code.size(), target_fn });
+        emitU32(0);
+    }
+    emitByte(OP_POP);
+    patchU32(skip_patch, (uint32_t)code.size());
+}
+
 void BytecodeCompiler::emitVMDtorCall(const std::string& var_name, const std::string& struct_name) {
     if (struct_name.empty()) return;
+    if (struct_name.rfind("__vec__:", 0) == 0) {
+        std::string elem_struct = struct_name.substr(8);
+        emitVMVecElemDtorLoop(var_name, elem_struct);
+        emitByte(OP_LOAD_VAR); emitString(var_name);
+        emitByte(OP_CALL_BUILTIN); emitString("__vec_destroy"); emitByte(1);
+        emitByte(OP_POP);
+        return;
+    }
     auto it = g_struct_registry.find(struct_name);
     if (it == g_struct_registry.end() || !it->second.has_destructor) return;
     emitByte(OP_LOAD_VAR); emitString(var_name);
@@ -1049,12 +1156,48 @@ void BytecodeCompiler::parsePrimary() {
         if (name == "YELLOW")        { emitByte(OP_CONST_NUM); emitDouble(14.0); return; }
         if (name == "WHITE")         { emitByte(OP_CONST_NUM); emitDouble(15.0); return; }
 
-        // Индексация массива: myArray[1]
+        // Индексация массива / вектора: myArray[1] или v[i].field
         if (match(TOK_LBRACKET)) {
             parseExpression();
             match(TOK_RBRACKET);
             emitByte(OP_LOAD_VAR); emitString(name);
             emitByte(OP_GET_INDEX);
+            string cur_struct;
+            auto vit = var_vec_types_.find(name);
+            if (vit != var_vec_types_.end() && g_struct_registry.count(vit->second)) {
+                cur_struct = vit->second;
+            }
+            while (match(TOK_DOT) || match(TOK_ARROW)) {
+                string member = advance().text;
+                if (match(TOK_LPAREN)) {
+                    uint8_t argc = 1;
+                    if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
+                        do {
+                            parseExpression();
+                            argc++;
+                        } while (match(TOK_COMMA));
+                    }
+                    consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')' у метода '" + member + "'!");
+                    (void)argc;
+                    string target_fn = !cur_struct.empty() ? (cur_struct + "_" + member) : (name + "_" + member);
+                    if (user_functions.count(target_fn)) {
+                        emitByte(OP_CALL_USER);
+                        emitU32(user_functions[target_fn].entry_ip);
+                    } else {
+                        emitByte(OP_CALL_USER);
+                        method_call_fixups.push_back({ code.size(), target_fn });
+                        emitU32(0);
+                    }
+                    cur_struct.clear();
+                } else {
+                    emitByte(OP_GET_FIELD); emitString(member);
+                    if (!cur_struct.empty() && g_struct_registry.count(cur_struct)) {
+                        const auto& sdef = g_struct_registry[cur_struct];
+                        auto fit = sdef.field_indices.find(member);
+                        cur_struct = (fit != sdef.field_indices.end()) ? sdef.fields[fit->second].struct_name : "";
+                    }
+                }
+            }
             return;
         }
 
@@ -1119,17 +1262,79 @@ void BytecodeCompiler::parsePrimary() {
         // Точка или стрелка как отдельный токен: obj.member / outer.inner.val / obj.method(args)
         if (match(TOK_DOT) || match(TOK_ARROW)) {
             string member = advance().text;
-            if ((member == "push" || member == "pop") && match(TOK_LPAREN)) {
-                if (member == "push") {
+            bool is_vec_var = (var_vec_types_.count(name) > 0);
+            bool struct_has_method = false;
+            if (var_struct_types.count(name) && g_struct_registry.count(var_struct_types[name])) {
+                const auto& mlist = g_struct_registry[var_struct_types[name]].methods;
+                for (const auto& mn : mlist) {
+                    if (mn == member) { struct_has_method = true; break; }
+                }
+            }
+            if ((is_vec_var || !struct_has_method) && peek().kind == TOK_LPAREN) {
+                if (member == "push" || member == "push_back") {
+                    advance(); // (
+                    emitByte(OP_LOAD_VAR); emitString(name);
                     parseExpression();
                     consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
-                    emitByte(OP_LOAD_VAR); emitString(name);
-                    emitByte(OP_ARRAY_PUSH);
+                    emitByte(OP_CALL_BUILTIN); emitString("__vec_push"); emitByte(2);
                     return;
-                } else {
+                } else if (member == "pop" || member == "pop_back") {
+                    advance(); // (
+                    consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
+                    if (!is_vec_var && member == "pop") {
+                        emitByte(OP_LOAD_VAR); emitString(name);
+                        emitByte(OP_ARRAY_POP);
+                        return;
+                    }
+                    if (is_vec_var) emitVMVecPopElemDtor(name, var_vec_types_[name]);
+                    emitByte(OP_LOAD_VAR); emitString(name);
+                    emitByte(OP_CALL_BUILTIN); emitString("__vec_pop"); emitByte(1);
+                    return;
+                } else if (member == "size" || member == "len") {
+                    advance(); // (
                     consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
                     emitByte(OP_LOAD_VAR); emitString(name);
-                    emitByte(OP_ARRAY_POP);
+                    emitByte(OP_CALL_BUILTIN); emitString("__vec_size"); emitByte(1);
+                    return;
+                } else if (member == "capacity") {
+                    advance(); // (
+                    consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
+                    emitByte(OP_LOAD_VAR); emitString(name);
+                    emitByte(OP_CALL_BUILTIN); emitString("__vec_capacity"); emitByte(1);
+                    return;
+                } else if (member == "empty") {
+                    advance(); // (
+                    consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
+                    emitByte(OP_LOAD_VAR); emitString(name);
+                    emitByte(OP_CALL_BUILTIN); emitString("__vec_empty"); emitByte(1);
+                    return;
+                } else if (member == "clear") {
+                    advance(); // (
+                    consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
+                    if (is_vec_var) emitVMVecElemDtorLoop(name, var_vec_types_[name]);
+                    emitByte(OP_LOAD_VAR); emitString(name);
+                    emitByte(OP_CALL_BUILTIN); emitString("__vec_clear"); emitByte(1);
+                    return;
+                } else if (member == "reserve") {
+                    advance(); // (
+                    emitByte(OP_LOAD_VAR); emitString(name);
+                    parseExpression();
+                    consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
+                    emitByte(OP_CALL_BUILTIN); emitString("__vec_reserve"); emitByte(2);
+                    return;
+                } else if (member == "data") {
+                    advance(); // (
+                    consume(TOK_RPAREN, "Ожидалась закрывающая круглая скобка ')'!");
+                    emitByte(OP_LOAD_VAR); emitString(name);
+                    emitByte(OP_CALL_BUILTIN); emitString("__vec_data"); emitByte(1);
+                    if (match(TOK_LBRACKET)) {
+                        string tmp_ptr = "__vec_dp_" + to_string(vm_temp_counter_++);
+                        emitByte(OP_DEF_VAR); emitString(tmp_ptr);
+                        parseExpression();
+                        consume(TOK_RBRACKET, "Ожидалась ']'!");
+                        emitByte(OP_LOAD_VAR); emitString(tmp_ptr);
+                        emitByte(OP_GET_INDEX);
+                    }
                     return;
                 }
             }
@@ -2270,13 +2475,19 @@ void BytecodeCompiler::parseStatement() {
         if (peek().kind != TOK_RPAREN && peek().kind != TOK_EOF) {
             while (true) {
                 string ptype;
-                if (isTypeOrFuncKeyword(peek().text) || g_struct_registry.count(peek().text)) {
+                string pvec_elem;
+                if (isVMVecTypeStart()) {
+                    pvec_elem = parseVMVecInnerType();
+                    while (match(TOK_STAR)) {}
+                } else if (isTypeOrFuncKeyword(peek().text) || g_struct_registry.count(peek().text)) {
                     ptype = advance().text;
                     while (match(TOK_STAR)) {}
                 }
                 string pname = advance().text;
                 params.push_back(pname);
-                if (!ptype.empty() && g_struct_registry.count(ptype)) {
+                if (!pvec_elem.empty()) {
+                    var_vec_types_[pname] = pvec_elem;
+                } else if (!ptype.empty() && g_struct_registry.count(ptype)) {
                     param_structs.push_back({pname, ptype});
                 }
                 if (!match(TOK_COMMA)) break;
@@ -3000,6 +3211,30 @@ void BytecodeCompiler::parseStatement() {
         return;
     }
 
+    // Объявление динамического массива vec<T> / vector<T>: vec<int> v; или vec<int>* vp = &v;
+    if (isVMVecTypeStart()) {
+        std::string elem_t = parseVMVecInnerType();
+        bool is_explicit_ptr = false;
+        while (match(TOK_STAR)) is_explicit_ptr = true;
+        if (peek().kind == TOK_IDENT) {
+            std::string v_name = advance().text;
+            var_vec_types_[v_name] = elem_t;
+            if (match(TOK_ASSIGN)) {
+                parseExpression();
+            } else if (!is_explicit_ptr) {
+                emitByte(OP_CALL_BUILTIN); emitString("__vec_create"); emitByte(0);
+            } else {
+                emitByte(OP_CONST_NUM); emitDouble(0.0);
+            }
+            emitByte(OP_DEF_VAR); emitString(v_name);
+            if (!is_explicit_ptr) {
+                registerVMRAIIVar(v_name, "__vec__:" + elem_t);
+            }
+            match(TOK_SEMI);
+            return;
+        }
+    }
+
     // Объявление экземпляра структуры: Player player; или Player* player = ...;
     if (peek().kind == TOK_IDENT && g_struct_registry.count(peek().text)) {
         size_t off = 1;
@@ -3346,20 +3581,49 @@ void BytecodeCompiler::parseStatement() {
         return;
     }
 
-    // Присваивание по индексу массива: myArray[1] = 20;
-    if (peek().kind == TOK_IDENT && peek(1).kind == TOK_LBRACKET) {
-        string arr_name = advance().text;
-        match(TOK_LBRACKET);
-        parseExpression(); // index
-        match(TOK_RBRACKET);
-        if (match(TOK_ASSIGN)) {
-            parseExpression(); // value
-            match(TOK_SEMI);
-            emitByte(OP_LOAD_VAR); emitString(arr_name);
-            emitByte(OP_SET_INDEX);
-            return;
+        // Присваивание по индексу массива: myArray[1] = 20; или v[i] += val;
+        if (peek().kind == TOK_IDENT && peek(1).kind == TOK_LBRACKET) {
+            size_t look = 2;
+            int depth = 1;
+            while (peek((int)look).kind != TOK_EOF && depth > 0) {
+                if (peek((int)look).kind == TOK_LBRACKET) depth++;
+                else if (peek((int)look).kind == TOK_RBRACKET) depth--;
+                look++;
+            }
+            GrassTokenKind ak = peek((int)look).kind;
+            if (ak == TOK_ASSIGN || ak == TOK_PLUS_ASSIGN || ak == TOK_MINUS_ASSIGN ||
+                ak == TOK_MUL_ASSIGN || ak == TOK_DIV_ASSIGN) {
+                string arr_name = advance().text;
+                match(TOK_LBRACKET);
+                size_t idx_start = cur;
+                parseExpression(); // index
+                match(TOK_RBRACKET);
+                GrassTokenKind op = advance().kind;
+                if (op == TOK_ASSIGN) {
+                    parseExpression(); // value
+                    match(TOK_SEMI);
+                    emitByte(OP_LOAD_VAR); emitString(arr_name);
+                    emitByte(OP_SET_INDEX);
+                } else {
+                    std::string tmp_idx = "__vm_idx_" + to_string(vm_temp_counter_++);
+                    (void)idx_start;
+                    emitByte(OP_DEF_VAR); emitString(tmp_idx);
+                    emitByte(OP_LOAD_VAR); emitString(tmp_idx);
+                    emitByte(OP_LOAD_VAR); emitString(tmp_idx);
+                    emitByte(OP_LOAD_VAR); emitString(arr_name);
+                    emitByte(OP_GET_INDEX);
+                    parseExpression();
+                    if (op == TOK_PLUS_ASSIGN) emitByte(OP_ADD);
+                    else if (op == TOK_MINUS_ASSIGN) emitByte(OP_SUB);
+                    else if (op == TOK_MUL_ASSIGN) emitByte(OP_MUL);
+                    else emitByte(OP_DIV);
+                    match(TOK_SEMI);
+                    emitByte(OP_LOAD_VAR); emitString(arr_name);
+                    emitByte(OP_SET_INDEX);
+                }
+                return;
+            }
         }
-    }
 
     // Разыменование указателя при присваивании: *ptr = val; **ptr = val; *(expr) = val;
     if (peek().kind == TOK_STAR) {
@@ -3797,16 +4061,26 @@ void BytecodeCompiler::parseStructDefinition() {
         // Поддержка двух вариантов объявления полей:
         // 1. C-style: string name; или int hp;
         // 2. RoadMap-style: hp: u32, или x: u64
-        string f_type, f_name;
+        string f_type, f_name, f_vec_elem;
         bool is_field_ptr = false;
         if (peek(1).kind == TOK_ASSIGN || peek(1).kind == TOK_COLON) {
             f_name = advance().text;
             advance(); // consume ':' / '='
-            f_type = advance().text;
+            if (isVMVecTypeStart()) {
+                f_vec_elem = parseVMVecInnerType();
+                f_type = "vec<" + f_vec_elem + ">";
+            } else {
+                f_type = advance().text;
+            }
             while (match(TOK_STAR)) is_field_ptr = true;
             if (match(TOK_COMMA) || match(TOK_SEMI)) {}
         } else {
-            f_type = advance().text;
+            if (isVMVecTypeStart()) {
+                f_vec_elem = parseVMVecInnerType();
+                f_type = "vec<" + f_vec_elem + ">";
+            } else {
+                f_type = advance().text;
+            }
             while (match(TOK_STAR)) is_field_ptr = true;
             f_name = advance().text;
             if (match(TOK_SEMI) || match(TOK_COMMA)) {}
@@ -3819,6 +4093,10 @@ void BytecodeCompiler::parseStructDefinition() {
 
         if (is_field_ptr) {
             ft = GrassFieldType::VALUE; f_size = 8; f_align = 8;
+        } else if (!f_vec_elem.empty()) {
+            ft = GrassFieldType::VALUE; f_size = 8; f_align = 8;
+            f_struct_name = "__vec__:" + f_vec_elem;
+            def.has_destructor = true;
         } else if (f_type == "u8" || f_type == "uint8" || f_type == "char" || f_type == "byte") {
             ft = GrassFieldType::U8; f_size = 1; f_align = 1;
         } else if (f_type == "bool") {
@@ -3880,6 +4158,13 @@ void BytecodeCompiler::parseStructDefinition() {
     auto emit_field_dtor_loop = [&]() {
         for (auto it = def.fields.rbegin(); it != def.fields.rend(); ++it) {
             if (it->struct_name.empty()) continue;
+            if (it->struct_name.rfind("__vec__:", 0) == 0) {
+                emitByte(OP_LOAD_VAR); emitString("this");
+                emitByte(OP_GET_FIELD); emitString(it->name);
+                emitByte(OP_CALL_BUILTIN); emitString("__vec_destroy"); emitByte(1);
+                emitByte(OP_POP);
+                continue;
+            }
             auto fit = g_struct_registry.find(it->struct_name);
             if (fit == g_struct_registry.end() || !fit->second.has_destructor) continue;
             emitByte(OP_LOAD_VAR); emitString("this");
@@ -4093,6 +4378,7 @@ bool GrassParser::isTypeName(const std::string& s) const {
     if (custom_types.count(s)) return true;
     return s == "int" || s == "float" || s == "double" || s == "string" ||
            s == "bool" || s == "void" || s == "char" || s == "take" ||
+           s == "vec" || s == "vector" ||
            s == "uint8" || s == "uint16" || s == "uint32" || s == "uint64" ||
            s == "int8" || s == "int16" || s == "int32" || s == "int64" ||
            s == "uint8_t" || s == "uint16_t" || s == "uint32_t" || s == "uint64_t" ||
@@ -4100,6 +4386,48 @@ bool GrassParser::isTypeName(const std::string& s) const {
            s == "u8" || s == "u16" || s == "u32" || s == "u64" ||
            s == "i8" || s == "i16" || s == "i32" || s == "i64" ||
            s == "f32" || s == "f64" || s == "byte" || s == "size_t";
+}
+
+bool GrassParser::isTypeStart(size_t offset) const {
+    if ((peek(offset).text == "vec" || peek(offset).text == "vector") && peek(offset + 1).kind == TOK_LT) {
+        return true;
+    }
+    if (isTypeName(peek(offset).text)) return true;
+    if (peek(offset).kind == TOK_IDENT) {
+        size_t off = offset + 1;
+        while (peek(off).kind == TOK_STAR) off++;
+        if (peek(off).kind == TOK_IDENT) return true;
+    }
+    return false;
+}
+
+bool GrassParser::parseTypeSpec(std::string& out_type, int& out_ptr_depth) {
+    out_ptr_depth = 0;
+    if ((peek().text == "vec" || peek().text == "vector") && peek(1).kind == TOK_LT) {
+        advance(); // vec / vector
+        advance(); // <
+        std::string inner_t;
+        int inner_ptr = 0;
+        if (!parseTypeSpec(inner_t, inner_ptr)) {
+            return false;
+        }
+        for (int i = 0; i < inner_ptr; ++i) inner_t += "*";
+        if (!match(TOK_GT)) {
+            reportError(peek().loc(filename), "Expected '>' closing vec<T> type", "Close template argument with '>'");
+        }
+        out_type = "vec<" + inner_t + ">";
+        while (match(TOK_STAR)) out_ptr_depth++;
+        return true;
+    }
+    if (peek().kind != TOK_IDENT) return false;
+    out_type = advance().text;
+    while (match(TOK_COLON_COLON)) {
+        if (peek().kind == TOK_IDENT) {
+            out_type += "::" + advance().text;
+        } else break;
+    }
+    while (match(TOK_STAR)) out_ptr_depth++;
+    return true;
 }
 
 bool GrassParser::isVarKeyword(const std::string& s) {
@@ -4329,19 +4657,11 @@ std::unique_ptr<ExprAST> GrassParser::parsePostfix() {
         } else if (match(TOK_AS)) {
             auto loc = peek(-1).loc(filename);
             std::string tname = "";
+            int ptr_depth = 0;
             if (peek().kind == TOK_IDENT) {
-                tname = advance().text;
-                while (match(TOK_COLON_COLON)) {
-                    if (peek().kind == TOK_IDENT) {
-                        tname += "::" + advance().text;
-                    }
-                }
+                parseTypeSpec(tname, ptr_depth);
             } else {
                 reportError(peek().loc(filename), "Expected type name after 'as'", "Specify target type");
-            }
-            int ptr_depth = 0;
-            while (match(TOK_STAR)) {
-                ptr_depth++;
             }
             expr = std::make_unique<CastExprAST>(loc, tname, ptr_depth, std::move(expr), false);
         } else if (match(TOK_DOT)) {
@@ -4412,16 +4732,9 @@ std::unique_ptr<ExprAST> GrassParser::parsePrimary() {
             reportError(peek().loc(filename), "Expected '(' after sizeof", "Enclose sizeof operand in '(' and ')'");
         }
         if (peek().kind == TOK_IDENT && isTypeName(peek().text)) {
-            std::string tname = advance().text;
-            while (match(TOK_COLON_COLON)) {
-                if (peek().kind == TOK_IDENT) {
-                    tname += "::" + advance().text;
-                }
-            }
+            std::string tname;
             int ptr_depth = 0;
-            while (match(TOK_STAR)) {
-                ptr_depth++;
-            }
+            parseTypeSpec(tname, ptr_depth);
             if (!match(TOK_RPAREN)) {
                 reportError(peek().loc(filename), "Expected ')' after type in sizeof", "Close with ')'");
             }
@@ -4546,21 +4859,12 @@ std::unique_ptr<StmtAST> GrassParser::parseStatement() {
         }
     }
 
-    bool is_type = isTypeName(peek().text);
-    if (!is_type && peek().kind == TOK_IDENT) {
-        if (peek(1).kind == TOK_IDENT) {
-            is_type = true;
-        } else if (peek(1).kind == TOK_STAR) {
-            size_t off = 2;
-            while (peek(off).kind == TOK_STAR) off++;
-            if (peek(off).kind == TOK_IDENT) is_type = true;
-        }
-    }
+    bool is_type = isTypeStart();
 
     if (is_type) {
-        std::string tname = advance().text;
+        std::string tname;
         int ptr_depth = 0;
-        while (match(TOK_STAR)) ptr_depth++;
+        parseTypeSpec(tname, ptr_depth);
         if (peek().kind == TOK_IDENT) {
             return parseVarDecl(tname, ptr_depth, false);
         }
@@ -4575,8 +4879,7 @@ std::unique_ptr<StmtAST> GrassParser::parseStatement() {
         std::string tname = "var";
         int ptr_depth = 0;
         if (isTypeName(peek().text)) {
-            tname = advance().text;
-            while (match(TOK_STAR)) ptr_depth++;
+            parseTypeSpec(tname, ptr_depth);
         }
         return parseVarDecl(tname, ptr_depth, is_const);
     }
@@ -4690,8 +4993,9 @@ std::unique_ptr<StmtAST> GrassParser::parseFor() {
     std::unique_ptr<StmtAST> init = nullptr;
     if (!check(TOK_SEMI)) {
         if (isTypeName(peek().text)) {
-            std::string tname = advance().text;
-            int ptr = 0; while (match(TOK_STAR)) ptr++;
+            std::string tname;
+            int ptr = 0;
+            parseTypeSpec(tname, ptr);
             init = parseVarDecl(tname, ptr, false);
         } else {
             auto e = parseExpression();
@@ -4762,8 +5066,7 @@ std::unique_ptr<FunctionDeclAST> GrassParser::parseFunction(const std::string& r
             std::string ptype = "var";
             int pptr = 0;
             if (isTypeName(peek().text) || isVarKeyword(peek().text)) {
-                ptype = advance().text;
-                while (match(TOK_STAR)) pptr++;
+                parseTypeSpec(ptype, pptr);
             }
             if (peek().kind == TOK_IDENT) {
                 auto ptok = advance();
@@ -4840,8 +5143,9 @@ std::unique_ptr<StructDeclAST> GrassParser::parseStruct() {
             continue;
         }
         if (isTypeName(peek().text)) {
-            std::string tname = advance().text;
-            int ptr = 0; while (match(TOK_STAR)) ptr++;
+            std::string tname;
+            int ptr = 0;
+            parseTypeSpec(tname, ptr);
             if (peek().kind == TOK_IDENT) {
                 std::string fname = advance().text;
                 if (check(TOK_LPAREN)) {
@@ -4928,8 +5232,9 @@ std::unique_ptr<ClassDeclAST> GrassParser::parseClass() {
             continue;
         }
         if (isTypeName(peek().text)) {
-            std::string tname = advance().text;
-            int ptr = 0; while (match(TOK_STAR)) ptr++;
+            std::string tname;
+            int ptr = 0;
+            parseTypeSpec(tname, ptr);
             if (peek().kind == TOK_IDENT) {
                 std::string fname = advance().text;
                 if (check(TOK_LPAREN)) {
@@ -4983,8 +5288,9 @@ std::unique_ptr<ModuleDeclAST> GrassParser::parseModule() {
             auto cls = parseClass();
             if (cls) mod->classes.push_back(std::move(cls));
         } else if (isTypeName(peek().text)) {
-            std::string tname = advance().text;
-            int ptr = 0; while (match(TOK_STAR)) ptr++;
+            std::string tname;
+            int ptr = 0;
+            parseTypeSpec(tname, ptr);
             if (peek().kind == TOK_IDENT && peek(1).kind == TOK_LPAREN) {
                 std::string fname = advance().text;
                 mod->functions.push_back(parseFunction(tname, ptr, fname));
@@ -5052,20 +5358,11 @@ std::unique_ptr<NamespaceDeclAST> GrassParser::parseNamespace() {
             auto fn = parseFunction("auto", 0, fname);
             if (fn) decls.push_back(std::move(fn));
         } else {
-            bool is_type = isTypeName(peek().text);
-            if (!is_type && peek().kind == TOK_IDENT) {
-                if (peek(1).kind == TOK_IDENT) {
-                    is_type = true;
-                } else if (peek(1).kind == TOK_STAR) {
-                    size_t off = 2;
-                    while (peek(off).kind == TOK_STAR) off++;
-                    if (peek(off).kind == TOK_IDENT) is_type = true;
-                }
-            }
+            bool is_type = isTypeStart();
             if (is_type) {
-                std::string type_name = advance().text;
+                std::string type_name;
                 int ptr_depth = 0;
-                while (match(TOK_STAR)) ptr_depth++;
+                parseTypeSpec(type_name, ptr_depth);
 
                 if (peek().kind == TOK_IDENT && peek(1).kind == TOK_LPAREN) {
                     std::string fname = advance().text;
@@ -5165,20 +5462,11 @@ std::unique_ptr<ProgramAST> GrassParser::parseProgram() {
                 auto fn = parseFunction("auto", 0, fname);
                 if (fn) program->declarations.push_back(std::move(fn));
             } else {
-                bool is_type = isTypeName(peek().text);
-                if (!is_type && peek().kind == TOK_IDENT) {
-                    if (peek(1).kind == TOK_IDENT) {
-                        is_type = true;
-                    } else if (peek(1).kind == TOK_STAR) {
-                        size_t off = 2;
-                        while (peek(off).kind == TOK_STAR) off++;
-                        if (peek(off).kind == TOK_IDENT) is_type = true;
-                    }
-                }
+                bool is_type = isTypeStart();
                 if (is_type) {
-                    std::string type_name = advance().text;
+                    std::string type_name;
                     int ptr_depth = 0;
-                    while (match(TOK_STAR)) ptr_depth++;
+                    parseTypeSpec(type_name, ptr_depth);
 
                     if (peek().kind == TOK_IDENT && peek(1).kind == TOK_LPAREN) {
                         std::string fname = advance().text;

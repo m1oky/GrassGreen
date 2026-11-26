@@ -411,6 +411,9 @@ int64_t memory_free_block(int64_t block_addr) {
             ir::IRType* type = nullptr;
             std::string struct_type_name;
             bool is_raii = false;
+            bool is_vec = false;
+            ir::IRType* vec_elem_type = nullptr;
+            std::string vec_elem_struct;
         };
         struct ScopeFrame {
             std::unordered_map<std::string, VarBinding> vars;
@@ -429,6 +432,12 @@ int64_t memory_free_block(int64_t block_addr) {
         std::string last_struct_name_;
         std::string current_dtor_struct_;
         bool last_expr_is_borrowed_ptr_ = false;
+        struct VecMeta {
+            ir::IRType* vec_struct_type = nullptr;
+            ir::IRType* elem_type = nullptr;
+            std::string elem_struct;
+        };
+        std::unordered_map<std::string, VecMeta> vec_struct_meta_;
 
         std::vector<std::string> namespace_stack_;
         std::vector<std::string> using_namespaces_;
@@ -521,14 +530,19 @@ int64_t memory_free_block(int64_t block_addr) {
         }
 
         void emit_var_dtor(const VarBinding& b) {
-            if (!b.is_raii || b.struct_type_name.empty() || !oop_mgr_) return;
+            if (!b.is_raii) return;
             ir::BasicBlock* cur_bb = builder_.get_insert_block();
             if (!cur_bb || cur_bb->has_terminator()) return;
+            if (b.is_vec) {
+                if (b.type && b.type->is_struct()) {
+                    emit_vec_dtor(b.alloca_id, b.type, b.vec_elem_type, b.vec_elem_struct);
+                }
+                return;
+            }
+            if (b.struct_type_name.empty() || !oop_mgr_) return;
             const auto* cd = oop_mgr_->get_class(b.struct_type_name);
             if (!cd || !cd->has_destructor) return;
             std::string dtor_name = oop_mgr_->get_destructor_name(cd->name);
-            ir::ValueId ptr_type_expected = 0;
-            (void)ptr_type_expected;
             ir::IRType* struct_ptr_t = ctx_.get_ptr_type(cd->ir_struct_type);
             if (b.type && b.type->is_pointer()) {
                 ir::ValueId obj_ptr = builder_.create_load(b.alloca_id, cd->name + "_dtor_ptr");
@@ -556,6 +570,14 @@ int64_t memory_free_block(int64_t block_addr) {
             if (!cd) return;
             for (auto it = cd->fields.rbegin(); it != cd->fields.rend(); ++it) {
                 if (it->type && it->type->is_struct()) {
+                    auto vit = vec_struct_meta_.find(it->type->struct_name);
+                    if (vit != vec_struct_meta_.end()) {
+                        ir::ValueId fptr = oop_mgr_->emit_field_gep(builder_, this_ptr, struct_name, it->name, it->name + "_vdtor_gep");
+                        if (fptr != ir::kInvalidValueId) {
+                            emit_vec_dtor(fptr, it->type, vit->second.elem_type, vit->second.elem_struct);
+                        }
+                        continue;
+                    }
                     const auto* fcd = oop_mgr_->get_class(it->type->struct_name);
                     if (fcd && fcd->has_destructor) {
                         ir::ValueId fptr = oop_mgr_->emit_field_gep(builder_, this_ptr, struct_name, it->name, it->name + "_dtor_gep");
@@ -595,9 +617,10 @@ int64_t memory_free_block(int64_t block_addr) {
         }
 
         bool declare_var(const std::string& name, ir::ValueId alloca_id, ir::IRType* type,
-                         const std::string& struct_name = "", bool is_raii = false) {
+                         const std::string& struct_name = "", bool is_raii = false,
+                         bool is_vec = false, ir::IRType* vec_elem_t = nullptr, const std::string& vec_elem_struct = "") {
             if (scopes_.empty()) push_scope();
-            scopes_.back().vars[name] = { alloca_id, type, struct_name, is_raii };
+            scopes_.back().vars[name] = { alloca_id, type, struct_name, is_raii, is_vec, vec_elem_t, vec_elem_struct };
             if (is_raii) {
                 scopes_.back().raii_vars.push_back(name);
             }
@@ -622,6 +645,241 @@ int64_t memory_free_block(int64_t block_addr) {
             for (uint64_t i = 0; i < qwords; ++i) {
                 ir::ValueId slot_p = (i == 0) ? base_p : builder_.create_gep(base_p, { builder_.create_const_i64(static_cast<int64_t>(i)) }, ctx_.get_i64_type());
                 builder_.create_store(zero64, slot_p);
+            }
+        }
+
+        bool is_vec_type_start(int offset = 0) const {
+            return (peek(offset).text == "vec" || peek(offset).text == "vector") &&
+                   peek(offset + 1).kind == TOK_LT;
+        }
+
+        static uint64_t get_ir_type_size_bytes(ir::IRType* t) {
+            if (!t) return 8;
+            uint64_t sz = t->size();
+            return sz > 0 ? sz : 8;
+        }
+
+        static std::string mangle_ir_type_key(ir::IRType* t, const std::string& elem_struct) {
+            if (!t) return "any";
+            if (t->is_pointer()) return "ptr_" + mangle_ir_type_key(t->element_type, elem_struct);
+            if (t->is_struct()) return "st_" + (!elem_struct.empty() ? elem_struct : t->struct_name);
+            if (t->is_floating_point()) return "f64";
+            if (t->is_bool()) return "i1";
+            if (t->is_i8()) return "i8";
+            if (t->is_i16()) return "i16";
+            if (t->is_i32()) return "i32";
+            return "i64";
+        }
+
+        ir::IRType* get_or_create_vec_ir_type(ir::IRType* elem_t, const std::string& elem_struct, std::string& out_sname) {
+            if (!elem_t || elem_t->is_void()) elem_t = ctx_.get_i64_type();
+            out_sname = "__vec_" + mangle_ir_type_key(elem_t, elem_struct);
+            auto it = vec_struct_meta_.find(out_sname);
+            if (it != vec_struct_meta_.end()) {
+                return it->second.vec_struct_type;
+            }
+            ir::IRType* data_ptr_t = ctx_.get_ptr_type(elem_t);
+            ir::IRType* i64_t = ctx_.get_i64_type();
+            ir::IRType* st = ctx_.get_struct_type(out_sname, { data_ptr_t, i64_t, i64_t }, { "data", "size", "capacity" });
+            vec_struct_meta_[out_sname] = { st, elem_t, elem_struct };
+            return st;
+        }
+
+        ir::IRType* parse_vec_ir_type(ir::IRType*& out_elem_t, std::string& out_elem_struct, std::string& out_vec_sname) {
+            advance(); // vec / vector
+            advance(); // <
+            out_elem_struct.clear();
+            if (is_vec_type_start()) {
+                ir::IRType* sub_e = nullptr;
+                std::string sub_es, sub_vs;
+                out_elem_t = parse_vec_ir_type(sub_e, sub_es, sub_vs);
+            } else {
+                std::string tname = advance().text;
+                while (match(TOK_COLON_COLON)) {
+                    if (peek().kind == TOK_IDENT) tname += "::" + advance().text;
+                }
+                if (oop_mgr_ && oop_mgr_->has_class(tname)) {
+                    out_elem_struct = tname;
+                    const auto* cd = oop_mgr_->get_class(tname);
+                    out_elem_t = (cd && cd->ir_struct_type) ? cd->ir_struct_type : ctx_.get_i64_type();
+                } else {
+                    out_elem_t = parse_type_name(tname);
+                }
+            }
+            while (match(TOK_STAR)) {
+                out_elem_t = ctx_.get_ptr_type(out_elem_t);
+                out_elem_struct.clear();
+            }
+            match(TOK_GT);
+            return get_or_create_vec_ir_type(out_elem_t, out_elem_struct, out_vec_sname);
+        }
+
+        void emit_vec_elem_dtor(ir::ValueId elem_ptr, const std::string& elem_struct) {
+            if (!oop_mgr_ || elem_struct.empty() || !elem_ptr) return;
+            const auto* cd = oop_mgr_->get_class(elem_struct);
+            if (!cd || !cd->has_destructor) return;
+            ir::ValueId cast_p = coerce_type(elem_ptr, ctx_.get_ptr_type(cd->ir_struct_type));
+            builder_.create_call(oop_mgr_->get_destructor_name(cd->name), ctx_.get_void_type(), { cast_p });
+        }
+
+        ir::ValueId emit_vec_size(ir::ValueId vec_ptr) {
+            ir::ValueId sz_p = builder_.create_gep_struct(vec_ptr, 1, "vec_sz_ptr");
+            return builder_.create_load(sz_p, "vec_sz");
+        }
+
+        ir::ValueId emit_vec_capacity(ir::ValueId vec_ptr) {
+            ir::ValueId cap_p = builder_.create_gep_struct(vec_ptr, 2, "vec_cap_ptr");
+            return builder_.create_load(cap_p, "vec_cap");
+        }
+
+        ir::ValueId emit_vec_empty(ir::ValueId vec_ptr) {
+            ir::ValueId sz = emit_vec_size(vec_ptr);
+            return builder_.create_icmp_eq(sz, builder_.create_const_i64(0), "vec_empty");
+        }
+
+        ir::ValueId emit_vec_data(ir::ValueId vec_ptr, ir::IRType* elem_t) {
+            ir::ValueId dp = builder_.create_gep_struct(vec_ptr, 0, "vec_data_field");
+            ir::ValueId raw = builder_.create_load(dp, "vec_data");
+            return coerce_type(raw, ctx_.get_ptr_type(elem_t));
+        }
+
+        void emit_vec_reserve(ir::ValueId vec_ptr, ir::IRType* elem_t, ir::ValueId new_cap) {
+            ir::ValueId new_cap64 = coerce_type(new_cap, ctx_.get_i64_type());
+            ir::ValueId cap_p = builder_.create_gep_struct(vec_ptr, 2, "vec_cap_field");
+            ir::ValueId cur_cap = builder_.create_load(cap_p, "cur_cap");
+            ir::ValueId need_grow = builder_.create_icmp(ir::ICmpCond::SGT, new_cap64, cur_cap, "need_grow");
+            ir::BasicBlock* bb_grow = builder_.create_block("vec_res_grow");
+            ir::BasicBlock* bb_done = builder_.create_block("vec_res_done");
+            builder_.create_branch(need_grow, bb_grow, bb_done);
+
+            builder_.set_insert_point(bb_grow);
+            uint64_t elem_sz = get_ir_type_size_bytes(elem_t);
+            ir::ValueId bytes = builder_.create_mul(new_cap64, builder_.create_const_i64(static_cast<int64_t>(elem_sz)), "vec_bytes");
+            ir::ValueId data_f = builder_.create_gep_struct(vec_ptr, 0, "vec_data_f");
+            ir::ValueId cur_data = coerce_type(builder_.create_load(data_f, "cur_data"), ctx_.get_ptr_type());
+            ir::ValueId new_raw = builder_.create_call("grass_realloc", ctx_.get_ptr_type(), { cur_data, bytes });
+            ir::ValueId new_typed = coerce_type(new_raw, ctx_.get_ptr_type(elem_t));
+            builder_.create_store(new_typed, data_f);
+            builder_.create_store(new_cap64, cap_p);
+            builder_.create_jump(bb_done);
+
+            builder_.set_insert_point(bb_done);
+        }
+
+        void emit_vec_push(ir::ValueId vec_ptr, ir::IRType* elem_t, ir::ValueId val) {
+            ir::ValueId sz_p = builder_.create_gep_struct(vec_ptr, 1, "push_sz_f");
+            ir::ValueId cap_p = builder_.create_gep_struct(vec_ptr, 2, "push_cap_f");
+            ir::ValueId sz = builder_.create_load(sz_p, "push_sz");
+            ir::ValueId cap = builder_.create_load(cap_p, "push_cap");
+            ir::ValueId full = builder_.create_icmp(ir::ICmpCond::SGE, sz, cap, "vec_full");
+
+            ir::BasicBlock* bb_grow = builder_.create_block("vec_push_grow");
+            ir::BasicBlock* bb_zero = builder_.create_block("vec_push_init");
+            ir::BasicBlock* bb_dbl = builder_.create_block("vec_push_dbl");
+            ir::BasicBlock* bb_store = builder_.create_block("vec_push_store");
+            builder_.create_branch(full, bb_grow, bb_store);
+
+            builder_.set_insert_point(bb_grow);
+            ir::ValueId is_zero = builder_.create_icmp_eq(cap, builder_.create_const_i64(0), "cap_is_0");
+            builder_.create_branch(is_zero, bb_zero, bb_dbl);
+
+            builder_.set_insert_point(bb_zero);
+            emit_vec_reserve(vec_ptr, elem_t, builder_.create_const_i64(8));
+            builder_.create_jump(bb_store);
+
+            builder_.set_insert_point(bb_dbl);
+            ir::ValueId cap2 = builder_.create_mul(cap, builder_.create_const_i64(2), "cap_2x");
+            emit_vec_reserve(vec_ptr, elem_t, cap2);
+            builder_.create_jump(bb_store);
+
+            builder_.set_insert_point(bb_store);
+            ir::ValueId data_ptr = emit_vec_data(vec_ptr, elem_t);
+            ir::ValueId cur_sz = builder_.create_load(sz_p, "push_cur_sz");
+            ir::ValueId slot_ptr = builder_.create_gep(data_ptr, { cur_sz }, elem_t, "push_slot");
+            ir::IRType* val_t = builder_.get_function()->has_value(val) ? builder_.get_function()->get_value(val).type : nullptr;
+            if (elem_t && elem_t->is_struct() && val_t && val_t->is_pointer()) {
+                emit_copy_struct(slot_ptr, val, elem_t);
+            } else {
+                ir::ValueId cval = coerce_type(val, elem_t);
+                builder_.create_store(cval, slot_ptr);
+            }
+            ir::ValueId next_sz = builder_.create_add(cur_sz, builder_.create_const_i64(1), "next_sz");
+            builder_.create_store(next_sz, sz_p);
+        }
+
+        void emit_vec_pop(ir::ValueId vec_ptr, ir::IRType* elem_t, const std::string& elem_struct) {
+            ir::ValueId sz_p = builder_.create_gep_struct(vec_ptr, 1, "pop_sz_f");
+            ir::ValueId sz = builder_.create_load(sz_p, "pop_sz");
+            ir::ValueId non_empty = builder_.create_icmp(ir::ICmpCond::SGT, sz, builder_.create_const_i64(0), "pop_ne");
+            ir::BasicBlock* bb_do = builder_.create_block("vec_pop_do");
+            ir::BasicBlock* bb_done = builder_.create_block("vec_pop_done");
+            builder_.create_branch(non_empty, bb_do, bb_done);
+
+            builder_.set_insert_point(bb_do);
+            ir::ValueId new_sz = builder_.create_sub(sz, builder_.create_const_i64(1), "new_sz");
+            if (oop_mgr_ && !elem_struct.empty()) {
+                const auto* cd = oop_mgr_->get_class(elem_struct);
+                if (cd && cd->has_destructor) {
+                    ir::ValueId data_ptr = emit_vec_data(vec_ptr, elem_t);
+                    ir::ValueId elem_p = builder_.create_gep(data_ptr, { new_sz }, elem_t, "pop_elem_p");
+                    emit_vec_elem_dtor(elem_p, elem_struct);
+                }
+            }
+            builder_.create_store(new_sz, sz_p);
+            builder_.create_jump(bb_done);
+
+            builder_.set_insert_point(bb_done);
+        }
+
+        void emit_vec_clear(ir::ValueId vec_ptr, ir::IRType* elem_t, const std::string& elem_struct) {
+            ir::ValueId sz_p = builder_.create_gep_struct(vec_ptr, 1, "clr_sz_f");
+            if (oop_mgr_ && !elem_struct.empty()) {
+                const auto* cd = oop_mgr_->get_class(elem_struct);
+                if (cd && cd->has_destructor) {
+                    ir::ValueId sz = builder_.create_load(sz_p, "clr_sz");
+                    ir::ValueId idx_alloca = builder_.create_alloca(ctx_.get_i64_type(), 1, 0, "clr_i");
+                    builder_.create_store(builder_.create_sub(sz, builder_.create_const_i64(1)), idx_alloca);
+                    ir::BasicBlock* bb_cond = builder_.create_block("vec_clr_cond");
+                    ir::BasicBlock* bb_body = builder_.create_block("vec_clr_body");
+                    ir::BasicBlock* bb_end = builder_.create_block("vec_clr_end");
+                    builder_.create_jump(bb_cond);
+
+                    builder_.set_insert_point(bb_cond);
+                    ir::ValueId cur_i = builder_.create_load(idx_alloca, "clr_idx");
+                    ir::ValueId ge0 = builder_.create_icmp(ir::ICmpCond::SGE, cur_i, builder_.create_const_i64(0), "clr_ge0");
+                    builder_.create_branch(ge0, bb_body, bb_end);
+
+                    builder_.set_insert_point(bb_body);
+                    ir::ValueId data_ptr = emit_vec_data(vec_ptr, elem_t);
+                    ir::ValueId elem_p = builder_.create_gep(data_ptr, { cur_i }, elem_t, "clr_elem_p");
+                    emit_vec_elem_dtor(elem_p, elem_struct);
+                    builder_.create_store(builder_.create_sub(cur_i, builder_.create_const_i64(1)), idx_alloca);
+                    builder_.create_jump(bb_cond);
+
+                    builder_.set_insert_point(bb_end);
+                }
+            }
+            builder_.create_store(builder_.create_const_i64(0), sz_p);
+        }
+
+        void emit_vec_dtor(ir::ValueId vec_ptr, ir::IRType* vec_st, ir::IRType* elem_t, const std::string& elem_struct) {
+            if (!vec_ptr) return;
+            emit_vec_clear(vec_ptr, elem_t, elem_struct);
+            ir::ValueId data_f = builder_.create_gep_struct(vec_ptr, 0, "dtor_data_f");
+            ir::ValueId raw_p = coerce_type(builder_.create_load(data_f, "dtor_data"), ctx_.get_ptr_type());
+            ir::ValueId null_p = builder_.create_const_int(ctx_.get_ptr_type(), 0);
+            ir::ValueId non_null = builder_.create_icmp_ne(raw_p, null_p);
+            ir::BasicBlock* bb_free = builder_.create_block("vec_dtor_free");
+            ir::BasicBlock* bb_done = builder_.create_block("vec_dtor_done");
+            builder_.create_branch(non_null, bb_free, bb_done);
+
+            builder_.set_insert_point(bb_free);
+            builder_.create_call("grass_free", ctx_.get_void_type(), { raw_p });
+            builder_.create_jump(bb_done);
+
+            builder_.set_insert_point(bb_done);
+            if (vec_st && vec_st->is_struct()) {
+                emit_zero_struct(vec_ptr, vec_st);
             }
         }
 
@@ -815,7 +1073,16 @@ int64_t memory_free_block(int64_t block_addr) {
                 return true;
             }
             bool is_fn = false;
-            if (is_type_or_func_keyword(peek().text) || (oop_mgr_ && oop_mgr_->has_class(peek().text))) {
+            if (is_vec_type_start()) {
+                int off = 2; int depth = 1;
+                while (peek(off).kind != TOK_EOF && depth > 0) {
+                    if (peek(off).kind == TOK_LT) depth++;
+                    else if (peek(off).kind == TOK_GT) depth--;
+                    off++;
+                }
+                while (peek(off).kind == TOK_STAR) off++;
+                if (peek(off).kind == TOK_IDENT && peek(off + 1).kind == TOK_LPAREN) is_fn = true;
+            } else if (is_type_or_func_keyword(peek().text) || (oop_mgr_ && oop_mgr_->has_class(peek().text))) {
                 size_t off = 1;
                 while (peek(off).kind == TOK_STAR) off++;
                 if (peek(off).kind == TOK_IDENT && peek(off + 1).kind == TOK_LPAREN) is_fn = true;
@@ -962,12 +1229,29 @@ int64_t memory_free_block(int64_t block_addr) {
                 }
 
                 bool is_struct_field_or_ret = (oop_mgr_ && oop_mgr_->has_class(peek().text));
-                if (peek().kind == TOK_IDENT && (is_var_keyword(peek().text) || is_type_or_func_keyword(peek().text) || is_struct_field_or_ret)) {
-                    std::string ftype_str = advance().text;
-                    ir::IRType* ftype = (ftype_str == "fn") ? ctx_.get_void_type() : parse_type_name(ftype_str);
+                bool is_vec_field_or_ret = is_vec_type_start();
+                if (peek().kind == TOK_IDENT && (is_var_keyword(peek().text) || is_type_or_func_keyword(peek().text) || is_struct_field_or_ret || is_vec_field_or_ret)) {
+                    ir::IRType* ftype = nullptr;
+                    bool field_is_ptr = false;
+                    if (is_vec_field_or_ret) {
+                        ir::IRType* ve = nullptr;
+                        std::string ves, vsn;
+                        ftype = parse_vec_ir_type(ve, ves, vsn);
+                        if (!match(TOK_STAR) && oop_mgr_) {
+                            oop_mgr_->add_destructor();
+                        } else {
+                            ftype = ctx_.get_ptr_type(ftype);
+                            field_is_ptr = true;
+                        }
+                    } else {
+                        std::string ftype_str = advance().text;
+                        ftype = (ftype_str == "fn") ? ctx_.get_void_type() : parse_type_name(ftype_str);
+                    }
                     while (match(TOK_STAR)) {
                         ftype = ctx_.get_ptr_type(ftype);
+                        field_is_ptr = true;
                     }
+                    (void)field_is_ptr;
                     if (peek().kind != TOK_IDENT) {
                         error = "Line " + std::to_string(peek().line) + ": Expected field or method name!";
                         return false;
@@ -1153,13 +1437,19 @@ int64_t memory_free_block(int64_t block_addr) {
         }
 
         bool parse_function(std::string& error) {
-            std::string ret_type_name = advance().text;
             ir::IRType* ret_type = nullptr;
-            if (oop_mgr_ && oop_mgr_->has_class(ret_type_name)) {
-                const auto* cd = oop_mgr_->get_class(ret_type_name);
-                ret_type = (cd && cd->ir_struct_type) ? cd->ir_struct_type : ctx_.get_i64_type();
+            if (is_vec_type_start()) {
+                ir::IRType* ve = nullptr;
+                std::string ves, vsn;
+                ret_type = parse_vec_ir_type(ve, ves, vsn);
             } else {
-                ret_type = parse_type_name(ret_type_name);
+                std::string ret_type_name = advance().text;
+                if (oop_mgr_ && oop_mgr_->has_class(ret_type_name)) {
+                    const auto* cd = oop_mgr_->get_class(ret_type_name);
+                    ret_type = (cd && cd->ir_struct_type) ? cd->ir_struct_type : ctx_.get_i64_type();
+                } else {
+                    ret_type = parse_type_name(ret_type_name);
+                }
             }
             while (match(TOK_STAR)) {
                 ret_type = ctx_.get_ptr_type(ret_type);
@@ -1180,6 +1470,9 @@ int64_t memory_free_block(int64_t block_addr) {
                 std::string name;
                 ir::IRType* type;
                 std::string struct_name;
+                bool is_vec = false;
+                ir::IRType* vec_elem_t = nullptr;
+                std::string vec_elem_struct;
             };
             std::vector<ParamInfo> params;
 
@@ -1187,7 +1480,16 @@ int64_t memory_free_block(int64_t block_addr) {
                 while (true) {
                     ir::IRType* ptype = ctx_.get_i64_type();
                     std::string struct_name = "";
-                    if (peek().kind == TOK_IDENT &&
+                    bool p_is_vec = false;
+                    ir::IRType* p_velem = nullptr;
+                    std::string p_vestruct;
+                    if (is_vec_type_start()) {
+                        std::string vsn;
+                        ir::IRType* vst = parse_vec_ir_type(p_velem, p_vestruct, vsn);
+                        ptype = vst;
+                        struct_name = vsn;
+                        p_is_vec = true;
+                    } else if (peek().kind == TOK_IDENT &&
                         (peek(1).kind == TOK_IDENT || peek(1).kind == TOK_STAR || (oop_mgr_ && oop_mgr_->has_class(peek().text)))) {
                         std::string tname = advance().text;
                         if (oop_mgr_ && oop_mgr_->has_class(tname)) {
@@ -1209,7 +1511,7 @@ int64_t memory_free_block(int64_t block_addr) {
                         return false;
                     }
                     std::string pname = advance().text;
-                    params.push_back({ pname, ptype, struct_name });
+                    params.push_back({ pname, ptype, struct_name, p_is_vec, p_velem, p_vestruct });
                     fn->add_argument(pname, ptype);
                     if (!match(TOK_COMMA)) break;
                 }
@@ -1224,7 +1526,8 @@ int64_t memory_free_block(int64_t block_addr) {
             for (size_t i = 0; i < params.size(); ++i) {
                 ir::ValueId alloca_id = builder_.create_alloca(params[i].type, 1, 0, params[i].name);
                 builder_.create_store(fn->arguments[i].id, alloca_id);
-                declare_var(params[i].name, alloca_id, params[i].type, params[i].struct_name);
+                declare_var(params[i].name, alloca_id, params[i].type, params[i].struct_name, false,
+                            params[i].is_vec, params[i].vec_elem_t, params[i].vec_elem_struct);
             }
 
             while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
@@ -1376,6 +1679,42 @@ int64_t memory_free_block(int64_t block_addr) {
                     }
                 }
                 in_stream_io_ = prev_io;
+                match(TOK_SEMI);
+                return true;
+            }
+
+            // Dynamic Vector Declaration: vec<T> v; / vector<T> v; / vec<T>* vp = &v;
+            if (is_vec_type_start()) {
+                ir::IRType* elem_t = nullptr;
+                std::string elem_struct, vec_sname;
+                ir::IRType* vst = parse_vec_ir_type(elem_t, elem_struct, vec_sname);
+                bool is_explicit_ptr = false;
+                ir::IRType* vtype = vst;
+                while (match(TOK_STAR)) {
+                    vtype = ctx_.get_ptr_type(vtype);
+                    is_explicit_ptr = true;
+                }
+                while (peek().kind == TOK_IDENT) {
+                    std::string var_name = advance().text;
+                    ir::ValueId alloca_id = builder_.create_alloca(vtype, 1, 0, var_name);
+                    if (is_explicit_ptr) {
+                        declare_var(var_name, alloca_id, vtype, vec_sname, false, true, elem_t, elem_struct);
+                        if (match(TOK_ASSIGN)) {
+                            ir::ValueId init_val = coerce_type(parse_expression(error), vtype);
+                            if (!init_val) return false;
+                            builder_.create_store(init_val, alloca_id);
+                        } else {
+                            builder_.create_store(builder_.create_const_int(vtype, 0), alloca_id);
+                        }
+                    } else {
+                        declare_var(var_name, alloca_id, vtype, vec_sname, true, true, elem_t, elem_struct);
+                        emit_zero_struct(alloca_id, vst);
+                        if (match(TOK_ASSIGN)) {
+                            parse_expression(error);
+                        }
+                    }
+                    if (!match(TOK_COMMA)) break;
+                }
                 match(TOK_SEMI);
                 return true;
             }
@@ -1969,8 +2308,44 @@ int64_t memory_free_block(int64_t block_addr) {
                     }
                     ir::ValueId arr_ptr = builder_.create_load(var->alloca_id, arr_name + "_ptr");
                     bool is_typed_ptr = (var->type && var->type->is_pointer() &&
-                                         var->type->element_type && !var->type->element_type->is_void());
-                    if (is_typed_ptr) {
+                                         var->type->element_type && !var->type->element_type->is_void() &&
+                                         !var->is_vec);
+                    if (var->is_vec && var->vec_elem_type) {
+                        ir::IRType* elem_t = var->vec_elem_type;
+                        ir::ValueId vec_p = (var->type && var->type->is_pointer()) ? arr_ptr : var->alloca_id;
+                        ir::ValueId data_ptr = emit_vec_data(vec_p, elem_t);
+                        ir::ValueId idx64 = coerce_type(idx, ctx_.get_i64_type());
+                        ir::ValueId elem_ptr = builder_.create_gep(data_ptr, { idx64 }, elem_t, arr_name + "_vec_ep");
+                        if (op == TOK_ASSIGN) {
+                            ir::IRType* rhs_t = builder_.get_function()->has_value(rhs) ? builder_.get_function()->get_value(rhs).type : nullptr;
+                            if (elem_t->is_struct() && rhs_t && rhs_t->is_pointer()) {
+                                emit_copy_struct(elem_ptr, rhs, elem_t);
+                            } else {
+                                rhs = coerce_type(rhs, elem_t);
+                                builder_.create_store(rhs, elem_ptr);
+                            }
+                            return rhs;
+                        } else {
+                            ir::ValueId cur = builder_.create_load(elem_ptr, arr_name + "_vec_el");
+                            match_types(cur, rhs);
+                            ir::IRType* lt = builder_.get_function()->get_value(cur).type;
+                            ir::ValueId computed = 0;
+                            if (lt && lt->is_floating_point()) {
+                                if (op == TOK_PLUS_ASSIGN) computed = builder_.create_fadd(cur, rhs);
+                                else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_fsub(cur, rhs);
+                                else if (op == TOK_MUL_ASSIGN) computed = builder_.create_fmul(cur, rhs);
+                                else computed = builder_.create_fdiv(cur, rhs);
+                            } else {
+                                if (op == TOK_PLUS_ASSIGN) computed = builder_.create_add(cur, rhs);
+                                else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_sub(cur, rhs);
+                                else if (op == TOK_MUL_ASSIGN) computed = builder_.create_mul(cur, rhs);
+                                else computed = builder_.create_sdiv(cur, rhs);
+                            }
+                            computed = coerce_type(computed, elem_t);
+                            builder_.create_store(computed, elem_ptr);
+                            return computed;
+                        }
+                    } else if (is_typed_ptr) {
                         ir::IRType* elem_t = var->type->element_type;
                         ir::ValueId idx64 = coerce_type(idx, ctx_.get_i64_type());
                         ir::ValueId elem_ptr = builder_.create_gep(arr_ptr, { idx64 }, elem_t, arr_name + "_elem_ptr");
@@ -2342,8 +2717,15 @@ int64_t memory_free_block(int64_t block_addr) {
                 if (match(TOK_LBRACKET)) {
                     ir::ValueId idx = parse_expression(error);
                     if (!idx || !consume(TOK_RBRACKET, "Expected ']'", error)) return 0;
-                    ir::ValueId arr_ptr = builder_.create_load(var->alloca_id, id + "_ptr");
                     ir::ValueId idx64 = coerce_type(idx, ctx_.get_i64_type());
+                    if (var->is_vec && var->vec_elem_type) {
+                        ir::ValueId vec_p = (var->type && var->type->is_pointer())
+                            ? builder_.create_load(var->alloca_id, id + "_vptr")
+                            : var->alloca_id;
+                        ir::ValueId data_ptr = emit_vec_data(vec_p, var->vec_elem_type);
+                        return builder_.create_gep(data_ptr, { idx64 }, var->vec_elem_type, id + "_vec_elem_addr");
+                    }
+                    ir::ValueId arr_ptr = builder_.create_load(var->alloca_id, id + "_ptr");
                     bool is_typed_ptr = (var->type && var->type->is_pointer() &&
                                          var->type->element_type && !var->type->element_type->is_void());
                     if (is_typed_ptr) {
@@ -2508,16 +2890,14 @@ int64_t memory_free_block(int64_t block_addr) {
             if (!base) return 0;
 
             while (true) {
-                // Member access or method call obj.field / obj.method(args)
-                if (match(TOK_DOT)) {
+                if (match(TOK_DOT) || match(TOK_ARROW)) {
                     if (peek().kind != TOK_IDENT) {
-                        error = "Expected identifier after '.'!";
+                        error = "Expected identifier after '.' or '->'!";
                         return 0;
                     }
                     std::string member_name = advance().text;
                     std::string receiver_struct = last_struct_name_;
                     if (match(TOK_LPAREN)) {
-                        // Method call e.g. arr.push(10) or hero.status() or hero.take_damage(35)
                         std::vector<ir::ValueId> args;
                         if (peek().kind != TOK_RPAREN) {
                             while (true) {
@@ -2528,6 +2908,46 @@ int64_t memory_free_block(int64_t block_addr) {
                             }
                         }
                         consume(TOK_RPAREN, "Expected ')' closing method call!", error);
+                        if (!receiver_struct.empty() && vec_struct_meta_.count(receiver_struct)) {
+                            const auto& vm = vec_struct_meta_[receiver_struct];
+                            if ((member_name == "push" || member_name == "push_back") && !args.empty()) {
+                                emit_vec_push(base, vm.elem_type, args[0]);
+                                last_struct_name_.clear();
+                                base = builder_.create_const_i64(0);
+                                continue;
+                            } else if (member_name == "pop" || member_name == "pop_back") {
+                                emit_vec_pop(base, vm.elem_type, vm.elem_struct);
+                                last_struct_name_.clear();
+                                base = builder_.create_const_i64(0);
+                                continue;
+                            } else if (member_name == "size") {
+                                last_struct_name_.clear();
+                                base = emit_vec_size(base);
+                                continue;
+                            } else if (member_name == "capacity") {
+                                last_struct_name_.clear();
+                                base = emit_vec_capacity(base);
+                                continue;
+                            } else if (member_name == "empty") {
+                                last_struct_name_.clear();
+                                base = emit_vec_empty(base);
+                                continue;
+                            } else if (member_name == "clear") {
+                                emit_vec_clear(base, vm.elem_type, vm.elem_struct);
+                                last_struct_name_.clear();
+                                base = builder_.create_const_i64(0);
+                                continue;
+                            } else if (member_name == "reserve" && !args.empty()) {
+                                emit_vec_reserve(base, vm.elem_type, args[0]);
+                                last_struct_name_.clear();
+                                base = builder_.create_const_i64(0);
+                                continue;
+                            } else if (member_name == "data") {
+                                base = emit_vec_data(base, vm.elem_type);
+                                last_struct_name_ = vm.elem_struct;
+                                continue;
+                            }
+                        }
                         if (member_name == "push") {
                             std::vector<ir::ValueId> push_args = { base };
                             push_args.insert(push_args.end(), args.begin(), args.end());
@@ -2538,69 +2958,6 @@ int64_t memory_free_block(int64_t block_addr) {
                             last_struct_name_.clear();
                             return builder_.create_call("grass_array_len", ctx_.get_i64_type(), { base });
                         } else if (oop_mgr_ && !receiver_struct.empty()) {
-                            const auto* cd = oop_mgr_->get_class(receiver_struct);
-                            const auto* md = cd ? cd->find_method(member_name) : nullptr;
-                            base = oop_mgr_->emit_call_method(builder_, base, receiver_struct, member_name, args);
-                            if (md && md->return_type && md->return_type->is_struct()) {
-                                last_struct_name_ = md->return_type->struct_name;
-                            } else if (md && md->return_type && md->return_type->is_pointer() && md->return_type->element_type && md->return_type->element_type->is_struct()) {
-                                last_struct_name_ = md->return_type->element_type->struct_name;
-                            } else {
-                                last_struct_name_.clear();
-                            }
-                            return base;
-                        }
-                    } else {
-                        // Field access e.g. this.name, hero.hp, outer.inner.val
-                        if (oop_mgr_ && !receiver_struct.empty()) {
-                            std::string prev_struct = receiver_struct;
-                            const auto* cd = oop_mgr_->get_class(prev_struct);
-                            std::string next_struct = "";
-                            bool is_nested_val_struct = false;
-                            if (cd) {
-                                auto fit = cd->field_indices.find(member_name);
-                                if (fit != cd->field_indices.end()) {
-                                    const auto& fld = cd->fields[fit->second];
-                                    if (fld.type) {
-                                        if (fld.type->is_struct()) {
-                                            is_nested_val_struct = true;
-                                            next_struct = fld.type->struct_name;
-                                        } else if (fld.type->is_pointer() && fld.type->element_type && fld.type->element_type->is_struct()) {
-                                            next_struct = fld.type->element_type->struct_name;
-                                        }
-                                    }
-                                }
-                            }
-                            if (is_nested_val_struct) {
-                                base = oop_mgr_->emit_field_gep(builder_, base, prev_struct, member_name);
-                            } else {
-                                base = oop_mgr_->emit_load_field(builder_, base, prev_struct, member_name);
-                            }
-                            last_struct_name_ = next_struct;
-                        }
-                    }
-                    continue;
-                }
-                // Pointer member access ptr->field / ptr->method(args)
-                if (match(TOK_ARROW)) {
-                    if (peek().kind != TOK_IDENT) {
-                        error = "Expected identifier after '->'!";
-                        return 0;
-                    }
-                    std::string member_name = advance().text;
-                    std::string receiver_struct = last_struct_name_;
-                    if (match(TOK_LPAREN)) {
-                        std::vector<ir::ValueId> args;
-                        if (peek().kind != TOK_RPAREN) {
-                            while (true) {
-                                ir::ValueId arg = parse_expression(error);
-                                if (!arg) return 0;
-                                args.push_back(arg);
-                                if (!match(TOK_COMMA)) break;
-                            }
-                        }
-                        consume(TOK_RPAREN, "Expected ')' closing method call!", error);
-                        if (oop_mgr_ && !receiver_struct.empty()) {
                             const auto* cd = oop_mgr_->get_class(receiver_struct);
                             const auto* md = cd ? cd->find_method(member_name) : nullptr;
                             base = oop_mgr_->emit_call_method(builder_, base, receiver_struct, member_name, args);
@@ -2667,7 +3024,24 @@ int64_t memory_free_block(int64_t block_addr) {
                     consume(TOK_RBRACKET, "Expected ']' closing array index!", error);
                     ir::IRType* base_t = builder_.get_function()->has_value(base)
                         ? builder_.get_function()->get_value(base).type : nullptr;
-                    if (base_t && base_t->is_pointer() && base_t->element_type && !base_t->element_type->is_void()) {
+                    if (base_t && base_t->is_pointer() && base_t->element_type && base_t->element_type->is_struct() &&
+                        vec_struct_meta_.count(base_t->element_type->struct_name)) {
+                        const auto& vm = vec_struct_meta_[base_t->element_type->struct_name];
+                        ir::IRType* elem_t = vm.elem_type;
+                        ir::ValueId data_ptr = emit_vec_data(base, elem_t);
+                        ir::ValueId idx64 = coerce_type(idx, ctx_.get_i64_type());
+                        ir::ValueId elem_ptr = builder_.create_gep(data_ptr, { idx64 }, elem_t, "vec_idx_gep");
+                        if (elem_t->is_struct()) {
+                            last_struct_name_ = vm.elem_struct;
+                            base = elem_ptr;
+                        } else if (elem_t->is_pointer() && elem_t->element_type && elem_t->element_type->is_struct()) {
+                            last_struct_name_ = elem_t->element_type->struct_name;
+                            base = builder_.create_load(elem_ptr, "vec_idx_val");
+                        } else {
+                            last_struct_name_.clear();
+                            base = builder_.create_load(elem_ptr, "vec_idx_val");
+                        }
+                    } else if (base_t && base_t->is_pointer() && base_t->element_type && !base_t->element_type->is_void()) {
                         ir::IRType* elem_t = base_t->element_type;
                         ir::ValueId idx64 = coerce_type(idx, ctx_.get_i64_type());
                         ir::ValueId elem_ptr = builder_.create_gep(base, { idx64 }, elem_t, "ptr_idx_gep");

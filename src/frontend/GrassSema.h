@@ -18,6 +18,7 @@ enum class SemaTypeKind {
     String,
     Pointer,
     Array,
+    Vec,
     Struct,
     Unknown,
     Any
@@ -53,6 +54,11 @@ struct SemaType {
     static SemaType CustomStruct(const std::string& sname) {
         return SemaType(SemaTypeKind::Struct, sname);
     }
+    static SemaType Vec(const SemaType& elem) {
+        SemaType t(SemaTypeKind::Vec, "vec<" + elem.toString() + ">", 0);
+        t.element_type = std::make_shared<SemaType>(elem);
+        return t;
+    }
 
     bool is_pointer() const { return kind == SemaTypeKind::Pointer || pointer_depth > 0; }
     bool is_numeric() const { return (kind == SemaTypeKind::Int || kind == SemaTypeKind::Float) && !is_pointer(); }
@@ -60,6 +66,7 @@ struct SemaType {
     bool is_bool() const { return kind == SemaTypeKind::Bool && !is_pointer(); }
     bool is_void() const { return kind == SemaTypeKind::Void && !is_pointer(); }
     bool is_string() const { return kind == SemaTypeKind::String && !is_pointer(); }
+    bool is_vec() const { return kind == SemaTypeKind::Vec && !is_pointer(); }
     bool is_struct() const { return kind == SemaTypeKind::Struct && !is_pointer(); }
     bool is_unknown() const { return kind == SemaTypeKind::Unknown; }
     bool is_any() const { return kind == SemaTypeKind::Any; }
@@ -70,6 +77,10 @@ struct SemaType {
         if (pointer_depth != other.pointer_depth) return false;
         if (kind != other.kind) return false;
         if (kind == SemaTypeKind::Struct) return name == other.name;
+        if (kind == SemaTypeKind::Pointer || kind == SemaTypeKind::Vec) {
+            if (element_type && other.element_type) return element_type->equals(*other.element_type);
+            return name == other.name;
+        }
         return true;
     }
 
@@ -125,6 +136,9 @@ struct SemaType {
                 s = (element_type ? element_type->toString() : (name.empty() ? "void" : name)) + "*";
                 break;
             case SemaTypeKind::Array: s = name + "[]"; break;
+            case SemaTypeKind::Vec:
+                s = "vec<" + (element_type ? element_type->toString() : "any") + ">";
+                break;
             case SemaTypeKind::Struct: s = name; break;
             case SemaTypeKind::Any: s = "any"; break;
             default: s = "unknown"; break;

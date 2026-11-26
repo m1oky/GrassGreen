@@ -538,6 +538,49 @@ namespace grass::opt {
             std::unordered_set<ir::IRInst*> invariant_set;
             std::vector<ir::IRInst*> ordered_invariants;
 
+            // Detect whether loop modifies any vec<T> header or calls functions, so pure vec<T>
+            // field loads (data ptr & size) can be safely hoisted into the preheader for SIMD.
+            bool loop_has_calls = false;
+            std::unordered_set<ir::ValueId> written_vec_bases;
+            for (ir::BasicBlock* bb : loop.blocks) {
+                for (const auto& inst : bb->instructions) {
+                    if (inst->op == ir::IROp::Call || inst->op == ir::IROp::MemCpy || inst->op == ir::IROp::MemSet) {
+                        loop_has_calls = true;
+                        break;
+                    }
+                    if (inst->op == ir::IROp::Store && inst->operands.size() >= 2) {
+                        ir::ValueId ptr_v = inst->operands[1];
+                        ir::IRInst* pdef = fn.has_value(ptr_v) ? fn.get_value(ptr_v).def_inst : nullptr;
+                        if (pdef && pdef->op == ir::IROp::GetElementPtr && pdef->gep_field_index >= 0 && !pdef->operands.empty()) {
+                            written_vec_bases.insert(pdef->operands[0]);
+                        } else if (fn.has_value(ptr_v) && fn.get_value(ptr_v).type &&
+                                   fn.get_value(ptr_v).type->is_pointer() &&
+                                   fn.get_value(ptr_v).type->element_type &&
+                                   fn.get_value(ptr_v).type->element_type->is_struct() &&
+                                   fn.get_value(ptr_v).type->element_type->struct_name.rfind("__vec_", 0) == 0) {
+                            written_vec_bases.insert(ptr_v);
+                        }
+                    }
+                }
+                if (loop_has_calls) break;
+            }
+
+            auto is_invariant_vec_header_load = [&](const ir::IRInst* inst) -> bool {
+                if (loop_has_calls || !inst || inst->op != ir::IROp::Load || inst->operands.empty()) return false;
+                if (inst->parent != loop.header && loop.blocks.size() > 2) return false;
+                ir::IRInst* pdef = fn.has_value(inst->operands[0]) ? fn.get_value(inst->operands[0]).def_inst : nullptr;
+                if (!pdef || pdef->op != ir::IROp::GetElementPtr || pdef->gep_field_index < 0 || pdef->operands.empty()) {
+                    return false;
+                }
+                ir::ValueId base = pdef->operands[0];
+                if (!fn.has_value(base)) return false;
+                ir::IRType* bt = fn.get_value(base).type;
+                if (!bt || !bt->is_pointer() || !bt->element_type || !bt->element_type->is_struct()) return false;
+                if (bt->element_type->struct_name.rfind("__vec_", 0) != 0) return false;
+                if (written_vec_bases.count(base)) return false;
+                return true;
+            };
+
             auto is_val_invariant = [&](ir::ValueId vid) -> bool {
                 if (!fn.has_value(vid)) return true;
                 const auto& v = fn.get_value(vid);
@@ -552,7 +595,7 @@ namespace grass::opt {
                 for (ir::BasicBlock* bb : loop.blocks) {
                     for (auto& inst : bb->instructions) {
                         if (invariant_set.count(inst.get())) continue;
-                        if (!is_hoistable_instruction(inst.get())) continue;
+                        if (!is_hoistable_instruction(inst.get()) && !is_invariant_vec_header_load(inst.get())) continue;
 
                         bool all_ops_inv = true;
                         for (ir::ValueId opnd : inst->operands) {

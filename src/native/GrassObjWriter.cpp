@@ -2555,7 +2555,9 @@ namespace grass::backend {
         // 2 & 3b. grass_alloc, alloc, memory_alloc: Win32 HeapAlloc with size <= 0 and integer-overflow bounds check
         if ((needed_symbols.count("grass_alloc") > 0 && defined_symbols.count("grass_alloc") == 0) ||
             (needed_symbols.count("alloc") > 0 && defined_symbols.count("alloc") == 0) ||
-            (needed_symbols.count("memory_alloc") > 0 && defined_symbols.count("memory_alloc") == 0)) {
+            (needed_symbols.count("memory_alloc") > 0 && defined_symbols.count("memory_alloc") == 0) ||
+            ((needed_symbols.count("grass_realloc") > 0 || needed_symbols.count("realloc") > 0) &&
+             defined_symbols.count("grass_alloc") == 0)) {
             std::vector<uint8_t> code;
             auto emit = [&](std::initializer_list<uint8_t> bytes) { code.insert(code.end(), bytes); };
             emit({0x48, 0x85, 0xC9});                                     // test rcx, rcx
@@ -2653,12 +2655,14 @@ namespace grass::backend {
             size_t rel_alloc = code.size() + 1;
             emit({0xE9, 0x00, 0x00, 0x00, 0x00});                         // jmp grass_alloc
             emit({0x48, 0x83, 0xEC, 0x28});                               // sub rsp, 40
-            emit({0x49, 0x89, 0xD1});                                     // mov r9, rdx
-            emit({0x49, 0x89, 0xC8});                                     // mov r8, rcx
+            emit({0x48, 0x89, 0x4C, 0x24, 0x30});                         // mov [rsp + 48], rcx (save lpMem)
+            emit({0x48, 0x89, 0x54, 0x24, 0x38});                         // mov [rsp + 56], rdx (save dwBytes)
             size_t rel_heap = code.size() + 1;
             emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call GetProcessHeap
-            emit({0x48, 0x89, 0xC1});                                     // mov rcx, rax
-            emit({0xBA, 0x08, 0x00, 0x00, 0x00});                         // mov edx, 8
+            emit({0x48, 0x89, 0xC1});                                     // mov rcx, rax (hHeap)
+            emit({0xBA, 0x08, 0x00, 0x00, 0x00});                         // mov edx, 8 (HEAP_ZERO_MEMORY)
+            emit({0x4C, 0x8B, 0x44, 0x24, 0x30});                         // mov r8, [rsp + 48] (lpMem)
+            emit({0x4C, 0x8B, 0x4C, 0x24, 0x38});                         // mov r9, [rsp + 56] (dwBytes)
             size_t rel_realloc = code.size() + 1;
             emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call HeapReAlloc
             emit({0x48, 0x83, 0xC4, 0x28});                               // add rsp, 40

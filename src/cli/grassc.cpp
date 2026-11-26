@@ -1270,9 +1270,133 @@ public:
                         if (args[0].is_array()) {
                             GrassArray* a = args[0].asArray();
                             push(GrassValue::Num(a ? (double)a->elements.size() : 0.0));
+                        } else if (args[0].is_ptr() && args[0].asPtr() && args[0].asPtr()->cell && args[0].asPtr()->cell->is_array()) {
+                            GrassArray* a = args[0].asPtr()->cell->asArray();
+                            push(GrassValue::Num(a ? (double)a->elements.size() : 0.0));
                         } else {
                             push(GrassValue::Num((double)args[0].toString().size()));
                         }
+                    }
+                    else if (fn == "__vec_create") {
+                        GrassArray* arr = new GrassArray();
+                        arr->is_vec = true;
+                        arr->vec_capacity = 0;
+                        heap_arrays.push_back(arr);
+                        push(GrassValue::Array(arr));
+                    }
+                    else if (fn == "__vec_push" && argc >= 2) {
+                        GrassArray* arr = nullptr;
+                        if (args[0].is_array()) arr = args[0].asArray();
+                        else if (args[0].is_ptr() && args[0].asPtr() && args[0].asPtr()->cell && args[0].asPtr()->cell->is_array()) {
+                            arr = args[0].asPtr()->cell->asArray();
+                        }
+                        if (arr) {
+                            if (arr->vec_capacity == 0) {
+                                arr->vec_capacity = 8;
+                                arr->elements.reserve(8);
+                            } else if (arr->elements.size() >= arr->vec_capacity) {
+                                arr->vec_capacity *= 2;
+                                arr->elements.reserve(arr->vec_capacity);
+                            }
+                            GrassValue pushed_val = args[1];
+                            if (pushed_val.is_struct() && pushed_val.asStruct() && pushed_val.asStruct()->def) {
+                                GrassStructInstance* src = pushed_val.asStruct();
+                                GrassStructInstance* clone = (GrassStructInstance*)g_vm_arena.alloc(sizeof(GrassStructInstance));
+                                uint8_t* cbuf = (uint8_t*)g_vm_arena.alloc(src->def->total_size);
+                                if (cbuf && src->data) memcpy(cbuf, src->data, src->def->total_size);
+                                clone->def = src->def;
+                                clone->data = cbuf;
+                                pushed_val = GrassValue::Struct(clone);
+                            }
+                            arr->elements.push_back(pushed_val);
+                        }
+                        push(GrassValue::Nil());
+                    }
+                    else if (fn == "__vec_pop" && argc >= 1) {
+                        GrassArray* arr = nullptr;
+                        if (args[0].is_array()) arr = args[0].asArray();
+                        else if (args[0].is_ptr() && args[0].asPtr() && args[0].asPtr()->cell && args[0].asPtr()->cell->is_array()) {
+                            arr = args[0].asPtr()->cell->asArray();
+                        }
+                        if (arr && !arr->elements.empty()) {
+                            arr->elements.pop_back();
+                        }
+                        push(GrassValue::Nil());
+                    }
+                    else if (fn == "__vec_size" && argc >= 1) {
+                        GrassArray* arr = nullptr;
+                        if (args[0].is_array()) arr = args[0].asArray();
+                        else if (args[0].is_ptr() && args[0].asPtr() && args[0].asPtr()->cell && args[0].asPtr()->cell->is_array()) {
+                            arr = args[0].asPtr()->cell->asArray();
+                        }
+                        push(GrassValue::Num(arr ? (double)arr->elements.size() : 0.0));
+                    }
+                    else if (fn == "__vec_capacity" && argc >= 1) {
+                        GrassArray* arr = nullptr;
+                        if (args[0].is_array()) arr = args[0].asArray();
+                        else if (args[0].is_ptr() && args[0].asPtr() && args[0].asPtr()->cell && args[0].asPtr()->cell->is_array()) {
+                            arr = args[0].asPtr()->cell->asArray();
+                        }
+                        size_t cap = 0;
+                        if (arr) cap = arr->is_vec ? arr->vec_capacity : arr->elements.capacity();
+                        push(GrassValue::Num((double)cap));
+                    }
+                    else if (fn == "__vec_empty" && argc >= 1) {
+                        GrassArray* arr = nullptr;
+                        if (args[0].is_array()) arr = args[0].asArray();
+                        else if (args[0].is_ptr() && args[0].asPtr() && args[0].asPtr()->cell && args[0].asPtr()->cell->is_array()) {
+                            arr = args[0].asPtr()->cell->asArray();
+                        }
+                        push(GrassValue::Bool(!arr || arr->elements.empty()));
+                    }
+                    else if (fn == "__vec_clear" && argc >= 1) {
+                        GrassArray* arr = nullptr;
+                        if (args[0].is_array()) arr = args[0].asArray();
+                        else if (args[0].is_ptr() && args[0].asPtr() && args[0].asPtr()->cell && args[0].asPtr()->cell->is_array()) {
+                            arr = args[0].asPtr()->cell->asArray();
+                        }
+                        if (arr) arr->elements.clear();
+                        push(GrassValue::Nil());
+                    }
+                    else if (fn == "__vec_reserve" && argc >= 2) {
+                        GrassArray* arr = nullptr;
+                        if (args[0].is_array()) arr = args[0].asArray();
+                        else if (args[0].is_ptr() && args[0].asPtr() && args[0].asPtr()->cell && args[0].asPtr()->cell->is_array()) {
+                            arr = args[0].asPtr()->cell->asArray();
+                        }
+                        long long nc = (long long)args[1].toNumber();
+                        if (arr && nc > 0 && (size_t)nc > arr->vec_capacity) {
+                            arr->vec_capacity = (size_t)nc;
+                            arr->elements.reserve(arr->vec_capacity);
+                        }
+                        push(GrassValue::Nil());
+                    }
+                    else if (fn == "__vec_data" && argc >= 1) {
+                        GrassArray* arr = nullptr;
+                        if (args[0].is_array()) arr = args[0].asArray();
+                        else if (args[0].is_ptr() && args[0].asPtr() && args[0].asPtr()->cell && args[0].asPtr()->cell->is_array()) {
+                            arr = args[0].asPtr()->cell->asArray();
+                        }
+                        GrassVMPtr* p = (GrassVMPtr*)g_vm_arena.alloc(sizeof(GrassVMPtr));
+                        new (p) GrassVMPtr();
+                        if (arr) {
+                            p->vec = &arr->elements;
+                            p->vec_idx = 0;
+                            p->elem_size = 8;
+                        }
+                        push(GrassValue::Ptr(p));
+                    }
+                    else if (fn == "__vec_destroy" && argc >= 1) {
+                        GrassArray* arr = nullptr;
+                        if (args[0].is_array()) arr = args[0].asArray();
+                        else if (args[0].is_ptr() && args[0].asPtr() && args[0].asPtr()->cell && args[0].asPtr()->cell->is_array()) {
+                            arr = args[0].asPtr()->cell->asArray();
+                        }
+                        if (arr) {
+                            arr->elements.clear();
+                            arr->vec_capacity = 0;
+                        }
+                        push(GrassValue::Nil());
                     }
                     else if (fn == "upper" && argc >= 1) {
                         string s = args[0].toString();
@@ -3374,7 +3498,13 @@ public:
                 inst->def = &sd;
                 inst->data = buf;
                 for (const auto& fd : sd.fields) {
-                    if (!fd.struct_name.empty()) {
+                    if (fd.struct_name.rfind("__vec__:", 0) == 0) {
+                        GrassArray* arr = new GrassArray();
+                        arr->is_vec = true;
+                        arr->vec_capacity = 0;
+                        heap_arrays.push_back(arr);
+                        *(GrassValue*)(buf + fd.offset) = GrassValue::Array(arr);
+                    } else if (!fd.struct_name.empty()) {
                         auto fit = g_struct_registry.find(fd.struct_name);
                         if (fit != g_struct_registry.end()) {
                             GrassStructInstance* sub = self(self, fit->second);
