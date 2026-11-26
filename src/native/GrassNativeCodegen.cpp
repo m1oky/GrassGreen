@@ -3874,6 +3874,42 @@ int64_t memory_free_block(int64_t block_addr) {
                         target_call_name = ident;
                     } else if (ident == "web_compile" && args.size() == 1) {
                         args.push_back(builder_.create_call(add_rodata_string(""), ctx_.get_ptr_type(ctx_.get_i8_type()), {}));
+                    } else if (ident == "color" && !args.empty()) {
+                        ir::IRType* at0 = builder_.get_function()->has_value(args[0]) ? builder_.get_function()->get_value(args[0]).type : nullptr;
+                        if (at0 && at0->is_pointer()) {
+                            ident = "grass_bm_color_str";
+                            target_call_name = ident;
+                            if (args.size() == 1) {
+                                args.push_back(builder_.create_call(add_rodata_string(""), ctx_.get_ptr_type(ctx_.get_i8_type()), {}));
+                            }
+                        } else {
+                            ident = "grass_bm_color_int";
+                            target_call_name = ident;
+                            if (args.size() == 1) {
+                                args.push_back(builder_.create_const_i64(0));
+                            }
+                        }
+                    } else if (ident == "draw_box") {
+                        if (args.size() == 4) args.push_back(builder_.create_call(add_rodata_string(""), ctx_.get_ptr_type(ctx_.get_i8_type()), {}));
+                        if (args.size() == 5) args.push_back(builder_.create_const_i64(10));
+                        if (args.size() == 6) args.push_back(builder_.create_const_i64(0));
+                    } else if (ident == "progress_bar") {
+                        if (args.size() == 4) args.push_back(builder_.create_const_i64(10));
+                        if (args.size() == 5) args.push_back(builder_.create_const_i64(0));
+                    } else if (ident == "mouse_down") {
+                        if (args.empty()) {
+                            args.push_back(builder_.create_const_i64(1));
+                        } else {
+                            ir::IRType* at0 = builder_.get_function()->has_value(args[0]) ? builder_.get_function()->get_value(args[0]).type : nullptr;
+                            if (at0 && at0->is_pointer()) {
+                                ident = "mouse_down_str";
+                                target_call_name = ident;
+                            }
+                        }
+                    } else if (ident == "mouse_cursor" && args.empty()) {
+                        args.push_back(builder_.create_const_i64(1));
+                    } else if (ident == "not_clear" && args.empty()) {
+                        args.push_back(builder_.create_const_i64(1));
                     } else if ((ident == "thread_join" || ident == "mutex_lock") && args.size() == 1) {
                         args.push_back(builder_.create_const_i64(0));
                     } else if ((ident == "thread" || ident == "async") && !args.empty()) {
@@ -3941,6 +3977,22 @@ int64_t memory_free_block(int64_t block_addr) {
                 }
                 const VarBinding* var = lookup_var(ident);
                 if (!var) {
+                    if (ident == "BLACK")         return builder_.create_const_i64(0);
+                    if (ident == "BLUE")          return builder_.create_const_i64(1);
+                    if (ident == "GREEN")         return builder_.create_const_i64(2);
+                    if (ident == "CYAN")          return builder_.create_const_i64(3);
+                    if (ident == "RED")           return builder_.create_const_i64(4);
+                    if (ident == "MAGENTA")       return builder_.create_const_i64(5);
+                    if (ident == "BROWN")         return builder_.create_const_i64(6);
+                    if (ident == "LIGHT_GRAY")    return builder_.create_const_i64(7);
+                    if (ident == "DARK_GRAY")     return builder_.create_const_i64(8);
+                    if (ident == "LIGHT_BLUE")    return builder_.create_const_i64(9);
+                    if (ident == "LIGHT_GREEN")   return builder_.create_const_i64(10);
+                    if (ident == "LIGHT_CYAN")    return builder_.create_const_i64(11);
+                    if (ident == "LIGHT_RED")     return builder_.create_const_i64(12);
+                    if (ident == "LIGHT_MAGENTA") return builder_.create_const_i64(13);
+                    if (ident == "YELLOW")        return builder_.create_const_i64(14);
+                    if (ident == "WHITE")         return builder_.create_const_i64(15);
                     if (ir::IRFunction* fn_ref = module_.get_function(ident)) {
                         (void)fn_ref;
                         last_struct_name_.clear();
@@ -4976,7 +5028,13 @@ int64_t memory_free_block(int64_t block_addr) {
                                 break;
                             }
 
-                            if (inst->callee_name == "system" && !options_.freestanding &&
+                            if ((inst->callee_name == "system" || inst->callee_name == "clear" ||
+                                 inst->callee_name == "cls" || inst->callee_name == "clear_all" ||
+                                 inst->callee_name == "cls_all" || inst->callee_name == "grass_bm_color_int" ||
+                                 inst->callee_name == "grass_bm_color_str" || inst->callee_name == "color" ||
+                                 inst->callee_name == "draw_box" || inst->callee_name == "progress_bar" ||
+                                 inst->callee_name == "SetConsoleTextAttribute") &&
+                                !options_.freestanding &&
                                 options_.arch == TargetArch::X86_64 && options_.abi == TargetABI::Win64) {
                                 encoder.call_extern("gout_flush");
                             }

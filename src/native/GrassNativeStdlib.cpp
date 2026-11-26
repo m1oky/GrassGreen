@@ -31,6 +31,7 @@ namespace grass::native {
         populate_physics3d(ctx);
         populate_memory(ctx);
         populate_thread(ctx);
+        populate_baremetal(ctx);
         populate_ffi(ctx);
         populate_extra(ctx);
 
@@ -670,9 +671,6 @@ namespace grass::native {
         register_function({ "ticks", "sys", i64_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "threads", "sys", i64_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "grass_sleep_sec", "sys", v_t, { i64_t }, { "sec" }, false, false, false, "", backend::TargetABI::Win64 });
-        register_function({ "clear", "sys", v_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
-        register_function({ "not_clear_on", "sys", v_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
-        register_function({ "not_clear_off", "sys", v_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
 
         register_function({ "inw", "mmio", i64_t, { i64_t }, { "port" }, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "inl", "mmio", i64_t, { i64_t }, { "port" }, false, true, false, "", backend::TargetABI::Win64 });
@@ -716,6 +714,36 @@ namespace grass::native {
 
         register_function({ "grass_native_thread_spawn", "thread", i64_t, { ptr_t, ptr_t }, { "fn", "arg" }, false, false, false, "", backend::TargetABI::Win64 });
         register_function({ "grass_native_thread_id", "thread", i64_t, {}, {}, false, false, false, "", backend::TargetABI::Win64 });
+    }
+
+    void GrassNativeStdlib::populate_baremetal(ir::IRContext& ctx) {
+        ir::IRType* v_t   = ctx.get_void_type();
+        ir::IRType* i64_t = ctx.get_i64_type();
+        ir::IRType* ptr_t = ctx.get_ptr_type();
+        ir::IRType* str_t = ctx.get_ptr_type(ctx.get_i8_type());
+
+        register_function({ "color", "baremetal", v_t, { ptr_t, ptr_t }, { "fg", "bg" }, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "grass_bm_color_int", "baremetal", v_t, { i64_t, i64_t }, { "fg", "bg" }, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "grass_bm_color_str", "baremetal", v_t, { ptr_t, ptr_t }, { "fg", "bg" }, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "clear", "baremetal", v_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "cls", "baremetal", v_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "clear_all", "baremetal", v_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "cls_all", "baremetal", v_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "not_clear", "baremetal", v_t, { i64_t }, { "enable" }, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "not_clear_on", "baremetal", v_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "not_clear_off", "baremetal", v_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "read_key", "baremetal", str_t, {}, {}, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "draw_box", "baremetal", v_t, { i64_t, i64_t, i64_t, i64_t, ptr_t, i64_t, i64_t }, { "x", "y", "w", "h", "title", "fg", "bg" }, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "menu", "baremetal", i64_t, { ptr_t, ptr_t }, { "title", "options" }, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "progress_bar", "baremetal", v_t, { i64_t, i64_t, i64_t, i64_t, i64_t, i64_t }, { "x", "y", "w", "pct", "fg", "bg" }, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "mouse_init", "baremetal", v_t, {}, {}, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "mouse_x", "baremetal", i64_t, {}, {}, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "mouse_y", "baremetal", i64_t, {}, {}, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "mouse_btn", "baremetal", i64_t, {}, {}, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "mouse_down", "baremetal", i64_t, { i64_t }, { "btn" }, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "mouse_down_str", "baremetal", i64_t, { ptr_t }, { "btn" }, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "mouse_poll", "baremetal", v_t, {}, {}, false, false, false, "", backend::TargetABI::Win64 });
+        register_function({ "mouse_cursor", "baremetal", v_t, { i64_t }, { "visible" }, false, false, false, "", backend::TargetABI::Win64 });
     }
 
     /* ========================================================================= */
@@ -768,6 +796,7 @@ namespace grass::native {
         register_extern("ReleaseMutex", "kernel32.dll", i32_t, { ptr_t }, backend::TargetABI::Win64);
         register_extern("GetLastError", "kernel32.dll", i32_t, {}, backend::TargetABI::Win64);
         register_extern("SetLastError", "kernel32.dll", v_t, { i32_t }, backend::TargetABI::Win64);
+        register_extern("SetConsoleTextAttribute", "kernel32.dll", i32_t, { ptr_t, i16_t }, backend::TargetABI::Win64);
 
         // 2. user32.dll (Win64)
         register_extern("MessageBoxA", "user32.dll", i32_t, { ptr_t, ptr_t, ptr_t, i32_t }, backend::TargetABI::Win64);

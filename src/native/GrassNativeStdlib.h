@@ -88,6 +88,7 @@ namespace grass::native {
         void populate_physics3d(ir::IRContext& ctx);
         void populate_memory(ir::IRContext& ctx);
         void populate_thread(ir::IRContext& ctx);
+        void populate_baremetal(ir::IRContext& ctx);
         void populate_ffi(ir::IRContext& ctx);
         void populate_extra(ir::IRContext& ctx);
     };

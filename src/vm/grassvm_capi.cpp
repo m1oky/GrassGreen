@@ -724,9 +724,51 @@ GRG_API double memory_usit(void) { return GrassMemory::usit(); }
 GRG_API const char* memory_free(void) { return capi_intern_str(GrassMemory::get_system_free()); }
 GRG_API void memory_clean(void) { GrassMemory::clean(); }
 
-GRG_API void clear(void) {}
+GRG_API void clear(void) { GrassBaremetal::clear(); }
+GRG_API void cls(void) { GrassBaremetal::clear(); }
+GRG_API void clear_all(void) { GrassBaremetal::clear(); }
+GRG_API void cls_all(void) { GrassBaremetal::clear(); }
+GRG_API void not_clear(int64_t on) {
+    if (on) GrassBaremetal::not_clear_on();
+    else GrassBaremetal::not_clear_off();
+}
 GRG_API void not_clear_on(void) { GrassBaremetal::not_clear_on(); }
 GRG_API void not_clear_off(void) { GrassBaremetal::not_clear_off(); }
+GRG_API void grass_bm_color_int(int64_t fg, int64_t bg) {
+    GrassBaremetal::set_color((uint8_t)(fg & 0x0F), (uint8_t)(bg & 0x0F));
+}
+GRG_API void grass_bm_color_str(const char* fg, const char* bg) {
+    std::string f = fg ? fg : "";
+    std::string b = bg ? bg : "";
+    if (!b.empty()) {
+        GrassBaremetal::set_color(GrassBaremetal::parse_color(f), GrassBaremetal::parse_color(b));
+    } else if (!f.empty() && f[0] == '#') {
+        GrassBaremetal::set_color_hex(f);
+    } else if (!f.empty()) {
+        GrassBaremetal::set_color(GrassBaremetal::parse_color(f));
+    }
+}
+GRG_API void color(const char* fg, const char* bg) { grass_bm_color_str(fg, bg); }
+GRG_API const char* read_key(void) { return capi_intern_str(GrassBaremetal::read_key()); }
+GRG_API void draw_box(int64_t x, int64_t y, int64_t w, int64_t h, const char* title, int64_t fg, int64_t bg) {
+    GrassBaremetal::draw_box((int)x, (int)y, (int)w, (int)h, title ? title : "", (int)fg, (int)bg);
+}
+GRG_API int64_t menu(const char* title, void* options_ptr) {
+    std::vector<std::string> opts;
+    (void)options_ptr;
+    return (int64_t)GrassBaremetal::menu(title ? title : "", opts);
+}
+GRG_API void progress_bar(int64_t x, int64_t y, int64_t w, int64_t pct, int64_t fg, int64_t bg) {
+    GrassBaremetal::progress_bar((int)x, (int)y, (int)w, (int)pct, (int)fg, (int)bg);
+}
+GRG_API void mouse_init(void) { GrassBaremetal::mouse_init(); }
+GRG_API int64_t mouse_x(void) { return (int64_t)GrassBaremetal::mouse_x(); }
+GRG_API int64_t mouse_y(void) { return (int64_t)GrassBaremetal::mouse_y(); }
+GRG_API int64_t mouse_btn(void) { return (int64_t)GrassBaremetal::mouse_btn(); }
+GRG_API int64_t mouse_down(int64_t btn) { return GrassBaremetal::mouse_down((int)btn) ? 1 : 0; }
+GRG_API int64_t mouse_down_str(const char* btn) { return GrassBaremetal::mouse_down(btn ? std::string(btn) : std::string("left")) ? 1 : 0; }
+GRG_API void mouse_poll(void) { GrassBaremetal::mouse_poll(); }
+GRG_API void mouse_cursor(int64_t vis) { GrassBaremetal::mouse_cursor(vis != 0); }
 
 GRG_API int64_t inw(int64_t port) { return (int64_t)GrassMMIO::in16((uint16_t)port); }
 GRG_API int64_t inl(int64_t port) { return (int64_t)GrassMMIO::in32((uint16_t)port); }

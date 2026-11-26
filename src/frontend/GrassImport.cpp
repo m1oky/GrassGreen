@@ -316,6 +316,8 @@ namespace GrassImport {
                     requested_modules.push_back("stdlib/gfx3d.grass");
                 } else if (lib == "!physics!" || lib == "!Physics!") {
                     requested_modules.push_back("stdlib/physics.grass");
+                } else if (lib == "!baremetal!" || lib == "!bm!" || lib == "!kernel!" || lib == "!BareMetal!") {
+                    requested_modules.push_back("stdlib/baremetal.grass");
                 }
             }
         }
@@ -361,7 +363,8 @@ namespace GrassImport {
                                lower_root.find("stdlib/math3d.grass") != std::string::npos ||
                                lower_root.find("stdlib/gfx2d.grass") != std::string::npos ||
                                lower_root.find("stdlib/gfx3d.grass") != std::string::npos ||
-                               lower_root.find("stdlib/physics.grass") != std::string::npos);
+                               lower_root.find("stdlib/physics.grass") != std::string::npos ||
+                               lower_root.find("stdlib/baremetal.grass") != std::string::npos);
 
         if (!is_stdlib_file && !requested_modules.empty()) {
             std::vector<GrassToken> auto_tokens;

@@ -565,8 +565,24 @@ void GrassSema::registerBuiltins() {
     add_builtin("sleep", SemaType::Void(), {SemaType::Int()});
     add_builtin("threads", SemaType::Int(), {});
     add_builtin("clear", SemaType::Void(), {});
+    add_builtin("cls", SemaType::Void(), {});
+    add_builtin("clear_all", SemaType::Void(), {});
+    add_builtin("cls_all", SemaType::Void(), {});
+    add_builtin("not_clear", SemaType::Void(), {}, true);
     add_builtin("not_clear_on", SemaType::Void(), {});
     add_builtin("not_clear_off", SemaType::Void(), {});
+    add_builtin("color", SemaType::Void(), {SemaType::Any()}, true);
+    add_builtin("read_key", SemaType::String(), {});
+    add_builtin("draw_box", SemaType::Void(), {SemaType::Int(), SemaType::Int(), SemaType::Int(), SemaType::Int()}, true);
+    add_builtin("menu", SemaType::Int(), {SemaType::String(), SemaType::Any()});
+    add_builtin("progress_bar", SemaType::Void(), {SemaType::Int(), SemaType::Int(), SemaType::Int(), SemaType::Int()}, true);
+    add_builtin("mouse_init", SemaType::Void(), {});
+    add_builtin("mouse_x", SemaType::Int(), {});
+    add_builtin("mouse_y", SemaType::Int(), {});
+    add_builtin("mouse_btn", SemaType::Int(), {});
+    add_builtin("mouse_down", SemaType::Bool(), {}, true);
+    add_builtin("mouse_poll", SemaType::Void(), {});
+    add_builtin("mouse_cursor", SemaType::Void(), {}, true);
 
     add_builtin("inw", SemaType::Int(), {SemaType::Int()});
     add_builtin("inl", SemaType::Int(), {SemaType::Int()});
@@ -1578,6 +1594,16 @@ SemaType GrassSema::checkLiteralExpr(const LiteralExprAST* lit) {
 
 SemaType GrassSema::checkVariableExpr(const VariableExprAST* var) {
     if (var->name == "endl" || var->name == "std::endl") return SemaType::String();
+    if (var->name == "BLACK" || var->name == "BLUE" || var->name == "GREEN" ||
+        var->name == "CYAN" || var->name == "RED" || var->name == "MAGENTA" ||
+        var->name == "BROWN" || var->name == "LIGHT_GRAY" || var->name == "DARK_GRAY" ||
+        var->name == "LIGHT_BLUE" || var->name == "LIGHT_GREEN" || var->name == "LIGHT_CYAN" ||
+        var->name == "LIGHT_RED" || var->name == "LIGHT_MAGENTA" || var->name == "YELLOW" ||
+        var->name == "WHITE") {
+        if (!current_scope_->lookupVariable(var->name)) {
+            return SemaType::Int();
+        }
+    }
     if (var->name == "proc_mem") return SemaType::Int();
     VariableSymbol* sym = current_scope_->lookupVariable(var->name);
     if (!sym) {

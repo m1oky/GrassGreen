@@ -2386,7 +2386,7 @@ namespace grass::backend {
             "RtlCaptureContext", "RtlLookupFunctionEntry", "RtlVirtualUnwind",
             "RaiseException", "lstrlenA", "lstrlenW", "lstrcpyA", "lstrcatA",
             "lstrcmpA", "lstrcmpiA", "FormatMessageA",
-            "GetFileSizeEx", "DeleteFileA"
+            "GetFileSizeEx", "DeleteFileA", "SetConsoleTextAttribute"
         };
         if (k32_syms.find(s) != k32_syms.end()) return "KERNEL32.dll";
 
@@ -2431,7 +2431,12 @@ namespace grass::backend {
             "telegram_init", "send_message", "send_photo", "send_document",
             "local_ip", "resolve_ip", "ping", "net_status", "net_set_agent", "API", "create_serv",
             "net_connect_host", "net_accept_srv", "net_close_srv", "download",
-            "fat_status", "ticks", "threads", "grass_sleep_sec", "clear", "not_clear_on", "not_clear_off",
+            "fat_status", "ticks", "threads", "grass_sleep_sec", "clear", "cls", "clear_all", "cls_all",
+            "not_clear", "not_clear_on", "not_clear_off",
+            "color", "grass_bm_color_int", "grass_bm_color_str",
+            "read_key", "draw_box", "menu", "progress_bar",
+            "mouse_init", "mouse_x", "mouse_y", "mouse_btn", "mouse_down", "mouse_down_str",
+            "mouse_poll", "mouse_cursor",
             "get_date", "get_time_str", "memory_usit", "memory_free", "memory_clean",
             "fs_mkdir", "fs_is_dir", "fs_size", "fs_copy", "fs_list", "fs_read", "fs_write", "fs_exists", "fs_remove",
             "inw", "inl", "outw", "outl", "inb", "outb",

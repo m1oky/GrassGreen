@@ -1,0 +1,23 @@
+!GrassGreen!
+
+// =============================================================================
+// GrassGreen Standard Library: Bare-Metal & Console TUI/OS (!baremetal!)
+// Console colors (Win32 SetConsoleTextAttribute / ANSI escapes), screen clear
+// & not_clear protection, keyboard/mouse input, and TUI widgets.
+//
+// VGA Color Constants:
+//   BLACK=0, BLUE=1, GREEN=2, CYAN=3, RED=4, MAGENTA=5, BROWN=6,
+//   LIGHT_GRAY=7, DARK_GRAY=8, LIGHT_BLUE=9, LIGHT_GREEN=10, LIGHT_CYAN=11,
+//   LIGHT_RED=12, LIGHT_MAGENTA=13, YELLOW=14, WHITE=15
+//
+// Registered builtins:
+//   color(fg [, bg]) -> void
+//   clear() -> void, cls() -> void, clear_all() -> void
+//   not_clear([enable]) -> void, not_clear_on() -> void, not_clear_off() -> void
+//   read_key() -> string
+//   draw_box(x, y, w, h [, title, fg, bg]) -> void
+//   menu(title, options) -> int
+//   progress_bar(x, y, width, percent [, fg, bg]) -> void
+//   mouse_init() -> void, mouse_x() -> int, mouse_y() -> int, mouse_btn() -> int
+//   mouse_down([btn]) -> bool, mouse_poll() -> void, mouse_cursor(visible) -> void
+// =============================================================================
