@@ -1,0 +1,17 @@
+!GrassGreen!
+
+// =============================================================================
+// GrassGreen Standard Library: 3D XPBD Physics (!physics!)
+// Rigid bodies (boxes, spheres), cloth, constraints, impulses, and raycasting.
+// Builtin functions:
+//   phys_world([gx, gy, gz] | [gy]) -> int
+//   phys_step(world, dt [, substeps])
+//   phys_box(world, px, py, pz, sx, sy, sz [, mass [, mat [, break_force]]]) -> int
+//   phys_sphere(world, px, py, pz, r [, mass [, mat]]) -> int
+//   phys_cloth(world, pos, w, h [, segs]) -> int
+//   phys_link(world, a, b, stiffness [, break_force])
+//   phys_set_pos(world, body, x, y, z), phys_set_vel(world, body, vx, vy, vz)
+//   phys_impulse(world, body, fx, fy, fz)
+//   phys_get_pos([world,] body) -> Vec3, phys_get_rot([world,] body) -> Vec3
+//   phys_raycast(world, origin, dir, max_dist) -> int
+// =============================================================================

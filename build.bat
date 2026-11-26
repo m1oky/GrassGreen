@@ -49,7 +49,7 @@ if %ERRORLEVEL% equ 0 (
     g++ -std=c++17 -O3 -Isrc -Iinclude src/cli/gpm.cpp -o bin/gpm.exe
 
     echo [GrassCompiler] Building libgrassvm embedded library...
-    g++ -std=c++17 -O3 -shared src/vm/grassvm_capi.cpp -Isrc -Iinclude -o bin/grassvm.dll "-Wl,--out-implib,bin/grassvm.lib"
+    g++ -std=c++17 -O3 -shared src/vm/grassvm_capi.cpp src/media/GrassGfx3D.cpp src/media/GrassPhysics.cpp src/media/GrassMath3D.cpp -Isrc -Iinclude -o bin/grassvm.dll "-Wl,--out-implib,bin/grassvm.lib" -lgdi32 -luser32
 
     if exist "C:\GrassGreen" (
         if not exist "C:\GrassGreen\bin" mkdir "C:\GrassGreen\bin"

@@ -829,6 +829,13 @@ int64_t memory_free_block(int64_t block_addr) {
         }
 
         bool lower(std::string& error) {
+            if (oop_mgr_ && !oop_mgr_->has_class("Vec3")) {
+                oop_mgr_->begin_struct("Vec3");
+                oop_mgr_->add_field("x", ctx_.get_f64_type());
+                oop_mgr_->add_field("y", ctx_.get_f64_type());
+                oop_mgr_->add_field("z", ctx_.get_f64_type());
+                oop_mgr_->finalize_class();
+            }
             while (peek().kind != TOK_EOF) {
                 if (!lower_declaration(error)) return false;
             }
@@ -1913,11 +1920,19 @@ int64_t memory_free_block(int64_t block_addr) {
                             cur = oop_mgr_->emit_load_field(builder_, inst_ptr, sname, field_name, field_name + "_val");
                         }
                         match_types(cur, rhs);
+                        ir::IRType* lt = builder_.get_function()->get_value(cur).type;
                         ir::ValueId computed = 0;
-                        if (op == TOK_PLUS_ASSIGN) computed = builder_.create_add(cur, rhs);
-                        else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_sub(cur, rhs);
-                        else if (op == TOK_MUL_ASSIGN) computed = builder_.create_mul(cur, rhs);
-                        else if (op == TOK_DIV_ASSIGN) computed = builder_.create_sdiv(cur, rhs);
+                        if (lt && lt->is_floating_point()) {
+                            if (op == TOK_PLUS_ASSIGN) computed = builder_.create_fadd(cur, rhs);
+                            else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_fsub(cur, rhs);
+                            else if (op == TOK_MUL_ASSIGN) computed = builder_.create_fmul(cur, rhs);
+                            else if (op == TOK_DIV_ASSIGN) computed = builder_.create_fdiv(cur, rhs);
+                        } else {
+                            if (op == TOK_PLUS_ASSIGN) computed = builder_.create_add(cur, rhs);
+                            else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_sub(cur, rhs);
+                            else if (op == TOK_MUL_ASSIGN) computed = builder_.create_mul(cur, rhs);
+                            else if (op == TOK_DIV_ASSIGN) computed = builder_.create_sdiv(cur, rhs);
+                        }
 
                         if (oop_mgr_) {
                             oop_mgr_->emit_store_field(builder_, inst_ptr, sname, field_name, computed);
@@ -2033,11 +2048,19 @@ int64_t memory_free_block(int64_t block_addr) {
                 } else {
                     ir::ValueId cur = builder_.create_load(var->alloca_id, var_name);
                     match_types(cur, rhs);
+                    ir::IRType* lt = builder_.get_function()->get_value(cur).type;
                     ir::ValueId computed = 0;
-                    if (op == TOK_PLUS_ASSIGN) computed = builder_.create_add(cur, rhs);
-                    else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_sub(cur, rhs);
-                    else if (op == TOK_MUL_ASSIGN) computed = builder_.create_mul(cur, rhs);
-                    else if (op == TOK_DIV_ASSIGN) computed = builder_.create_sdiv(cur, rhs);
+                    if (lt && lt->is_floating_point()) {
+                        if (op == TOK_PLUS_ASSIGN) computed = builder_.create_fadd(cur, rhs);
+                        else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_fsub(cur, rhs);
+                        else if (op == TOK_MUL_ASSIGN) computed = builder_.create_fmul(cur, rhs);
+                        else if (op == TOK_DIV_ASSIGN) computed = builder_.create_fdiv(cur, rhs);
+                    } else {
+                        if (op == TOK_PLUS_ASSIGN) computed = builder_.create_add(cur, rhs);
+                        else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_sub(cur, rhs);
+                        else if (op == TOK_MUL_ASSIGN) computed = builder_.create_mul(cur, rhs);
+                        else if (op == TOK_DIV_ASSIGN) computed = builder_.create_sdiv(cur, rhs);
+                    }
 
                     computed = coerce_type(computed, var->type);
                     builder_.create_store(computed, var->alloca_id);
@@ -2833,6 +2856,82 @@ int64_t memory_free_block(int64_t block_addr) {
                         last_struct_name_ = ident;
                         return oop_mgr_->emit_new_object(builder_, ident, args);
                     }
+
+                    // Overload / arity normalization for 3D Math, Gfx3D, and Physics
+                    if (ident == "m4_translate" && args.size() >= 3) {
+                        ident = "m4_translate_xyz";
+                        target_call_name = ident;
+                    } else if (ident == "m4_rotate" && args.size() >= 4) {
+                        ident = "m4_rotate_xyz";
+                        target_call_name = ident;
+                    } else if (ident == "m4_scale" && args.size() >= 3) {
+                        ident = "m4_scale_xyz";
+                        target_call_name = ident;
+                    } else if (ident == "g3d_clear" && args.size() >= 3) {
+                        ident = "g3d_clear_rgb";
+                        target_call_name = ident;
+                    } else if (ident == "g3d_key_down" && args.size() == 1) {
+                        ir::IRType* at0 = builder_.get_function()->has_value(args[0]) ? builder_.get_function()->get_value(args[0]).type : nullptr;
+                        if (at0 && at0->is_pointer()) {
+                            ident = "g3d_key_down_str";
+                            target_call_name = ident;
+                        }
+                    } else if (ident == "g3d_mouse_btn" && args.empty()) {
+                        args.push_back(builder_.create_const_int(ctx_.get_i64_type(), 0));
+                    } else if (ident == "g3d_camera" && args.size() >= 7) {
+                        ident = "g3d_camera_xyz";
+                        target_call_name = ident;
+                    } else if (ident == "g3d_sphere") {
+                        if (args.size() == 1) args.push_back(builder_.create_const_int(ctx_.get_i64_type(), 16));
+                        else if (args.size() > 2) args.resize(2);
+                    } else if (ident == "g3d_plane" && args.size() >= 3) {
+                        ident = "g3d_plane_segs";
+                        target_call_name = ident;
+                    } else if (ident == "g3d_set_color" && args.size() >= 4) {
+                        ident = "g3d_set_color_rgb";
+                        target_call_name = ident;
+                    } else if (ident == "g3d_transform" && args.size() == 2) {
+                        ident = "g3d_transform_mat";
+                        target_call_name = ident;
+                    } else if (ident == "g3d_dir_light" && args.size() >= 4) {
+                        ident = "g3d_dir_light_rgb";
+                        target_call_name = ident;
+                        if (args.size() == 4) args.push_back(builder_.create_const_f64(1.0));
+                    } else if (ident == "g3d_point_light" && args.size() == 4) {
+                        args.push_back(builder_.create_const_f64(10.0));
+                    } else if (ident == "g3d_fog" && args.size() == 3) {
+                        args.push_back(builder_.create_const_f64(0.05));
+                    } else if (ident == "g3d_bind_framebuffer" && args.size() == 3) {
+                        args.push_back(builder_.create_const_int(ctx_.get_i64_type(), 0));
+                    } else if (ident == "phys_world") {
+                        if (args.empty()) {
+                            args.push_back(builder_.create_const_f64(0.0));
+                            args.push_back(builder_.create_const_f64(-9.81));
+                            args.push_back(builder_.create_const_f64(0.0));
+                        } else if (args.size() == 1) {
+                            ir::ValueId gy = args[0];
+                            args = {
+                                builder_.create_const_f64(0.0),
+                                gy,
+                                builder_.create_const_f64(0.0)
+                            };
+                        }
+                    } else if (ident == "phys_step" && args.size() == 2) {
+                        args.push_back(builder_.create_const_int(ctx_.get_i64_type(), 8));
+                    } else if (ident == "phys_box" && args.size() == 7) {
+                        args.push_back(builder_.create_const_f64(1.0));
+                    } else if (ident == "phys_sphere" && args.size() == 5) {
+                        args.push_back(builder_.create_const_f64(1.0));
+                    } else if (ident == "phys_cloth" && args.size() == 4) {
+                        args.push_back(builder_.create_const_int(ctx_.get_i64_type(), 8));
+                    } else if (ident == "phys_link" && args.size() == 4) {
+                        args.push_back(builder_.create_const_f64(0.0));
+                    } else if ((ident == "phys_get_pos" || ident == "phys_get_rot") && args.size() == 1) {
+                        args.insert(args.begin(), builder_.create_const_int(ctx_.get_i64_type(), 1));
+                    } else if ((ident == "phys_set_pos" || ident == "phys_set_vel" || ident == "phys_impulse") && args.size() == 4) {
+                        args.insert(args.begin(), builder_.create_const_int(ctx_.get_i64_type(), 1));
+                    }
+
                     const native::NativeFunctionDesc* std_fn = native::GrassNativeStdlib::instance().find_function(ident);
                     if (std_fn && std_fn->return_type) {
                         call_ret_type = std_fn->return_type;
@@ -2861,6 +2960,15 @@ int64_t memory_free_block(int64_t block_addr) {
                     } else if (std_fn) {
                         for (size_t i = 0; i < args.size() && i < std_fn->param_types.size(); ++i) {
                             args[i] = coerce_type(args[i], std_fn->param_types[i]);
+                        }
+                    }
+
+                    if (oop_mgr_ && (ident == "v3_create" || ident == "v3_add" || ident == "v3_sub" ||
+                                     ident == "v3_mul" || ident == "v3_cross" || ident == "v3_normalize" ||
+                                     ident == "v3_lerp" || ident == "phys_get_pos" || ident == "phys_get_rot")) {
+                        const auto* vcd = oop_mgr_->get_class("Vec3");
+                        if (vcd && vcd->ir_struct_type) {
+                            call_ret_type = ctx_.get_ptr_type(vcd->ir_struct_type);
                         }
                     }
 

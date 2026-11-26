@@ -1857,7 +1857,7 @@ void BytecodeCompiler::parseStatement() {
             included_libs.insert("2DGraphics");
         } else if (lib == "!math3d!" || lib == "!Math3D!") {
             included_libs.insert("math3d");
-        } else if (lib == "!gfx3d!" || lib == "!Gfx3D!") {
+        } else if (lib == "!gfx3d!" || lib == "!Gfx3D!" || lib == "!3d!" || lib == "!3D!") {
             included_libs.insert("gfx3d");
         } else if (lib == "!physics!" || lib == "!Physics!") {
             included_libs.insert("physics");

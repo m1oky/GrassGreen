@@ -82,9 +82,9 @@ int main() {
 
     take prev_mx = g3d_mouse_x();
     take prev_my = g3d_mouse_y();
-    take prev_mouse_down = 0;
-    take prev_space_down = 0;
-    take prev_r_down = 0;
+    take prev_mouse_down = false;
+    take prev_space_down = false;
+    take prev_r_down = false;
     take frame_count = 0;
 
     while (g3d_is_open()) {

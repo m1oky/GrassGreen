@@ -1,0 +1,14 @@
+!GrassGreen!
+
+// =============================================================================
+// GrassGreen Standard Library: 3D Math (!math3d!)
+// Vectors (Vec3: x, y, z) and 4x4 Matrices (Mat4) for 3D transforms and camera.
+// Builtin functions:
+//   v3_create(x, y, z) -> Vec3
+//   v3_add(a, b) -> Vec3, v3_sub(a, b) -> Vec3, v3_mul(a, s) -> Vec3
+//   v3_dot(a, b) -> float, v3_cross(a, b) -> Vec3, v3_length(a) -> float
+//   v3_normalize(a) -> Vec3, v3_lerp(a, b, t) -> Vec3
+//   m4_identity() -> Mat4, m4_translate(...) -> Mat4, m4_rotate(...) -> Mat4
+//   m4_scale(...) -> Mat4, m4_look_at(eye, target, up) -> Mat4
+//   m4_perspective(fov, aspect, near, far) -> Mat4, m4_mul(a, b) -> Mat4
+// =============================================================================

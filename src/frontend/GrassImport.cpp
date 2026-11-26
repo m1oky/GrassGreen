@@ -307,6 +307,12 @@ namespace GrassImport {
                     requested_modules.push_back("stdlib/thread.grass");
                 } else if (lib == "!algo!") {
                     requested_modules.push_back("stdlib/algo.grass");
+                } else if (lib == "!math3d!" || lib == "!Math3D!") {
+                    requested_modules.push_back("stdlib/math3d.grass");
+                } else if (lib == "!gfx3d!" || lib == "!Gfx3D!" || lib == "!3d!" || lib == "!3D!") {
+                    requested_modules.push_back("stdlib/gfx3d.grass");
+                } else if (lib == "!physics!" || lib == "!Physics!") {
+                    requested_modules.push_back("stdlib/physics.grass");
                 }
             }
         }
@@ -323,7 +329,10 @@ namespace GrassImport {
                 "stdlib/sys.grass",
                 "stdlib/net.grass",
                 "stdlib/thread.grass",
-                "stdlib/algo.grass"
+                "stdlib/algo.grass",
+                "stdlib/math3d.grass",
+                "stdlib/gfx3d.grass",
+                "stdlib/physics.grass"
             };
             for (const char* m : all_mods) {
                 if (std::find(requested_modules.begin(), requested_modules.end(), m) == requested_modules.end()) {
@@ -344,7 +353,10 @@ namespace GrassImport {
                                lower_root.find("stdlib/sys.grass") != std::string::npos ||
                                lower_root.find("stdlib/net.grass") != std::string::npos ||
                                lower_root.find("stdlib/thread.grass") != std::string::npos ||
-                               lower_root.find("stdlib/algo.grass") != std::string::npos);
+                               lower_root.find("stdlib/algo.grass") != std::string::npos ||
+                               lower_root.find("stdlib/math3d.grass") != std::string::npos ||
+                               lower_root.find("stdlib/gfx3d.grass") != std::string::npos ||
+                               lower_root.find("stdlib/physics.grass") != std::string::npos);
 
         if (!is_stdlib_file && !requested_modules.empty()) {
             std::vector<GrassToken> auto_tokens;

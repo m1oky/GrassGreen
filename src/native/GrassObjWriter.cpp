@@ -2421,6 +2421,11 @@ namespace grass::backend {
         };
         if (crt_syms.find(s) != crt_syms.end()) return "msvcrt.dll";
 
+        if (s.rfind("g3d_", 0) == 0 || s.rfind("phys_", 0) == 0 ||
+            s.rfind("v3_", 0) == 0 || s.rfind("m4_", 0) == 0) {
+            return "grassvm.dll";
+        }
+
         return "KERNEL32.dll";
     }
 

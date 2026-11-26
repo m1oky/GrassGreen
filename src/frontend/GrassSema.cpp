@@ -284,6 +284,74 @@ void GrassSema::registerBuiltins() {
     add_builtin("gethostbyname", SemaType::Ptr(SemaType::Void()), {SemaType::Any()});
     add_builtin("WSAGetLastError", SemaType::Int(), {});
     add_builtin("ExitProcess", SemaType::Void(), {SemaType::Int()});
+
+    // 3D Math, Graphics (!gfx3d! / !3d!) and Physics (!physics!)
+    StructSymbol vec3_sym;
+    vec3_sym.name = "Vec3";
+    vec3_sym.loc = SourceLocation("<builtin>", 0, 0);
+    vec3_sym.fields["x"] = SemaType::Float();
+    vec3_sym.fields["y"] = SemaType::Float();
+    vec3_sym.fields["z"] = SemaType::Float();
+    vec3_sym.field_order = {"x", "y", "z"};
+    structs_["Vec3"] = vec3_sym;
+
+    SemaType vec3_t = SemaType::CustomStruct("Vec3");
+
+    add_builtin("v3_create", vec3_t, {SemaType::Float(), SemaType::Float(), SemaType::Float()});
+    add_builtin("v3_add", vec3_t, {SemaType::Any(), SemaType::Any()});
+    add_builtin("v3_sub", vec3_t, {SemaType::Any(), SemaType::Any()});
+    add_builtin("v3_mul", vec3_t, {SemaType::Any(), SemaType::Float()});
+    add_builtin("v3_dot", SemaType::Float(), {SemaType::Any(), SemaType::Any()});
+    add_builtin("v3_cross", vec3_t, {SemaType::Any(), SemaType::Any()});
+    add_builtin("v3_length", SemaType::Float(), {SemaType::Any()});
+    add_builtin("v3_normalize", vec3_t, {SemaType::Any()});
+    add_builtin("v3_lerp", vec3_t, {SemaType::Any(), SemaType::Any(), SemaType::Float()});
+
+    add_builtin("m4_identity", SemaType::Any(), {});
+    add_builtin("m4_translate", SemaType::Any(), {SemaType::Any()}, true);
+    add_builtin("m4_rotate", SemaType::Any(), {SemaType::Float(), SemaType::Any()}, true);
+    add_builtin("m4_scale", SemaType::Any(), {SemaType::Any()}, true);
+    add_builtin("m4_look_at", SemaType::Any(), {SemaType::Any(), SemaType::Any(), SemaType::Any()});
+    add_builtin("m4_perspective", SemaType::Any(), {SemaType::Float(), SemaType::Float(), SemaType::Float(), SemaType::Float()});
+    add_builtin("m4_mul", SemaType::Any(), {SemaType::Any(), SemaType::Any()});
+
+    add_builtin("g3d_window", SemaType::Int(), {SemaType::Any()}, true);
+    add_builtin("g3d_is_open", SemaType::Bool(), {});
+    add_builtin("g3d_clear", SemaType::Void(), {SemaType::Any()}, true);
+    add_builtin("g3d_present", SemaType::Void(), {});
+    add_builtin("g3d_dt", SemaType::Float(), {});
+    add_builtin("g3d_key_down", SemaType::Bool(), {SemaType::Any()});
+    add_builtin("g3d_mouse_x", SemaType::Int(), {});
+    add_builtin("g3d_mouse_y", SemaType::Int(), {});
+    add_builtin("g3d_mouse_btn", SemaType::Bool(), {}, true);
+    add_builtin("g3d_camera", SemaType::Void(), {SemaType::Any()}, true);
+    add_builtin("g3d_cube", SemaType::Int(), {SemaType::Float()});
+    add_builtin("g3d_box", SemaType::Int(), {SemaType::Float(), SemaType::Float(), SemaType::Float()});
+    add_builtin("g3d_sphere", SemaType::Int(), {SemaType::Float()}, true);
+    add_builtin("g3d_plane", SemaType::Int(), {SemaType::Float(), SemaType::Float()}, true);
+    add_builtin("g3d_load_obj", SemaType::Int(), {SemaType::String()});
+    add_builtin("g3d_set_texture", SemaType::Void(), {SemaType::Int(), SemaType::String()});
+    add_builtin("g3d_set_color", SemaType::Void(), {SemaType::Int(), SemaType::Any()}, true);
+    add_builtin("g3d_transform", SemaType::Void(), {SemaType::Int(), SemaType::Any()}, true);
+    add_builtin("g3d_draw", SemaType::Void(), {SemaType::Int()});
+    add_builtin("g3d_dir_light", SemaType::Void(), {SemaType::Any(), SemaType::Any()}, true);
+    add_builtin("g3d_point_light", SemaType::Void(), {SemaType::Any(), SemaType::Float(), SemaType::Float(), SemaType::Float()}, true);
+    add_builtin("g3d_fog", SemaType::Void(), {SemaType::Float(), SemaType::Float(), SemaType::Float()}, true);
+    add_builtin("g3d_skybox", SemaType::Void(), {SemaType::Int(), SemaType::Int()});
+    add_builtin("g3d_bind_framebuffer", SemaType::Void(), {SemaType::Any(), SemaType::Int(), SemaType::Int()}, true);
+
+    add_builtin("phys_world", SemaType::Int(), {}, true);
+    add_builtin("phys_step", SemaType::Void(), {SemaType::Int(), SemaType::Float()}, true);
+    add_builtin("phys_box", SemaType::Int(), {SemaType::Int(), SemaType::Any(), SemaType::Any()}, true);
+    add_builtin("phys_sphere", SemaType::Int(), {SemaType::Int(), SemaType::Any(), SemaType::Any()}, true);
+    add_builtin("phys_cloth", SemaType::Int(), {SemaType::Int(), SemaType::Any(), SemaType::Float(), SemaType::Float()}, true);
+    add_builtin("phys_link", SemaType::Void(), {SemaType::Int(), SemaType::Int(), SemaType::Int(), SemaType::Float()}, true);
+    add_builtin("phys_impulse", SemaType::Void(), {SemaType::Int(), SemaType::Any()}, true);
+    add_builtin("phys_raycast", SemaType::Int(), {SemaType::Int(), SemaType::Any(), SemaType::Any(), SemaType::Float()});
+    add_builtin("phys_get_pos", vec3_t, {SemaType::Int()}, true);
+    add_builtin("phys_get_rot", vec3_t, {SemaType::Int()}, true);
+    add_builtin("phys_set_pos", SemaType::Void(), {SemaType::Int(), SemaType::Any()}, true);
+    add_builtin("phys_set_vel", SemaType::Void(), {SemaType::Int(), SemaType::Any()}, true);
 }
 
 void GrassSema::enterScope(Scope::Kind kind) {

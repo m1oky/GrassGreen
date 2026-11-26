@@ -1,0 +1,16 @@
+!GrassGreen!
+
+// =============================================================================
+// GrassGreen Standard Library: 3D Graphics (!gfx3d! / !3d!)
+// Software/GDI 3D Rasterizer with Z-buffer, lighting, meshes, and input.
+// Builtin functions:
+//   g3d_window(title, w, h) -> int, g3d_is_open() -> bool
+//   g3d_clear(hex | r, g, b), g3d_present(), g3d_dt() -> float
+//   g3d_key_down(key_or_name) -> bool, g3d_mouse_x() -> int, g3d_mouse_y() -> int, g3d_mouse_btn(btn) -> bool
+//   g3d_camera(pos, target, fov), g3d_cube(size) -> int, g3d_box(w, h, d) -> int
+//   g3d_sphere(r, segs [, rings]) -> int, g3d_plane(w, d [, segs]) -> int, g3d_load_obj(path) -> int
+//   g3d_set_color(mesh, hex | r, g, b), g3d_set_texture(mesh, path)
+//   g3d_transform(mesh, mat4 | pos, rot, scale), g3d_draw(mesh)
+//   g3d_dir_light(dir, hex | r, g, b [, intensity]), g3d_point_light(pos, r, g, b [, range])
+//   g3d_fog(r, g, b [, density]), g3d_skybox(top_rgb, bottom_rgb), g3d_bind_framebuffer(addr, w, h [, pitch])
+// =============================================================================
