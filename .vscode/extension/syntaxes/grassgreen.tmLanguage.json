@@ -105,15 +105,31 @@
       "patterns": [
         {
           "name": "keyword.control.grassgreen",
-          "match": "\\b(if|else|while|for|return|break|continue|switch|tab|use|utf|not_clear|clear|cls|clearable|virtual_struct|physical_struct|reboot|poweroff|folder|dir|file)\\b"
+          "match": "\\b(if|else|while|for|return|break|continue|switch|tab|use|utf|not_clear|clear|cls|clearable|virtual_struct|physical_struct|reboot|poweroff|folder|dir|file|extends|implements|super|interface|abstract|instanceof|typeof|sizeof|nullptr|null|nil)\\b"
         },
         {
           "name": "storage.modifier.grassgreen",
-          "match": "\\b(volatile|static|const)\\b"
+          "match": "\\b(volatile|static|const|public|private|protected|final|virtual|override)\\b"
+        },
+        {
+          "name": "storage.type.class.grassgreen",
+          "match": "\\b(class|struct|enum|namespace)\\b"
         },
         {
           "name": "storage.type.grassgreen",
-          "match": "\\b(take|set|struct|array)\\b"
+          "match": "\\b(take|set|array)\\b"
+        },
+        {
+          "name": "keyword.operator.new.grassgreen",
+          "match": "\\b(new|delete)\\b"
+        },
+        {
+          "name": "variable.language.grassgreen",
+          "match": "\\b(this|self)\\b"
+        },
+        {
+          "name": "keyword.control.import.grassgreen",
+          "match": "\\b(using|as)\\b"
         },
         {
           "name": "keyword.control.concurrency.grassgreen",
@@ -125,7 +141,7 @@
       "patterns": [
         {
           "name": "entity.name.type.grassgreen",
-          "match": "\\b(int|void|string|float|double|u8|u16|u32|u64|bool|char)\\b"
+          "match": "\\b(int|void|string|String|float|double|u8|u16|u32|u64|bool|char|vec|vector|byte)\\b"
         }
       ]
     },

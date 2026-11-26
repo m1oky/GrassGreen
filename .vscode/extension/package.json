@@ -2,7 +2,7 @@
   "name": "grassgreen",
   "displayName": "GrassGreen (G&G) Language Support",
   "description": "Официальная поддержка системного языка программирования GrassGreen 4.3.0 — Evolution of the Bare-Metal: библиотека !baremetal!, 16 цветов VGA и HEX, плавный курсор 60+ FPS, read_key(), TUI-виджеты, перезапуск и выключение питания, RamFS VFS (virtual_struct / physical_struct), команды терминала, не удаляемый текст not_clear, подсветка синтаксиса и сборка ОС.",
-  "version": "4.3.0",
+  "version": "4.4.0",
   "publisher": "m1oky",
   "repository": {
     "type": "git",
