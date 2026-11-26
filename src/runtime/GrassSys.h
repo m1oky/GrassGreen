@@ -26,6 +26,9 @@ namespace GrassSys {
     double ram_total_mb();
     double ram_free_mb();
     double uptime_sec();
+
+    // Кроссплатформенный запуск системной команды (std::system + нормализация кода возврата)
+    int system_exec(const std::string& cmd);
 }
 
 #endif // GRASS_SYS_H

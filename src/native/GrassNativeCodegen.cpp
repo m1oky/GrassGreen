@@ -3887,6 +3887,11 @@ int64_t memory_free_block(int64_t block_addr) {
                                 break;
                             }
 
+                            if (inst->callee_name == "system" && !options_.freestanding &&
+                                options_.arch == TargetArch::X86_64 && options_.abi == TargetABI::Win64) {
+                                encoder.call_extern("gout_flush");
+                            }
+
                             // Pass arguments according to ABI
                             // Phase 1: spill all operands to argument scratch slots at [RSP + i*8] to avoid register clobbering
                             for (size_t i = 0; i < inst->operands.size(); ++i) {

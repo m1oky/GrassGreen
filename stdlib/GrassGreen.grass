@@ -1,0 +1,15 @@
+!GrassGreen!
+
+// =============================================================================
+// GrassGreen Standard Library: Core !GrassGreen! Module
+// Cross-platform OS & shell primitives (Windows & Linux, VM & Native):
+//   system(cmd: string) -> int
+//     - Executes command via OS shell (cmd.exe /c on Windows, /bin/sh -c on Linux)
+//     - Flushes stdout before execution
+//     - Returns normalized process exit code (0 on success, non-zero on error)
+//     - With empty string "": checks shell availability (returns 1 if available, 0 otherwise)
+// =============================================================================
+
+take shell_available() {
+    return system("");
+}

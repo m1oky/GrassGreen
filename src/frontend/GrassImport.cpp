@@ -313,6 +313,7 @@ namespace GrassImport {
 
         if (has_grassgreen) {
             static const char* all_mods[] = {
+                "stdlib/GrassGreen.grass",
                 "stdlib/io.grass",
                 "stdlib/fsys.grass",
                 "stdlib/time.grass",
@@ -333,7 +334,8 @@ namespace GrassImport {
 
         std::vector<GrassToken> tokens_to_resolve = root_tokens;
         std::string lower_root = root_canon;
-        bool is_stdlib_file = (lower_root.find("stdlib/io.grass") != std::string::npos ||
+        bool is_stdlib_file = (lower_root.find("stdlib/grassgreen.grass") != std::string::npos ||
+                               lower_root.find("stdlib/io.grass") != std::string::npos ||
                                lower_root.find("stdlib/fsys.grass") != std::string::npos ||
                                lower_root.find("stdlib/time.grass") != std::string::npos ||
                                lower_root.find("stdlib/memory.grass") != std::string::npos ||

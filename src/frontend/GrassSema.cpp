@@ -157,6 +157,7 @@ void GrassSema::registerBuiltins() {
     add_builtin("exec", SemaType::Int(), {SemaType::Any()});
     add_builtin("run", SemaType::Int(), {SemaType::Any()});
     add_builtin("sys_exec", SemaType::Int(), {SemaType::Any()});
+    add_builtin("system", SemaType::Int(), {SemaType::Any()});
     add_builtin("get_env", SemaType::Ptr(SemaType::Void()), {SemaType::Any()});
     add_builtin("sys_get_env", SemaType::Ptr(SemaType::Void()), {SemaType::Any()});
     add_builtin("set_env", SemaType::Int(), {SemaType::Any(), SemaType::Any()});

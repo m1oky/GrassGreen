@@ -1776,7 +1776,7 @@ public:
                         push(GrassValue::Num(1.0));
                     }
                     else if (fn == "system" && argc >= 1) {
-                        int r = system(args[0].toString().c_str());
+                        int r = GrassSys::system_exec(args[0].toString());
                         push(GrassValue::Num((double)r));
                     }
                     // !random!

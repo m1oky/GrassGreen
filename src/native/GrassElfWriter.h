@@ -43,7 +43,11 @@ namespace grass::backend {
         SysClose  = 3,
         SysMmap   = 9,
         SysMunmap = 11,
-        SysExit   = 60
+        SysAccess = 21,
+        SysFork   = 57,
+        SysExecve = 59,
+        SysExit   = 60,
+        SysWait4  = 61
     };
 
 #pragma pack(push, 1)

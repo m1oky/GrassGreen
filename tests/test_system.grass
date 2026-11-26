@@ -1,0 +1,13 @@
+!GrassGreen!
+
+int main() {
+    gout << "before_system ";
+    int has_shell = system("");
+    int rc_ok = system("echo ok");
+    int rc_42 = system("exit 42");
+    gout << "shell=" << has_shell << " ok=" << rc_ok << " exit42=" << rc_42 << endl;
+    if (has_shell != 1 || rc_ok != 0 || rc_42 != 42) {
+        return 1;
+    }
+    return 0;
+}

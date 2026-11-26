@@ -4,12 +4,15 @@
 #include <vector>
 #include <cstring>
 #include <cstdlib>
+#include <cstdio>
+#include <iostream>
 
 #if defined(_WIN32)
 #include <windows.h>
 #else
 #include <unistd.h>
 #include <sys/sysinfo.h>
+#include <sys/wait.h>
 #endif
 
 namespace GrassSys {
@@ -214,6 +217,21 @@ namespace GrassSys {
         struct sysinfo si;
         if (sysinfo(&si) == 0) return (double)si.uptime;
         return 0.0;
+#endif
+    }
+
+    int system_exec(const std::string& cmd) {
+        std::fflush(stdout);
+        std::cout.flush();
+        if (cmd.empty()) {
+            return (std::system(nullptr) != 0) ? 1 : 0;
+        }
+#if defined(_WIN32)
+        return std::system(cmd.c_str());
+#else
+        int status = std::system(cmd.c_str());
+        if (status == -1) return -1;
+        return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 #endif
     }
 

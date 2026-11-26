@@ -116,6 +116,118 @@ namespace grass::backend {
                     inject_syscall_wrapper(unit, LinuxSyscall::SysMunmap, rel.symbol_name);
                 } else if (rel.symbol_name == "sys_exit" || rel.symbol_name == "exit") {
                     inject_syscall_wrapper(unit, LinuxSyscall::SysExit, rel.symbol_name);
+                } else if (rel.symbol_name == "system") {
+                    auto add_ro_str = [&](const std::string& sname, const std::string& txt) {
+                        for (const auto& s : unit.symbols) {
+                            if (s.name == sname && !s.is_external) return;
+                        }
+                        while (unit.rodata.size() % 16 != 0) unit.rodata.push_back(0);
+                        uint64_t off = unit.rodata.size();
+                        unit.rodata.insert(unit.rodata.end(), txt.begin(), txt.end());
+                        unit.rodata.push_back(0);
+                        SymbolDef sym;
+                        sym.name = sname;
+                        sym.section = SectionKind::RoData;
+                        sym.offset = off;
+                        sym.size = txt.size() + 1;
+                        sym.is_global = true;
+                        sym.is_external = false;
+                        unit.symbols.push_back(sym);
+                    };
+                    add_ro_str("__grass_sh_path", "/bin/sh");
+                    add_ro_str("__grass_sh_c", "-c");
+
+                    std::vector<uint8_t> code;
+                    auto emit = [&](std::initializer_list<uint8_t> b) { code.insert(code.end(), b); };
+                    emit({0x48, 0x85, 0xFF});                                     // test rdi, rdi
+                    emit({0x74, 0x00}); size_t jz_null = code.size() - 1;         // jz .check_sh
+                    emit({0x80, 0x3F, 0x00});                                     // cmp byte ptr [rdi], 0
+                    emit({0x75, 0x00}); size_t jnz_fork = code.size() - 1;        // jnz .do_fork
+
+                    size_t check_sh = code.size();
+                    code[jz_null] = static_cast<uint8_t>(check_sh - (jz_null + 1));
+                    size_t rel_sh1 = code.size() + 3;
+                    emit({0x48, 0x8D, 0x3D, 0x00, 0x00, 0x00, 0x00});             // lea rdi, [rip + __grass_sh_path]
+                    emit({0xBE, 0x01, 0x00, 0x00, 0x00});                         // mov esi, 1 (X_OK)
+                    emit({0xB8, 0x15, 0x00, 0x00, 0x00});                         // mov eax, 21 (sys_access)
+                    emit({0x0F, 0x05});                                           // syscall
+                    emit({0x85, 0xC0});                                           // test eax, eax
+                    emit({0x0F, 0x94, 0xC0});                                     // sete al
+                    emit({0x0F, 0xB6, 0xC0});                                     // movzx eax, al
+                    emit({0xC3});                                                 // ret
+
+                    size_t do_fork = code.size();
+                    code[jnz_fork] = static_cast<uint8_t>(do_fork - (jnz_fork + 1));
+                    emit({0x53});                                                 // push rbx
+                    emit({0x48, 0x83, 0xEC, 0x30});                               // sub rsp, 48
+                    emit({0x48, 0x89, 0xFB});                                     // mov rbx, rdi
+                    emit({0xB8, 0x39, 0x00, 0x00, 0x00});                         // mov eax, 57 (sys_fork)
+                    emit({0x0F, 0x05});                                           // syscall
+                    emit({0x48, 0x85, 0xC0});                                     // test rax, rax
+                    emit({0x78, 0x00}); size_t js_err1 = code.size() - 1;         // js .err
+                    emit({0x75, 0x00}); size_t jnz_par = code.size() - 1;         // jnz .parent
+
+                    // Child: execve("/bin/sh", ["/bin/sh", "-c", cmd, NULL], NULL)
+                    size_t rel_sh2 = code.size() + 3;
+                    emit({0x48, 0x8D, 0x3D, 0x00, 0x00, 0x00, 0x00});             // lea rdi, [rip + __grass_sh_path]
+                    size_t rel_c = code.size() + 3;
+                    emit({0x48, 0x8D, 0x0D, 0x00, 0x00, 0x00, 0x00});             // lea rcx, [rip + __grass_sh_c]
+                    emit({0x48, 0x89, 0x3C, 0x24});                               // mov [rsp + 0], rdi
+                    emit({0x48, 0x89, 0x4C, 0x24, 0x08});                         // mov [rsp + 8], rcx
+                    emit({0x48, 0x89, 0x5C, 0x24, 0x10});                         // mov [rsp + 16], rbx
+                    emit({0x48, 0xC7, 0x44, 0x24, 0x18, 0x00, 0x00, 0x00, 0x00}); // mov qword ptr [rsp + 24], 0
+                    emit({0x48, 0x89, 0xE6});                                     // mov rsi, rsp
+                    emit({0x31, 0xD2});                                           // xor edx, edx
+                    emit({0xB8, 0x3B, 0x00, 0x00, 0x00});                         // mov eax, 59 (sys_execve)
+                    emit({0x0F, 0x05});                                           // syscall
+                    emit({0xBF, 0x7F, 0x00, 0x00, 0x00});                         // mov edi, 127
+                    emit({0xB8, 0x3C, 0x00, 0x00, 0x00});                         // mov eax, 60 (sys_exit)
+                    emit({0x0F, 0x05});                                           // syscall
+
+                    size_t parent = code.size();
+                    code[jnz_par] = static_cast<uint8_t>(parent - (jnz_par + 1));
+                    emit({0x48, 0x89, 0xC7});                                     // mov rdi, rax
+                    emit({0x48, 0x8D, 0x74, 0x24, 0x20});                         // lea rsi, [rsp + 32]
+                    emit({0x31, 0xD2});                                           // xor edx, edx
+                    emit({0x45, 0x31, 0xD2});                                     // xor r10d, r10d
+                    emit({0xB8, 0x3D, 0x00, 0x00, 0x00});                         // mov eax, 61 (sys_wait4)
+                    emit({0x0F, 0x05});                                           // syscall
+                    emit({0x48, 0x85, 0xC0});                                     // test rax, rax
+                    emit({0x78, 0x00}); size_t js_err2 = code.size() - 1;         // js .err
+                    emit({0x8B, 0x44, 0x24, 0x20});                               // mov eax, [rsp + 32]
+                    emit({0x89, 0xC1});                                           // mov ecx, eax
+                    emit({0x83, 0xE1, 0x7F});                                     // and ecx, 0x7F
+                    emit({0x75, 0x00}); size_t jnz_sig = code.size() - 1;         // jnz .err
+                    emit({0xC1, 0xE8, 0x08});                                     // shr eax, 8
+                    emit({0x25, 0xFF, 0x00, 0x00, 0x00});                         // and eax, 0xFF
+                    emit({0xEB, 0x00}); size_t jmp_done = code.size() - 1;        // jmp .done
+
+                    size_t err_lbl = code.size();
+                    code[js_err1] = static_cast<uint8_t>(err_lbl - (js_err1 + 1));
+                    code[js_err2] = static_cast<uint8_t>(err_lbl - (js_err2 + 1));
+                    code[jnz_sig] = static_cast<uint8_t>(err_lbl - (jnz_sig + 1));
+                    emit({0x48, 0xC7, 0xC0, 0xFF, 0xFF, 0xFF, 0xFF});             // mov rax, -1
+
+                    size_t done_lbl = code.size();
+                    code[jmp_done] = static_cast<uint8_t>(done_lbl - (jmp_done + 1));
+                    emit({0x48, 0x83, 0xC4, 0x30, 0x5B, 0xC3});                   // add rsp, 48; pop rbx; ret
+
+                    while (unit.text.size() % 16 != 0) unit.text.push_back(0x90);
+                    uint64_t fn_off = unit.text.size();
+                    unit.text.insert(unit.text.end(), code.begin(), code.end());
+
+                    SymbolDef fn_sym;
+                    fn_sym.name = "system";
+                    fn_sym.section = SectionKind::Text;
+                    fn_sym.offset = fn_off;
+                    fn_sym.size = code.size();
+                    fn_sym.is_global = true;
+                    fn_sym.is_external = false;
+                    unit.symbols.push_back(fn_sym);
+
+                    unit.relocations.push_back({ SectionKind::Text, fn_off + rel_sh1, "__grass_sh_path", RelocType::Rel32, -4 });
+                    unit.relocations.push_back({ SectionKind::Text, fn_off + rel_sh2, "__grass_sh_path", RelocType::Rel32, -4 });
+                    unit.relocations.push_back({ SectionKind::Text, fn_off + rel_c,   "__grass_sh_c",    RelocType::Rel32, -4 });
                 }
             }
         }

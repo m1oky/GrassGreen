@@ -3139,6 +3139,160 @@ namespace grass::backend {
             append_function("exit", code, rels);
         }
 
+        // 12c. system: Win32 CreateProcessA("cmd.exe /c " + cmd) + WaitForSingleObject + GetExitCodeProcess
+        if (needed_symbols.count("system") > 0 && defined_symbols.count("system") == 0) {
+            add_rodata_str("__grass_cmd_exe", "cmd.exe");
+            std::vector<uint8_t> code;
+            auto emit = [&](std::initializer_list<uint8_t> b) { code.insert(code.end(), b); };
+
+            emit({0x48, 0x85, 0xC9});                                     // test rcx, rcx
+            emit({0x74, 0x00}); size_t jz_null = code.size() - 1;         // jz .check_shell
+            emit({0x80, 0x39, 0x00});                                     // cmp byte ptr [rcx], 0
+            emit({0x75, 0x00}); size_t jnz_run = code.size() - 1;         // jnz .run_cmd
+
+            size_t check_shell = code.size();
+            code[jz_null] = static_cast<uint8_t>(check_shell - (jz_null + 1));
+            emit({0x48, 0x83, 0xEC, 0x38});                               // sub rsp, 56
+            emit({0x31, 0xC9});                                           // xor ecx, ecx
+            size_t rel_cmd = code.size() + 3;
+            emit({0x48, 0x8D, 0x15, 0x00, 0x00, 0x00, 0x00});             // lea rdx, [rip + __grass_cmd_exe]
+            emit({0x45, 0x31, 0xC0});                                     // xor r8d, r8d
+            emit({0x45, 0x31, 0xC9});                                     // xor r9d, r9d
+            emit({0x48, 0xC7, 0x44, 0x24, 0x20, 0x00, 0x00, 0x00, 0x00}); // mov qword ptr [rsp + 32], 0
+            emit({0x48, 0xC7, 0x44, 0x24, 0x28, 0x00, 0x00, 0x00, 0x00}); // mov qword ptr [rsp + 40], 0
+            size_t rel_sp = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call SearchPathA
+            emit({0x85, 0xC0});                                           // test eax, eax
+            emit({0x0F, 0x95, 0xC0});                                     // setnz al
+            emit({0x0F, 0xB6, 0xC0});                                     // movzx eax, al
+            emit({0x48, 0x83, 0xC4, 0x38, 0xC3});                         // add rsp, 56; ret
+
+            size_t run_cmd = code.size();
+            code[jnz_run] = static_cast<uint8_t>(run_cmd - (jnz_run + 1));
+            emit({0x53, 0x56, 0x57});                                     // push rbx; push rsi; push rdi
+            emit({0x48, 0x81, 0xEC, 0xE0, 0x00, 0x00, 0x00});             // sub rsp, 224
+            emit({0x48, 0x89, 0xCB});                                     // mov rbx, rcx (cmd)
+            size_t rel_len = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call lstrlenA
+            emit({0x89, 0xC6});                                           // mov esi, eax
+            size_t rel_heap1 = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call GetProcessHeap
+            emit({0x48, 0x89, 0xC1});                                     // mov rcx, rax
+            emit({0xBA, 0x08, 0x00, 0x00, 0x00});                         // mov edx, 8 (HEAP_ZERO_MEMORY)
+            emit({0x4C, 0x8D, 0x46, 0x0C});                               // lea r8, [rsi + 12]
+            size_t rel_alloc = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call HeapAlloc
+            emit({0x48, 0x85, 0xC0});                                     // test rax, rax
+            emit({0x74, 0x00}); size_t jz_oom = code.size() - 1;          // jz .fail_no_free
+            emit({0x48, 0x89, 0xC6});                                     // mov rsi, rax (cmdline)
+
+            // Write "cmd.exe /c " (11 bytes) at [rsi]
+            emit({0x48, 0xB8, 0x63, 0x6D, 0x64, 0x2E, 0x65, 0x78, 0x65, 0x20}); // mov rax, "cmd.exe "
+            emit({0x48, 0x89, 0x06});                                     // mov [rsi], rax
+            emit({0xC7, 0x46, 0x08, 0x2F, 0x63, 0x20, 0x00});             // mov dword ptr [rsi + 8], "/c \0"
+
+            // Copy cmd (rbx) to [rsi + 11]
+            emit({0x48, 0x8D, 0x56, 0x0B});                               // lea rdx, [rsi + 11]
+            emit({0x31, 0xC9});                                           // xor ecx, ecx
+            size_t cpy_loop = code.size();
+            emit({0x8A, 0x04, 0x0B});                                     // mov al, byte ptr [rbx + rcx]
+            emit({0x88, 0x04, 0x0A});                                     // mov byte ptr [rdx + rcx], al
+            emit({0x48, 0xFF, 0xC1});                                     // inc rcx
+            emit({0x84, 0xC0});                                           // test al, al
+            int8_t back_cpy = static_cast<int8_t>(static_cast<int>(cpy_loop) - static_cast<int>(code.size() + 2));
+            emit({0x75, static_cast<uint8_t>(back_cpy)});                 // jnz .cpy_loop
+
+            // Zero STARTUPINFOA + PROCESS_INFORMATION (128 bytes at [rsp + 80])
+            emit({0x48, 0x8D, 0x7C, 0x24, 0x50});                         // lea rdi, [rsp + 80]
+            emit({0xB9, 0x10, 0x00, 0x00, 0x00});                         // mov ecx, 16
+            emit({0x31, 0xC0});                                           // xor eax, eax
+            emit({0xF3, 0x48, 0xAB});                                     // rep stosq
+            emit({0xC7, 0x44, 0x24, 0x50, 0x68, 0x00, 0x00, 0x00});       // mov dword ptr [rsp + 80], 104 (si.cb)
+            emit({0xC7, 0x84, 0x24, 0xD0, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF}); // mov dword ptr [rsp + 208], -1
+
+            // CreateProcessA(NULL, rsi, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)
+            emit({0x31, 0xC9});                                           // xor ecx, ecx
+            emit({0x48, 0x89, 0xF2});                                     // mov rdx, rsi
+            emit({0x45, 0x31, 0xC0});                                     // xor r8d, r8d
+            emit({0x45, 0x31, 0xC9});                                     // xor r9d, r9d
+            emit({0x48, 0xC7, 0x44, 0x24, 0x20, 0x00, 0x00, 0x00, 0x00}); // mov qword ptr [rsp + 32], 0
+            emit({0x48, 0xC7, 0x44, 0x24, 0x28, 0x00, 0x00, 0x00, 0x00}); // mov qword ptr [rsp + 40], 0
+            emit({0x48, 0xC7, 0x44, 0x24, 0x30, 0x00, 0x00, 0x00, 0x00}); // mov qword ptr [rsp + 48], 0
+            emit({0x48, 0xC7, 0x44, 0x24, 0x38, 0x00, 0x00, 0x00, 0x00}); // mov qword ptr [rsp + 56], 0
+            emit({0x48, 0x8D, 0x44, 0x24, 0x50});                         // lea rax, [rsp + 80]
+            emit({0x48, 0x89, 0x44, 0x24, 0x40});                         // mov [rsp + 64], rax
+            emit({0x48, 0x8D, 0x84, 0x24, 0xB8, 0x00, 0x00, 0x00});       // lea rax, [rsp + 184]
+            emit({0x48, 0x89, 0x44, 0x24, 0x48});                         // mov [rsp + 72], rax
+            size_t rel_cp = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call CreateProcessA
+            emit({0x85, 0xC0});                                           // test eax, eax
+            emit({0x74, 0x00}); size_t jz_cp_err = code.size() - 1;       // jz .cp_err
+
+            // WaitForSingleObject(pi.hProcess, INFINITE)
+            emit({0x48, 0x8B, 0x8C, 0x24, 0xB8, 0x00, 0x00, 0x00});       // mov rcx, [rsp + 184]
+            emit({0xBA, 0xFF, 0xFF, 0xFF, 0xFF});                         // mov edx, -1
+            size_t rel_wait = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call WaitForSingleObject
+
+            // GetExitCodeProcess(pi.hProcess, &exit_code)
+            emit({0x48, 0x8B, 0x8C, 0x24, 0xB8, 0x00, 0x00, 0x00});       // mov rcx, [rsp + 184]
+            emit({0x48, 0x8D, 0x94, 0x24, 0xD0, 0x00, 0x00, 0x00});       // lea rdx, [rsp + 208]
+            size_t rel_gec = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call GetExitCodeProcess
+
+            // CloseHandle(pi.hProcess); CloseHandle(pi.hThread)
+            emit({0x48, 0x8B, 0x8C, 0x24, 0xB8, 0x00, 0x00, 0x00});       // mov rcx, [rsp + 184]
+            size_t rel_ch1 = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call CloseHandle
+            emit({0x48, 0x8B, 0x8C, 0x24, 0xC0, 0x00, 0x00, 0x00});       // mov rcx, [rsp + 192]
+            size_t rel_ch2 = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call CloseHandle
+
+            emit({0x8B, 0x9C, 0x24, 0xD0, 0x00, 0x00, 0x00});             // mov ebx, [rsp + 208]
+            emit({0xEB, 0x00}); size_t jmp_free = code.size() - 1;        // jmp .free_cmdline
+
+            size_t cp_err = code.size();
+            code[jz_cp_err] = static_cast<uint8_t>(cp_err - (jz_cp_err + 1));
+            emit({0xBB, 0xFF, 0xFF, 0xFF, 0xFF});                         // mov ebx, -1
+
+            size_t free_cmdline = code.size();
+            code[jmp_free] = static_cast<uint8_t>(free_cmdline - (jmp_free + 1));
+            size_t rel_heap2 = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call GetProcessHeap
+            emit({0x48, 0x89, 0xC1});                                     // mov rcx, rax
+            emit({0x31, 0xD2});                                           // xor edx, edx
+            emit({0x49, 0x89, 0xF0});                                     // mov r8, rsi
+            size_t rel_hfree = code.size() + 1;
+            emit({0xE8, 0x00, 0x00, 0x00, 0x00});                         // call HeapFree
+            emit({0x48, 0x63, 0xC3});                                     // movsxd rax, ebx
+            emit({0xEB, 0x00}); size_t jmp_epilog = code.size() - 1;      // jmp .epilog
+
+            size_t fail_no_free = code.size();
+            code[jz_oom] = static_cast<uint8_t>(fail_no_free - (jz_oom + 1));
+            emit({0x48, 0xC7, 0xC0, 0xFF, 0xFF, 0xFF, 0xFF});             // mov rax, -1
+
+            size_t epilog = code.size();
+            code[jmp_epilog] = static_cast<uint8_t>(epilog - (jmp_epilog + 1));
+            emit({0x48, 0x81, 0xC4, 0xE0, 0x00, 0x00, 0x00});             // add rsp, 224
+            emit({0x5F, 0x5E, 0x5B, 0xC3});                               // pop rdi; pop rsi; pop rbx; ret
+
+            std::vector<RelocEntry> rels = {
+                { SectionKind::Text, static_cast<uint32_t>(rel_cmd), "__grass_cmd_exe", RelocType::Rel32, -4 },
+                { SectionKind::Text, static_cast<uint32_t>(rel_sp), "SearchPathA", RelocType::Rel32, -4 },
+                { SectionKind::Text, static_cast<uint32_t>(rel_len), "lstrlenA", RelocType::Rel32, -4 },
+                { SectionKind::Text, static_cast<uint32_t>(rel_heap1), "GetProcessHeap", RelocType::Rel32, -4 },
+                { SectionKind::Text, static_cast<uint32_t>(rel_alloc), "HeapAlloc", RelocType::Rel32, -4 },
+                { SectionKind::Text, static_cast<uint32_t>(rel_cp), "CreateProcessA", RelocType::Rel32, -4 },
+                { SectionKind::Text, static_cast<uint32_t>(rel_wait), "WaitForSingleObject", RelocType::Rel32, -4 },
+                { SectionKind::Text, static_cast<uint32_t>(rel_gec), "GetExitCodeProcess", RelocType::Rel32, -4 },
+                { SectionKind::Text, static_cast<uint32_t>(rel_ch1), "CloseHandle", RelocType::Rel32, -4 },
+                { SectionKind::Text, static_cast<uint32_t>(rel_ch2), "CloseHandle", RelocType::Rel32, -4 },
+                { SectionKind::Text, static_cast<uint32_t>(rel_heap2), "GetProcessHeap", RelocType::Rel32, -4 },
+                { SectionKind::Text, static_cast<uint32_t>(rel_hfree), "HeapFree", RelocType::Rel32, -4 }
+            };
+            append_function("system", code, rels);
+        }
+
         // 13. grass_read_int: Win32 ReadFile(GetStdHandle(-10)) with aligned stack, handle checks, and null-termination
         if (needed_symbols.count("grass_read_int") > 0 && defined_symbols.count("grass_read_int") == 0) {
             std::vector<uint8_t> code;
