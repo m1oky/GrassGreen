@@ -1338,6 +1338,217 @@ static void test_jit_execution() {
     }
 }
 
+static void test_simd_encoding() {
+    std::cout << "\n=== PART 5: SSE2 & AVX2 SIMD Encoding & JIT Tests ===\n";
+
+    // SSE2 unaligned loads/stores & register moves
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.movdqu_xx(Reg::XMM0, Reg::XMM1);
+        check_bytes("movdqu xmm0, xmm1", enc.code(), { 0xF3, 0x0F, 0x6F, 0xC1 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.movdqu_xm(Reg::XMM8, mem(Reg::R12, 16));
+        check_bytes("movdqu xmm8, [r12 + 16]", enc.code(), { 0xF3, 0x45, 0x0F, 0x6F, 0x44, 0x24, 0x10 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.movdqu_mx(mem(Reg::RAX), Reg::XMM2);
+        check_bytes("movdqu [rax], xmm2", enc.code(), { 0xF3, 0x0F, 0x7F, 0x10 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.movupd_xm(Reg::XMM1, mem(Reg::RCX));
+        check_bytes("movupd xmm1, [rcx]", enc.code(), { 0x66, 0x0F, 0x10, 0x09 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.movupd_mx(mem(Reg::RDX), Reg::XMM3);
+        check_bytes("movupd [rdx], xmm3", enc.code(), { 0x66, 0x0F, 0x11, 0x1A });
+    }
+    // SSE2 arithmetic & horizontal reduction helpers
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.paddq_xx(Reg::XMM0, Reg::XMM1);
+        check_bytes("paddq xmm0, xmm1", enc.code(), { 0x66, 0x0F, 0xD4, 0xC1 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.psubq_xx(Reg::XMM2, Reg::XMM3);
+        check_bytes("psubq xmm2, xmm3", enc.code(), { 0x66, 0x0F, 0xFB, 0xD3 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.addpd_xx(Reg::XMM0, Reg::XMM1);
+        check_bytes("addpd xmm0, xmm1", enc.code(), { 0x66, 0x0F, 0x58, 0xC1 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.subpd_xx(Reg::XMM0, Reg::XMM1);
+        check_bytes("subpd xmm0, xmm1", enc.code(), { 0x66, 0x0F, 0x5C, 0xC1 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.mulpd_xx(Reg::XMM0, Reg::XMM1);
+        check_bytes("mulpd xmm0, xmm1", enc.code(), { 0x66, 0x0F, 0x59, 0xC1 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.haddpd_xx(Reg::XMM0, Reg::XMM0);
+        check_bytes("haddpd xmm0, xmm0", enc.code(), { 0x66, 0x0F, 0x7C, 0xC0 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.punpckhqdq_xx(Reg::XMM1, Reg::XMM0);
+        check_bytes("punpckhqdq xmm1, xmm0", enc.code(), { 0x66, 0x0F, 0x6D, 0xC8 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.psrldq_xi(Reg::XMM1, 8);
+        check_bytes("psrldq xmm1, 8", enc.code(), { 0x66, 0x0F, 0x73, 0xD9, 0x08 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.movhlps_xx(Reg::XMM1, Reg::XMM0);
+        check_bytes("movhlps xmm1, xmm0", enc.code(), { 0x0F, 0x12, 0xC8 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.shufpd_xxi(Reg::XMM0, Reg::XMM1, 1);
+        check_bytes("shufpd xmm0, xmm1, 1", enc.code(), { 0x66, 0x0F, 0xC6, 0xC1, 0x01 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.pxor_xx(Reg::XMM0, Reg::XMM0);
+        check_bytes("pxor xmm0, xmm0", enc.code(), { 0x66, 0x0F, 0xEF, 0xC0 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.movq_rx(Reg::RAX, Reg::XMM0);
+        check_bytes("movq rax, xmm0", enc.code(), { 0x66, 0x48, 0x0F, 0x7E, 0xC0 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.movq_xr(Reg::XMM0, Reg::RAX);
+        check_bytes("movq xmm0, rax", enc.code(), { 0x66, 0x48, 0x0F, 0x6E, 0xC0 });
+    }
+
+    // AVX2 256-bit YMM VEX encoding
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.vmovdqu_ym(Reg::YMM0, mem(Reg::RAX));
+        check_bytes("vmovdqu ymm0, [rax]", enc.code(), { 0xC5, 0xFE, 0x6F, 0x00 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.vmovdqu_my(mem(Reg::R8), Reg::YMM9);
+        check_bytes("vmovdqu [r8], ymm9 (3-byte VEX)", enc.code(), { 0xC4, 0x41, 0x7E, 0x7F, 0x08 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.vmovupd_ym(Reg::YMM1, mem(Reg::RCX));
+        check_bytes("vmovupd ymm1, [rcx]", enc.code(), { 0xC5, 0xFD, 0x10, 0x09 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.vmovupd_my(mem(Reg::RDX), Reg::YMM2);
+        check_bytes("vmovupd [rdx], ymm2", enc.code(), { 0xC5, 0xFD, 0x11, 0x12 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.vpaddq_yyy(Reg::YMM0, Reg::YMM1, Reg::YMM2);
+        check_bytes("vpaddq ymm0, ymm1, ymm2", enc.code(), { 0xC5, 0xF5, 0xD4, 0xC2 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.vpsubq_yyy(Reg::YMM0, Reg::YMM1, Reg::YMM2);
+        check_bytes("vpsubq ymm0, ymm1, ymm2", enc.code(), { 0xC5, 0xF5, 0xFB, 0xC2 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.vaddpd_yyy(Reg::YMM0, Reg::YMM1, Reg::YMM2);
+        check_bytes("vaddpd ymm0, ymm1, ymm2", enc.code(), { 0xC5, 0xF5, 0x58, 0xC2 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.vsubpd_yyy(Reg::YMM0, Reg::YMM1, Reg::YMM2);
+        check_bytes("vsubpd ymm0, ymm1, ymm2", enc.code(), { 0xC5, 0xF5, 0x5C, 0xC2 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.vmulpd_yyy(Reg::YMM0, Reg::YMM1, Reg::YMM2);
+        check_bytes("vmulpd ymm0, ymm1, ymm2", enc.code(), { 0xC5, 0xF5, 0x59, 0xC2 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.vpxor_yyy(Reg::YMM0, Reg::YMM0, Reg::YMM0);
+        check_bytes("vpxor ymm0, ymm0, ymm0", enc.code(), { 0xC5, 0xFD, 0xEF, 0xC0 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.vhaddpd_yyy(Reg::YMM0, Reg::YMM1, Reg::YMM2);
+        check_bytes("vhaddpd ymm0, ymm1, ymm2", enc.code(), { 0xC5, 0xF5, 0x7C, 0xC2 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.vextracti128_xyi(Reg::XMM1, Reg::YMM0, 1);
+        check_bytes("vextracti128 xmm1, ymm0, 1", enc.code(), { 0xC4, 0xE3, 0x7D, 0x39, 0xC1, 0x01 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.vextractf128_xyi(Reg::XMM1, Reg::YMM0, 1);
+        check_bytes("vextractf128 xmm1, ymm0, 1", enc.code(), { 0xC4, 0xE3, 0x7D, 0x19, 0xC1, 0x01 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.vpbroadcastq_yx(Reg::YMM0, Reg::XMM1);
+        check_bytes("vpbroadcastq ymm0, xmm1", enc.code(), { 0xC4, 0xE2, 0x7D, 0x59, 0xC1 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.vbroadcastsd_yx(Reg::YMM0, Reg::XMM1);
+        check_bytes("vbroadcastsd ymm0, xmm1", enc.code(), { 0xC4, 0xE2, 0x7D, 0x19, 0xC1 });
+    }
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+        enc.vzeroupper();
+        check_bytes("vzeroupper", enc.code(), { 0xC5, 0xF8, 0x77 });
+    }
+
+    // JIT execution test: AVX2 4-double dot product
+    {
+        GrassX86Encoder enc(TargetArch::X86_64);
+#if defined(_WIN32)
+        Reg r_a = Reg::RCX;
+        Reg r_b = Reg::RDX;
+#else
+        Reg r_a = Reg::RDI;
+        Reg r_b = Reg::RSI;
+#endif
+        enc.vmovupd_ym(Reg::YMM0, mem(r_a));
+        enc.vmovupd_ym(Reg::YMM1, mem(r_b));
+        enc.vmulpd_yyy(Reg::YMM0, Reg::YMM0, Reg::YMM1);
+        enc.vextractf128_xyi(Reg::XMM1, Reg::YMM0, 1);
+        enc.addpd_xx(Reg::XMM0, Reg::XMM1);
+        enc.haddpd_xx(Reg::XMM0, Reg::XMM0);
+        enc.vzeroupper();
+        enc.ret();
+
+        size_t sz = enc.code_size();
+        void* mem_ptr = allocate_exec_mem(sz);
+        std::memcpy(mem_ptr, enc.code().data(), sz);
+
+        using Dot4Fn = double (*)(const double*, const double*);
+        Dot4Fn fn = reinterpret_cast<Dot4Fn>(mem_ptr);
+        double a[4] = { 1.0, 2.0, 3.0, 4.0 };
+        double b[4] = { 10.0, 20.0, 30.0, 40.0 };
+        double res = fn(a, b);
+        check_bool("JIT AVX2 dot4({1,2,3,4}, {10,20,30,40}) == 300.0", std::fabs(res - 300.0) < 1e-9);
+        free_exec_mem(mem_ptr, sz);
+    }
+}
+
 int main() {
     std::cout << "Starting GrassGreen x86/x86_64 Binary Machine Encoder Unit Tests...\n";
 
@@ -1346,6 +1557,7 @@ int main() {
         test_x86_32_encoding();
         test_utilities_and_relocs();
         test_jit_execution();
+        test_simd_encoding();
     } catch (const std::exception& ex) {
         std::cerr << "[UNEXPECTED EXCEPTION] " << ex.what() << "\n";
         g_tests_failed++;

@@ -267,6 +267,46 @@ namespace grass::backend {
         void cvttss2si_rx(Reg dst, Reg src);
         void xorps_xx(Reg dst, Reg src);
 
+        // Packed SIMD (SSE2 128-bit XMM)
+        void movdqu_xx(Reg dst, Reg src);
+        void movdqu_xm(Reg dst, const MemOp& src);
+        void movdqu_mx(const MemOp& dst, Reg src);
+        void movupd_xx(Reg dst, Reg src);
+        void movupd_xm(Reg dst, const MemOp& src);
+        void movupd_mx(const MemOp& dst, Reg src);
+        void paddq_xx(Reg dst, Reg src);
+        void psubq_xx(Reg dst, Reg src);
+        void addpd_xx(Reg dst, Reg src);
+        void subpd_xx(Reg dst, Reg src);
+        void mulpd_xx(Reg dst, Reg src);
+        void haddpd_xx(Reg dst, Reg src);
+        void punpckhqdq_xx(Reg dst, Reg src);
+        void movhlps_xx(Reg dst, Reg src);
+        void psrldq_xi(Reg dst, uint8_t imm);
+        void shufpd_xxi(Reg dst, Reg src, uint8_t imm);
+        void movq_rx(Reg dst_gpr, Reg src_xmm);
+        void movq_xr(Reg dst_xmm, Reg src_gpr);
+
+        // Packed SIMD (AVX2 256-bit YMM with VEX)
+        void vmovdqu_yy(Reg dst, Reg src);
+        void vmovdqu_ym(Reg dst, const MemOp& src);
+        void vmovdqu_my(const MemOp& dst, Reg src);
+        void vmovupd_yy(Reg dst, Reg src);
+        void vmovupd_ym(Reg dst, const MemOp& src);
+        void vmovupd_my(const MemOp& dst, Reg src);
+        void vpaddq_yyy(Reg dst, Reg src1, Reg src2);
+        void vpsubq_yyy(Reg dst, Reg src1, Reg src2);
+        void vaddpd_yyy(Reg dst, Reg src1, Reg src2);
+        void vsubpd_yyy(Reg dst, Reg src1, Reg src2);
+        void vmulpd_yyy(Reg dst, Reg src1, Reg src2);
+        void vpxor_yyy(Reg dst, Reg src1, Reg src2);
+        void vhaddpd_yyy(Reg dst, Reg src1, Reg src2);
+        void vextracti128_xyi(Reg dst_xmm, Reg src_ymm, uint8_t imm);
+        void vextractf128_xyi(Reg dst_xmm, Reg src_ymm, uint8_t imm);
+        void vpbroadcastq_yx(Reg dst_ymm, Reg src_xmm);
+        void vbroadcastsd_yx(Reg dst_ymm, Reg src_xmm);
+        void vzeroupper();
+
         // External symbol relocations
         void lea_symbol(Reg reg, const std::string& symbol);
         void mov_symbol_addr(Reg reg, const std::string& symbol);
@@ -300,8 +340,11 @@ namespace grass::backend {
         void validate_reg(Reg r) const;
         void validate_arch_gpr(Reg r) const;
         void validate_xmm(Reg r) const;
+        void validate_ymm(Reg r) const;
 
         void emit_rex(bool w, bool r, bool x, bool b, bool force_rex = false);
+        void emit_vex(bool l, uint8_t pp, uint8_t map_select, bool w,
+                      bool r_ext, bool x_ext, bool b_ext, uint8_t vvvv);
         void emit_modrm_sib_disp(uint8_t reg_field, const MemOp& mem, size_t extra_inst_bytes = 0);
 
         void emit_alu_rr(uint8_t alu_code, Reg dst, Reg src);

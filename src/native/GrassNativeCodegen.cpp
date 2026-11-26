@@ -3177,7 +3177,7 @@ int64_t memory_free_block(int64_t block_addr) {
                 if (frame_info.total_frame_size > 0) encoder.sub_ri(backend::Reg::RSP, frame_info.total_frame_size);
                 for (backend::Reg xr : used_callee_xmm) {
                     int32_t off = xmm_save_offsets[xr];
-                    encoder.movsd_mx(backend::mem(backend::Reg::RBP, -off, 8), xr);
+                    encoder.movdqu_mx(backend::mem(backend::Reg::RBP, -off, 16), xr);
                 }
                 if (fn->name == "main" && !options_.freestanding) {
                     encoder.call_extern("grass_install_runtime_crash_handler");
@@ -3206,11 +3206,37 @@ int64_t memory_free_block(int64_t block_addr) {
                 return spill_base_offset + static_cast<int32_t>(val * 8);
             };
 
+            auto to_vec_reg = [&](backend::Reg xmm_r, ir::IRType* vtype) -> backend::Reg {
+                if (vtype && vtype->is_vector() && vtype->array_len == 4 && backend::reg_is_xmm(xmm_r)) {
+                    return static_cast<backend::Reg>(0x0070 | backend::reg_raw_index(xmm_r));
+                }
+                return xmm_r;
+            };
+
+            auto to_xmm_reg = [&](backend::Reg r) -> backend::Reg {
+                if (backend::reg_is_ymm(r)) {
+                    return static_cast<backend::Reg>(0x0050 | backend::reg_raw_index(r));
+                }
+                return r;
+            };
+
             auto load_val = [&](ir::ValueId val, backend::Reg temp_reg) -> backend::Reg {
                 backend::Reg r = get_loc_reg(val);
-                if (r != backend::Reg::None) return r;
-                int32_t off = get_spill_offset(val);
                 ir::IRType* vtype = fn->get_value(val).type;
+                if (r != backend::Reg::None) {
+                    return (vtype && vtype->is_vector()) ? to_vec_reg(r, vtype) : r;
+                }
+                int32_t off = get_spill_offset(val);
+                if (vtype && vtype->is_vector()) {
+                    backend::Reg base_xmm = backend::reg_is_xmm(temp_reg) ? temp_reg : backend::Reg::XMM0;
+                    backend::Reg vtmp = to_vec_reg(base_xmm, vtype);
+                    if (vtype->array_len == 4) {
+                        encoder.vmovdqu_ym(vtmp, backend::mem(backend::Reg::RBP, -off, 32));
+                    } else {
+                        encoder.movdqu_xm(vtmp, backend::mem(backend::Reg::RBP, -off, 16));
+                    }
+                    return vtmp;
+                }
                 if (vtype && vtype->is_floating_point()) {
                     if (backend::reg_is_xmm(temp_reg)) {
                         encoder.movsd_xm(temp_reg, backend::mem(backend::Reg::RBP, -off, 8));
@@ -3227,6 +3253,24 @@ int64_t memory_free_block(int64_t block_addr) {
             auto store_val = [&](ir::ValueId val, backend::Reg src_reg) {
                 backend::Reg r = get_loc_reg(val);
                 ir::IRType* vtype = fn->get_value(val).type;
+
+                if (vtype && vtype->is_vector()) {
+                    if (r != backend::Reg::None) {
+                        backend::Reg vr = to_vec_reg(r, vtype);
+                        if (vr != src_reg) {
+                            if (vtype->array_len == 4) encoder.vmovdqu_yy(vr, src_reg);
+                            else encoder.movdqu_xx(vr, src_reg);
+                        }
+                    } else {
+                        int32_t off = get_spill_offset(val);
+                        if (vtype->array_len == 4) {
+                            encoder.vmovdqu_my(backend::mem(backend::Reg::RBP, -off, 32), src_reg);
+                        } else {
+                            encoder.movdqu_mx(backend::mem(backend::Reg::RBP, -off, 16), src_reg);
+                        }
+                    }
+                    return;
+                }
 
                 if (r != backend::Reg::None) {
                     if (r != src_reg) {
@@ -3348,6 +3392,7 @@ int64_t memory_free_block(int64_t block_addr) {
                     ir::ValueId src_val;
                     ir::ValueId dst_val;
                     bool is_fp;
+                    uint8_t vec_lanes;
                 };
                 std::vector<PhiMove> moves;
                 for (const auto& phi_inst : to_bb->instructions) {
@@ -3356,7 +3401,8 @@ int64_t memory_free_block(int64_t block_addr) {
                     if (in_val != ir::kInvalidValueId) {
                         ir::IRType* vt = phi_inst->type;
                         bool fp = vt && vt->is_floating_point();
-                        moves.push_back({ in_val, phi_inst->result_id, fp });
+                        uint8_t vlanes = (vt && vt->is_vector()) ? static_cast<uint8_t>(vt->array_len) : 0;
+                        moves.push_back({ in_val, phi_inst->result_id, fp, vlanes });
                     }
                 }
                 if (moves.empty()) return;
@@ -3364,8 +3410,14 @@ int64_t memory_free_block(int64_t block_addr) {
                 // Pass 1: save all source values into stack scratch slots
                 int32_t scratch_base = phi_scratch_base;
                 for (size_t i = 0; i < moves.size(); ++i) {
-                    int32_t off = scratch_base + static_cast<int32_t>(i * 8);
-                    if (moves[i].is_fp) {
+                    int32_t off = scratch_base + static_cast<int32_t>(i * 32);
+                    if (moves[i].vec_lanes == 4) {
+                        backend::Reg r = load_val(moves[i].src_val, backend::Reg::XMM0);
+                        encoder.vmovdqu_my(backend::mem(backend::Reg::RBP, -off, 32), r);
+                    } else if (moves[i].vec_lanes == 2) {
+                        backend::Reg r = load_val(moves[i].src_val, backend::Reg::XMM0);
+                        encoder.movdqu_mx(backend::mem(backend::Reg::RBP, -off, 16), r);
+                    } else if (moves[i].is_fp) {
                         backend::Reg r = load_val(moves[i].src_val, backend::Reg::XMM0);
                         encoder.movsd_mx(backend::mem(backend::Reg::RBP, -off, 8), r);
                     } else {
@@ -3376,8 +3428,14 @@ int64_t memory_free_block(int64_t block_addr) {
 
                 // Pass 2: load from scratch slots into destination values
                 for (size_t i = 0; i < moves.size(); ++i) {
-                    int32_t off = scratch_base + static_cast<int32_t>(i * 8);
-                    if (moves[i].is_fp) {
+                    int32_t off = scratch_base + static_cast<int32_t>(i * 32);
+                    if (moves[i].vec_lanes == 4) {
+                        encoder.vmovdqu_ym(backend::Reg::YMM0, backend::mem(backend::Reg::RBP, -off, 32));
+                        store_val(moves[i].dst_val, backend::Reg::YMM0);
+                    } else if (moves[i].vec_lanes == 2) {
+                        encoder.movdqu_xm(backend::Reg::XMM0, backend::mem(backend::Reg::RBP, -off, 16));
+                        store_val(moves[i].dst_val, backend::Reg::XMM0);
+                    } else if (moves[i].is_fp) {
                         encoder.movsd_xm(backend::Reg::XMM0, backend::mem(backend::Reg::RBP, -off, 8));
                         store_val(moves[i].dst_val, backend::Reg::XMM0);
                     } else {
@@ -4051,6 +4109,167 @@ int64_t memory_free_block(int64_t block_addr) {
                             // Handled at predecessor jump edges
                             break;
                         }
+                        case ir::IROp::VecZero: {
+                            ir::IRType* vt = inst->type;
+                            backend::Reg dst = get_loc_reg(inst->result_id);
+                            backend::Reg xmm_out = (dst != backend::Reg::None && backend::reg_is_xmm(dst)) ? dst : backend::Reg::XMM0;
+                            backend::Reg vout = to_vec_reg(xmm_out, vt);
+                            if (vt && vt->array_len == 4) {
+                                encoder.vpxor_yyy(vout, vout, vout);
+                            } else {
+                                encoder.pxor_xx(vout, vout);
+                            }
+                            store_val(inst->result_id, vout);
+                            break;
+                        }
+                        case ir::IROp::VecSplat: {
+                            ir::IRType* vt = inst->type;
+                            bool is_fp = vt && vt->element_type && vt->element_type->is_floating_point();
+                            backend::Reg dst = get_loc_reg(inst->result_id);
+                            backend::Reg xmm_out = (dst != backend::Reg::None && backend::reg_is_xmm(dst)) ? dst : backend::Reg::XMM0;
+                            backend::Reg vout = to_vec_reg(xmm_out, vt);
+                            if (is_fp) {
+                                backend::Reg sreg = load_val(inst->operands[0], backend::Reg::XMM1);
+                                if (sreg != xmm_out) encoder.movsd_xx(xmm_out, sreg);
+                                if (vt && vt->array_len == 4) {
+                                    encoder.vbroadcastsd_yx(vout, xmm_out);
+                                } else {
+                                    encoder.shufpd_xxi(xmm_out, xmm_out, 0);
+                                }
+                            } else {
+                                backend::Reg sreg = load_val(inst->operands[0], backend::Reg::RAX);
+                                encoder.movq_xr(xmm_out, sreg);
+                                if (vt && vt->array_len == 4) {
+                                    encoder.vpbroadcastq_yx(vout, xmm_out);
+                                } else {
+                                    encoder.shufpd_xxi(xmm_out, xmm_out, 0);
+                                }
+                            }
+                            store_val(inst->result_id, vout);
+                            break;
+                        }
+                        case ir::IROp::VecLoad: {
+                            ir::IRType* vt = inst->type;
+                            bool is_fp = vt && vt->element_type && vt->element_type->is_floating_point();
+                            backend::Reg ptr = load_val(inst->operands[0], backend::Reg::R10);
+                            backend::Reg dst = get_loc_reg(inst->result_id);
+                            backend::Reg xmm_out = (dst != backend::Reg::None && backend::reg_is_xmm(dst)) ? dst : backend::Reg::XMM0;
+                            backend::Reg vout = to_vec_reg(xmm_out, vt);
+                            if (vt && vt->array_len == 4) {
+                                if (is_fp) encoder.vmovupd_ym(vout, backend::mem(ptr, 0, 32));
+                                else encoder.vmovdqu_ym(vout, backend::mem(ptr, 0, 32));
+                            } else {
+                                if (is_fp) encoder.movupd_xm(vout, backend::mem(ptr, 0, 16));
+                                else encoder.movdqu_xm(vout, backend::mem(ptr, 0, 16));
+                            }
+                            store_val(inst->result_id, vout);
+                            break;
+                        }
+                        case ir::IROp::VecStore: {
+                            ir::IRType* vt = fn->get_value(inst->operands[0]).type;
+                            bool is_fp = vt && vt->element_type && vt->element_type->is_floating_point();
+                            backend::Reg vreg = load_val(inst->operands[0], backend::Reg::XMM0);
+                            backend::Reg ptr = load_val(inst->operands[1], backend::Reg::R10);
+                            if (vt && vt->array_len == 4) {
+                                if (is_fp) encoder.vmovupd_my(backend::mem(ptr, 0, 32), vreg);
+                                else encoder.vmovdqu_my(backend::mem(ptr, 0, 32), vreg);
+                            } else {
+                                if (is_fp) encoder.movupd_mx(backend::mem(ptr, 0, 16), vreg);
+                                else encoder.movdqu_mx(backend::mem(ptr, 0, 16), vreg);
+                            }
+                            break;
+                        }
+                        case ir::IROp::VecAdd:
+                        case ir::IROp::VecSub:
+                        case ir::IROp::VecMul: {
+                            ir::IRType* vt = inst->type;
+                            bool is_fp = vt && vt->element_type && vt->element_type->is_floating_point();
+                            uint64_t lanes = vt ? vt->array_len : 2;
+                            backend::Reg lhs = load_val(inst->operands[0], backend::Reg::XMM0);
+                            backend::Reg rhs = load_val(inst->operands[1], backend::Reg::XMM1);
+                            backend::Reg dst = get_loc_reg(inst->result_id);
+                            backend::Reg xmm_out = (dst != backend::Reg::None && backend::reg_is_xmm(dst)) ? dst : backend::Reg::XMM2;
+                            backend::Reg vout = to_vec_reg(xmm_out, vt);
+
+                            if (lanes == 4) {
+                                if (inst->op == ir::IROp::VecAdd) {
+                                    if (is_fp) encoder.vaddpd_yyy(vout, lhs, rhs);
+                                    else encoder.vpaddq_yyy(vout, lhs, rhs);
+                                } else if (inst->op == ir::IROp::VecSub) {
+                                    if (is_fp) encoder.vsubpd_yyy(vout, lhs, rhs);
+                                    else encoder.vpsubq_yyy(vout, lhs, rhs);
+                                } else {
+                                    encoder.vmulpd_yyy(vout, lhs, rhs);
+                                }
+                                store_val(inst->result_id, vout);
+                            } else {
+                                auto emit_sse_op = [&](backend::Reg d, backend::Reg s) {
+                                    if (inst->op == ir::IROp::VecAdd) {
+                                        if (is_fp) encoder.addpd_xx(d, s);
+                                        else encoder.paddq_xx(d, s);
+                                    } else if (inst->op == ir::IROp::VecSub) {
+                                        if (is_fp) encoder.subpd_xx(d, s);
+                                        else encoder.psubq_xx(d, s);
+                                    } else {
+                                        encoder.mulpd_xx(d, s);
+                                    }
+                                };
+                                if (vout == rhs && vout != lhs) {
+                                    backend::Reg tmp = backend::Reg::XMM2;
+                                    if (lhs != backend::Reg::XMM0 && rhs != backend::Reg::XMM0) tmp = backend::Reg::XMM0;
+                                    else if (lhs != backend::Reg::XMM1 && rhs != backend::Reg::XMM1) tmp = backend::Reg::XMM1;
+                                    encoder.movdqu_xx(tmp, lhs);
+                                    emit_sse_op(tmp, rhs);
+                                    store_val(inst->result_id, tmp);
+                                } else {
+                                    if (vout != lhs) encoder.movdqu_xx(vout, lhs);
+                                    emit_sse_op(vout, rhs);
+                                    store_val(inst->result_id, vout);
+                                }
+                            }
+                            break;
+                        }
+                        case ir::IROp::VecHAdd: {
+                            ir::IRType* vt = fn->get_value(inst->operands[0]).type;
+                            bool is_fp = vt && vt->element_type && vt->element_type->is_floating_point();
+                            uint64_t lanes = vt ? vt->array_len : 2;
+                            backend::Reg vsrc = load_val(inst->operands[0], backend::Reg::XMM0);
+                            if (lanes == 4) {
+                                backend::Reg hi_tmp = (backend::reg_raw_index(vsrc) == 1) ? backend::Reg::XMM2 : backend::Reg::XMM1;
+                                if (is_fp) {
+                                    encoder.vextractf128_xyi(hi_tmp, vsrc, 1);
+                                    if (backend::reg_raw_index(vsrc) != 0) encoder.vextractf128_xyi(backend::Reg::XMM0, vsrc, 0);
+                                    encoder.addpd_xx(backend::Reg::XMM0, hi_tmp);
+                                    encoder.movhlps_xx(backend::Reg::XMM1, backend::Reg::XMM0);
+                                    encoder.addsd_xx(backend::Reg::XMM0, backend::Reg::XMM1);
+                                    encoder.vzeroupper();
+                                    store_val(inst->result_id, backend::Reg::XMM0);
+                                } else {
+                                    encoder.vextracti128_xyi(hi_tmp, vsrc, 1);
+                                    if (backend::reg_raw_index(vsrc) != 0) encoder.vextracti128_xyi(backend::Reg::XMM0, vsrc, 0);
+                                    encoder.paddq_xx(backend::Reg::XMM0, hi_tmp);
+                                    encoder.movhlps_xx(backend::Reg::XMM1, backend::Reg::XMM0);
+                                    encoder.paddq_xx(backend::Reg::XMM0, backend::Reg::XMM1);
+                                    encoder.vzeroupper();
+                                    encoder.movq_rx(backend::Reg::RAX, backend::Reg::XMM0);
+                                    store_val(inst->result_id, backend::Reg::RAX);
+                                }
+                            } else {
+                                if (is_fp) {
+                                    if (vsrc != backend::Reg::XMM0) encoder.movupd_xx(backend::Reg::XMM0, vsrc);
+                                    encoder.movhlps_xx(backend::Reg::XMM1, backend::Reg::XMM0);
+                                    encoder.addsd_xx(backend::Reg::XMM0, backend::Reg::XMM1);
+                                    store_val(inst->result_id, backend::Reg::XMM0);
+                                } else {
+                                    if (vsrc != backend::Reg::XMM0) encoder.movdqu_xx(backend::Reg::XMM0, vsrc);
+                                    encoder.movhlps_xx(backend::Reg::XMM1, backend::Reg::XMM0);
+                                    encoder.paddq_xx(backend::Reg::XMM0, backend::Reg::XMM1);
+                                    encoder.movq_rx(backend::Reg::RAX, backend::Reg::XMM0);
+                                    store_val(inst->result_id, backend::Reg::RAX);
+                                }
+                            }
+                            break;
+                        }
                         default:
                             break;
                     }
@@ -4083,7 +4302,7 @@ int64_t memory_free_block(int64_t block_addr) {
             }
             for (backend::Reg xr : used_callee_xmm) {
                 int32_t off = xmm_save_offsets[xr];
-                encoder.movsd_xm(xr, backend::mem(backend::Reg::RBP, -off, 8));
+                encoder.movdqu_xm(xr, backend::mem(backend::Reg::RBP, -off, 16));
             }
             if (frame_info.total_frame_size > 0) {
                 encoder.add_ri((options_.arch == TargetArch::X86_64) ? backend::Reg::RSP : backend::Reg::ESP,

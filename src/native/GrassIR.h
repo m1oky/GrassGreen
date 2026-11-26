@@ -66,7 +66,8 @@ namespace grass::ir {
         F64,
         Ptr,
         Array,
-        Struct
+        Struct,
+        Vec
     };
 
     struct StructField {
@@ -99,6 +100,7 @@ namespace grass::ir {
         bool is_pointer() const { return kind == TypeKind::Ptr; }
         bool is_array() const { return kind == TypeKind::Array; }
         bool is_struct() const { return kind == TypeKind::Struct; }
+        bool is_vector() const { return kind == TypeKind::Vec; }
         bool is_numeric() const { return is_integer() || is_floating_point(); }
 
         uint32_t bit_width() const;
@@ -140,6 +142,7 @@ namespace grass::ir {
         IRType* get_f64_type();
         IRType* get_ptr_type(IRType* pointee = nullptr);
         IRType* get_array_type(IRType* elem, uint64_t length);
+        IRType* get_vec_type(IRType* elem, uint64_t lanes);
         IRType* get_struct_type(const std::string& name,
                                 const std::vector<IRType*>& field_types,
                                 const std::vector<std::string>& field_names = {});
@@ -203,7 +206,17 @@ namespace grass::ir {
         Jump,
         Branch,
         Call,
-        Ret
+        Ret,
+
+        // SIMD Vector Operations
+        VecZero,
+        VecSplat,
+        VecLoad,
+        VecStore,
+        VecAdd,
+        VecSub,
+        VecMul,
+        VecHAdd
     };
 
     enum class ICmpCond : uint8_t {
@@ -486,6 +499,16 @@ namespace grass::ir {
         ValueId create_indirect_call(ValueId func_ptr, IRType* ret_type, const std::vector<ValueId>& args, const std::string& name = "");
         IRInst* create_ret(ValueId val);
         IRInst* create_ret_void();
+
+        // SIMD Vector Operations
+        ValueId create_vec_zero(IRType* vec_type, const std::string& name = "");
+        ValueId create_vec_splat(IRType* vec_type, ValueId scalar, const std::string& name = "");
+        ValueId create_vec_load(IRType* vec_type, ValueId ptr, const std::string& name = "");
+        IRInst* create_vec_store(ValueId vec_val, ValueId ptr);
+        ValueId create_vec_add(ValueId lhs, ValueId rhs, const std::string& name = "");
+        ValueId create_vec_sub(ValueId lhs, ValueId rhs, const std::string& name = "");
+        ValueId create_vec_mul(ValueId lhs, ValueId rhs, const std::string& name = "");
+        ValueId create_vec_hadd(ValueId vec_val, IRType* scalar_type, const std::string& name = "");
     };
 
     // 8. Dominator Tree & SSA Mem2Reg

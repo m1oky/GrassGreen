@@ -19,6 +19,8 @@ namespace grass::opt {
         bool enable_licm = true;
         bool enable_unrolling = true;
         bool enable_strength_reduction = true;
+        bool enable_vectorization = true;
+        int vector_width = 4; // 4 = AVX2 (256-bit), 2 = SSE2 (128-bit)
         int max_inline_iterations = 4;
         int max_opt_iterations = 4;
     };
@@ -39,6 +41,8 @@ namespace grass::opt {
         static bool run_loop_unrolling(ir::IRModule& module, int factor = 4);
         static bool run_strength_reduction(ir::IRFunction& fn);
         static bool run_strength_reduction(ir::IRModule& module);
+        static bool run_loop_vectorization(ir::IRFunction& fn, int vector_width = 4);
+        static bool run_loop_vectorization(ir::IRModule& module, int vector_width = 4);
 
     private:
         // Internal helper methods for inlining

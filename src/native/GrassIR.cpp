@@ -74,6 +74,9 @@ namespace grass::ir {
             case TypeKind::Array:
                 return "[" + std::to_string(array_len) + " x " +
                        (element_type ? element_type->to_string() : "unknown") + "]";
+            case TypeKind::Vec:
+                return "<" + std::to_string(array_len) + " x " +
+                       (element_type ? element_type->to_string() : "unknown") + ">";
             case TypeKind::Struct: {
                 if (!struct_name.empty()) return "%" + struct_name;
                 std::string res = "{ ";
@@ -93,7 +96,7 @@ namespace grass::ir {
         if (this == other) return true;
         if (kind != other->kind) return false;
 
-        if (kind == TypeKind::Array) {
+        if (kind == TypeKind::Array || kind == TypeKind::Vec) {
             return array_len == other->array_len &&
                    ((!element_type && !other->element_type) ||
                     (element_type && element_type->equals(other->element_type)));
@@ -176,6 +179,23 @@ namespace grass::ir {
         t->array_len = length;
         t->cached_align = elem ? elem->alignment() : 1;
         t->cached_size = elem ? elem->size() * length : 0;
+        IRType* raw = t.get();
+        types_storage_.push_back(std::move(t));
+        return raw;
+    }
+
+    IRType* IRContext::get_vec_type(IRType* elem, uint64_t lanes) {
+        for (const auto& t : types_storage_) {
+            if (t->kind == TypeKind::Vec && t->element_type == elem && t->array_len == lanes) {
+                return t.get();
+            }
+        }
+        auto t = std::make_unique<IRType>();
+        t->kind = TypeKind::Vec;
+        t->element_type = elem;
+        t->array_len = lanes;
+        t->cached_size = elem ? elem->size() * lanes : 0;
+        t->cached_align = t->cached_size > 0 ? t->cached_size : 16;
         IRType* raw = t.get();
         types_storage_.push_back(std::move(t));
         return raw;
@@ -271,6 +291,14 @@ namespace grass::ir {
             case IROp::Branch:        return "br";
             case IROp::Call:          return "call";
             case IROp::Ret:           return "ret";
+            case IROp::VecZero:       return "vec_zero";
+            case IROp::VecSplat:      return "vec_splat";
+            case IROp::VecLoad:       return "vec_load";
+            case IROp::VecStore:      return "vec_store";
+            case IROp::VecAdd:        return "vec_add";
+            case IROp::VecSub:        return "vec_sub";
+            case IROp::VecMul:        return "vec_mul";
+            case IROp::VecHAdd:       return "vec_hadd";
             default:                  return "unknown_op";
         }
     }
@@ -374,19 +402,20 @@ namespace grass::ir {
 
     bool IRInst::is_memory() const {
         return op == IROp::Alloca || op == IROp::Load || op == IROp::Store ||
-               op == IROp::GetElementPtr || op == IROp::MemCpy || op == IROp::MemSet;
+               op == IROp::GetElementPtr || op == IROp::MemCpy || op == IROp::MemSet ||
+               op == IROp::VecLoad || op == IROp::VecStore;
     }
 
     bool IRInst::has_side_effects() const {
         return op == IROp::Store || op == IROp::Call || op == IROp::Jump ||
                op == IROp::Branch || op == IROp::Ret || op == IROp::MemCpy ||
-               op == IROp::MemSet;
+               op == IROp::MemSet || op == IROp::VecStore;
     }
 
     bool IRInst::is_commutative() const {
         if (op == IROp::Add || op == IROp::Mul || op == IROp::FAdd ||
             op == IROp::FMul || op == IROp::And || op == IROp::Or ||
-            op == IROp::Xor) {
+            op == IROp::Xor || op == IROp::VecAdd || op == IROp::VecMul) {
             return true;
         }
         if (op == IROp::ICmp && (icmp_cond == ICmpCond::EQ || icmp_cond == ICmpCond::NE)) {
@@ -1669,6 +1698,94 @@ namespace grass::ir {
         inst->type = void_t;
         inst->operands = {dst, val_byte, size_bytes};
         return insert_instruction(std::move(inst));
+    }
+
+    ValueId IRBuilder::create_vec_zero(IRType* vec_type, const std::string& name) {
+        auto inst = std::make_unique<IRInst>();
+        inst->op = IROp::VecZero;
+        inst->type = vec_type;
+        inst->result_id = function_->create_value(vec_type, name, inst.get());
+        ValueId id = inst->result_id;
+        insert_instruction(std::move(inst));
+        return id;
+    }
+
+    ValueId IRBuilder::create_vec_splat(IRType* vec_type, ValueId scalar, const std::string& name) {
+        auto inst = std::make_unique<IRInst>();
+        inst->op = IROp::VecSplat;
+        inst->type = vec_type;
+        inst->operands = {scalar};
+        inst->result_id = function_->create_value(vec_type, name, inst.get());
+        ValueId id = inst->result_id;
+        insert_instruction(std::move(inst));
+        return id;
+    }
+
+    ValueId IRBuilder::create_vec_load(IRType* vec_type, ValueId ptr, const std::string& name) {
+        auto inst = std::make_unique<IRInst>();
+        inst->op = IROp::VecLoad;
+        inst->type = vec_type;
+        inst->operands = {ptr};
+        inst->result_id = function_->create_value(vec_type, name, inst.get());
+        ValueId id = inst->result_id;
+        insert_instruction(std::move(inst));
+        return id;
+    }
+
+    IRInst* IRBuilder::create_vec_store(ValueId vec_val, ValueId ptr) {
+        IRType* void_t = function_->parent ? function_->parent->context.get_void_type() : nullptr;
+        auto inst = std::make_unique<IRInst>();
+        inst->op = IROp::VecStore;
+        inst->type = void_t;
+        inst->operands = {vec_val, ptr};
+        return insert_instruction(std::move(inst));
+    }
+
+    ValueId IRBuilder::create_vec_add(ValueId lhs, ValueId rhs, const std::string& name) {
+        IRType* vt = function_->get_value(lhs).type;
+        auto inst = std::make_unique<IRInst>();
+        inst->op = IROp::VecAdd;
+        inst->type = vt;
+        inst->operands = {lhs, rhs};
+        inst->result_id = function_->create_value(vt, name, inst.get());
+        ValueId id = inst->result_id;
+        insert_instruction(std::move(inst));
+        return id;
+    }
+
+    ValueId IRBuilder::create_vec_sub(ValueId lhs, ValueId rhs, const std::string& name) {
+        IRType* vt = function_->get_value(lhs).type;
+        auto inst = std::make_unique<IRInst>();
+        inst->op = IROp::VecSub;
+        inst->type = vt;
+        inst->operands = {lhs, rhs};
+        inst->result_id = function_->create_value(vt, name, inst.get());
+        ValueId id = inst->result_id;
+        insert_instruction(std::move(inst));
+        return id;
+    }
+
+    ValueId IRBuilder::create_vec_mul(ValueId lhs, ValueId rhs, const std::string& name) {
+        IRType* vt = function_->get_value(lhs).type;
+        auto inst = std::make_unique<IRInst>();
+        inst->op = IROp::VecMul;
+        inst->type = vt;
+        inst->operands = {lhs, rhs};
+        inst->result_id = function_->create_value(vt, name, inst.get());
+        ValueId id = inst->result_id;
+        insert_instruction(std::move(inst));
+        return id;
+    }
+
+    ValueId IRBuilder::create_vec_hadd(ValueId vec_val, IRType* scalar_type, const std::string& name) {
+        auto inst = std::make_unique<IRInst>();
+        inst->op = IROp::VecHAdd;
+        inst->type = scalar_type;
+        inst->operands = {vec_val};
+        inst->result_id = function_->create_value(scalar_type, name, inst.get());
+        ValueId id = inst->result_id;
+        insert_instruction(std::move(inst));
+        return id;
     }
 
     IRInst* IRBuilder::create_jump(BasicBlock* target) {
@@ -3174,8 +3291,14 @@ namespace grass::ir {
                     } else {
                         current->is_spilled = true;
                         current->reg = PhysReg::None;
-                        current->stack_slot_offset = current_stack_slot;
-                        current_stack_slot += 8;
+                        if (current->type && current->type->is_vector()) {
+                            current_stack_slot = (current_stack_slot + 31) & ~31;
+                            current->stack_slot_offset = current_stack_slot;
+                            current_stack_slot += 32;
+                        } else {
+                            current->stack_slot_offset = current_stack_slot;
+                            current_stack_slot += 8;
+                        }
                         result.spill_count++;
                     }
                 }
@@ -3189,7 +3312,7 @@ namespace grass::ir {
 
         for (auto& [vid, interval] : result.intervals) {
             (void)vid;
-            if (interval.type && interval.type->is_floating_point()) {
+            if (interval.type && (interval.type->is_floating_point() || interval.type->is_vector())) {
                 xmm_intervals.push_back(&interval);
             } else {
                 gpr_intervals.push_back(&interval);

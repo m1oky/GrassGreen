@@ -68,6 +68,12 @@ namespace grass::backend {
         XMM8  = 0x0058, XMM9  = 0x0059, XMM10 = 0x005A, XMM11 = 0x005B,
         XMM12 = 0x005C, XMM13 = 0x005D, XMM14 = 0x005E, XMM15 = 0x005F,
 
+        // 256-bit AVX2 / Vector Registers
+        YMM0  = 0x0070, YMM1  = 0x0071, YMM2  = 0x0072, YMM3  = 0x0073,
+        YMM4  = 0x0074, YMM5  = 0x0075, YMM6  = 0x0076, YMM7  = 0x0077,
+        YMM8  = 0x0078, YMM9  = 0x0079, YMM10 = 0x007A, YMM11 = 0x007B,
+        YMM12 = 0x007C, YMM13 = 0x007D, YMM14 = 0x007E, YMM15 = 0x007F,
+
         // Invalid / Sentinel
         None = 0xFFFF
     };
@@ -90,6 +96,7 @@ namespace grass::backend {
             case 4: return 1; // 8-bit high
             case 5: return 8; // XMM scalar double default size in bytes
             case 6: return 8; // RIP
+            case 7: return 32; // YMM 256-bit vector
             default: return 0;
         }
     }
@@ -112,6 +119,14 @@ namespace grass::backend {
 
     inline bool reg_is_xmm(Reg r) {
         return reg_kind(r) == 5;
+    }
+
+    inline bool reg_is_ymm(Reg r) {
+        return reg_kind(r) == 7;
+    }
+
+    inline bool reg_is_vec(Reg r) {
+        return reg_is_xmm(r) || reg_is_ymm(r);
     }
 
     inline bool reg_is_rip(Reg r) {
