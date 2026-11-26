@@ -13,3 +13,12 @@
 
 [$RootKey$\Default Icon]
 ".grass"="$PackageFolder$\Resources\GrassGreen.ico,0"
+
+[$RootKey$\TextMate\Repositories]
+"GrassGreen"="$PackageFolder$\Grammars"
+
+[$RootKey$\TextMate\LanguageConfiguration\GrammarMapping]
+"source.grass"="$PackageFolder$\Grammars\language-configuration.json"
+
+[$RootKey$\TextMate\LanguageConfiguration\ContentTypeMapping]
+"grassgreen"="$PackageFolder$\Grammars\language-configuration.json"

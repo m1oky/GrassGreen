@@ -127,6 +127,39 @@ namespace GrassGreen.VisualStudio.Parser
                     continue;
                 }
 
+                // Single-quoted string / char literal
+                if (c == '\'')
+                {
+                    Advance(); // opening '
+                    bool closed = false;
+                    while (_pos < _length)
+                    {
+                        char ch = Peek();
+                        if (ch == '\\')
+                        {
+                            Advance();
+                            if (_pos < _length) Advance();
+                        }
+                        else if (ch == '\'')
+                        {
+                            Advance();
+                            closed = true;
+                            break;
+                        }
+                        else if (ch == '\r' || ch == '\n')
+                        {
+                            break;
+                        }
+                        else
+                        {
+                            Advance();
+                        }
+                    }
+                    int len = _pos - start;
+                    tokens.Add(new GrassToken(GrassTokenKind.String, _text.Substring(start, len), start, len, tokenLine, tokenCol, !closed));
+                    continue;
+                }
+
                 // Directives: !GrassGreen!
                 if (c == '!')
                 {
@@ -316,6 +349,18 @@ namespace GrassGreen.VisualStudio.Parser
                 {
                     Advance(); Advance();
                     tokens.Add(new GrassToken(GrassTokenKind.Operator, "/=", start, 2, tokenLine, tokenCol));
+                    continue;
+                }
+                if (c == '-' && Peek(1) == '>')
+                {
+                    Advance(); Advance();
+                    tokens.Add(new GrassToken(GrassTokenKind.Operator, "->", start, 2, tokenLine, tokenCol));
+                    continue;
+                }
+                if (c == '=' && Peek(1) == '>')
+                {
+                    Advance(); Advance();
+                    tokens.Add(new GrassToken(GrassTokenKind.Operator, "=>", start, 2, tokenLine, tokenCol));
                     continue;
                 }
                 if (c == '=' && Peek(1) == '=')

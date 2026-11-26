@@ -1,0 +1,259 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "GrassGreen",
+  "scopeName": "source.grass",
+  "fileTypes": [
+    "grass",
+    "gdb"
+  ],
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#directives"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#hex-colors"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#control-keywords"
+    },
+    {
+      "include": "#storage-types"
+    },
+    {
+      "include": "#language-constants"
+    },
+    {
+      "include": "#ui-properties"
+    },
+    {
+      "include": "#functions"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#punctuation"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.grass",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.grass",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "directives": {
+      "patterns": [
+        {
+          "name": "keyword.control.import.grass",
+          "match": "(!)([A-Za-z0-9_+\\-]+)(!)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.import.grass"
+            },
+            "2": {
+              "name": "entity.name.namespace.grass"
+            },
+            "3": {
+              "name": "keyword.control.import.grass"
+            }
+          }
+        },
+        {
+          "name": "keyword.control.import.grass",
+          "match": "@[A-Za-z_][A-Za-z0-9_]*"
+        },
+        {
+          "name": "keyword.control.import.grass",
+          "match": "\\b(import|include|using)\\b"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.grass",
+          "begin": "\"",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.grass"
+            }
+          },
+          "end": "\"",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.grass"
+            }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.grass",
+              "match": "\\\\(?:[\\\\'\"ntr0abfv]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|[0-7]{1,3})"
+            },
+            {
+              "name": "constant.other.color.rgb-value.grass",
+              "match": "#(?:[0-9A-Fa-f]{8}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{4}|[0-9A-Fa-f]{3})\\b"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.grass",
+          "begin": "'",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.grass"
+            }
+          },
+          "end": "'",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.grass"
+            }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.grass",
+              "match": "\\\\(?:[\\\\'\"ntr0abfv]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|[0-7]{1,3})"
+            }
+          ]
+        }
+      ]
+    },
+    "hex-colors": {
+      "patterns": [
+        {
+          "name": "constant.other.color.rgb-value.grass",
+          "match": "#(?:[0-9A-Fa-f]{8}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{4}|[0-9A-Fa-f]{3})\\b"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.grass",
+          "match": "\\b0[xX][0-9A-Fa-f]+(?:_[0-9A-Fa-f]+)*\\b"
+        },
+        {
+          "name": "constant.numeric.grass",
+          "match": "\\b0[bB][01]+(?:_[01]+)*\\b"
+        },
+        {
+          "name": "constant.numeric.grass",
+          "match": "\\b[0-9]+\\.[0-9]+(?:[eE][+-]?[0-9]+)?[fFdD]?\\b"
+        },
+        {
+          "name": "constant.numeric.grass",
+          "match": "\\b[0-9]+(?:[eE][+-]?[0-9]+)?[uUlL]*\\b"
+        }
+      ]
+    },
+    "control-keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.grass",
+          "match": "\\b(if|else|while|for|return|break|continue|match|take|struct|enum|fn|fun|func|switch|case|default|async|thread|wait|sleep|exit|clear|cls|not_clear|clearable|virtual_struct|physical_struct|reboot|poweroff|set|var|let|use|utf|tab|this)\\b"
+        }
+      ]
+    },
+    "storage-types": {
+      "patterns": [
+        {
+          "name": "storage.type.grass",
+          "match": "\\b(int|float|double|bool|string|str|void|char|byte|ptr|const|static|volatile|u8|u16|u32|u64|i8|i16|i32|i64|f32|f64|num|auto|array|Vec3|Mat4)\\b"
+        }
+      ]
+    },
+    "language-constants": {
+      "patterns": [
+        {
+          "name": "constant.language.grass",
+          "match": "\\b(true|false|null|nil|endl|gout|gin|cout|cin|BLACK|BLUE|GREEN|CYAN|RED|MAGENTA|BROWN|LIGHT_GRAY|DARK_GRAY|LIGHT_BLUE|LIGHT_GREEN|LIGHT_CYAN|LIGHT_RED|LIGHT_MAGENTA|YELLOW|WHITE)\\b"
+        }
+      ]
+    },
+    "ui-properties": {
+      "patterns": [
+        {
+          "name": "support.type.property-name.grass",
+          "match": "\\b[a-z][a-z0-9]*(?:-[a-z0-9]+)+\\b(?=\\s*:)"
+        },
+        {
+          "name": "entity.other.attribute-name.grass",
+          "match": "\\b(window|label|button|enter|icon|iconP|video|border-radius-app|border_radius_app|window-ob|ob-window|text-color|font-size|font-style|font-family|header-color|header_color|header-text-color|header_text_color|bg-color|border-color|hover-color|active-color|focus-color|cursor-color|button-color|auto_size_display|z-index|z_index|clock|clock-format|click-ob|set-text|set-val|clear-val|repaint-color|repaint-bg|play-anim|script-start|script-end|on-click|end-click|on-input|end-input|on-hover|end-hover|on-key|end-key|every|end-every|end-wait|end-chek|table|end-table|box-start|box-end|row-start|row-end|col-start|col-end|shadow|radius|glass|pad|middle|left|right|center|align|placeholder|title|size-top|theme|fon|surface|layer|gradient|glow|border|header|size|text|switch|hide|show|toggle|fullscreen|fullscrean|animation|animate|particles|svg|image|vd_plus|engine)\\b"
+        },
+        {
+          "name": "entity.other.attribute-name.grass",
+          "match": "\\b[a-z][a-z0-9]*(?:-[a-z0-9]+)+\\b"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "match": "\\b(?:fn|fun|func|int|float|double|bool|string|str|void|char|byte|ptr|take|u8|u16|u32|u64)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+          "captures": {
+            "1": {
+              "name": "entity.name.function.grass"
+            }
+          }
+        },
+        {
+          "name": "support.function.grass",
+          "match": "\\b(main|len|length|upper|lower|substr|replace|contains|trim|to_str|to_num|typeof|color|time|clock_ms|beep|msgbox|system|input|input\\.getline|gin\\.getline|exists|remove|open|run|print|println|ask|push|pop|abs|sqrt|pow|floor|ceil|round|sin|cos|tan|atan2|deg_to_rad|rad_to_deg|dist2d|lerp|clamp|min|max|rand|discor|rand_int|rand_float|v3_[a-zA-Z0-9_]+|m4_[a-zA-Z0-9_]+|g3d_[a-zA-Z0-9_]+|phys_[a-zA-Z0-9_]+|gfx_[a-zA-Z0-9_]+|g2d_[a-zA-Z0-9_]+|fs_[a-zA-Z0-9_]+|hw_[a-zA-Z0-9_]+|db_[a-zA-Z0-9_]+|tg_[a-zA-Z0-9_]+|lang_[a-zA-Z0-9_]+|ffi_[a-zA-Z0-9_]+|mmio_[a-zA-Z0-9_]+|kbd_[a-zA-Z0-9_]+|audio_[a-zA-Z0-9_]+|thread_[a-zA-Z0-9_]+|mutex_[a-zA-Z0-9_]+|proc_[a-zA-Z0-9_]+|memory_[a-zA-Z0-9_]+|mem_[a-zA-Z0-9_]+|pack_u[0-9]+|json_[a-zA-Z0-9_]+|gui_[a-zA-Z0-9_]+|web_[a-zA-Z0-9_]+|pc_name|user_name|screen_w|screen_h|cpu_cores|ram_total_mb|ram_free_mb|uptime_sec|clip_set|clip_get|cli_args|get_env|read_key|draw_box|menu|progress_bar|malloc|free|sizeof)\\b"
+        },
+        {
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+          "captures": {
+            "1": {
+              "name": "entity.name.function.grass"
+            }
+          }
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.grass",
+          "match": "<<|>>|->|=>|==|!=|<=|>=|&&|\\|\\||\\+=|-=|\\*=|/=|\\+\\+|--|[+\\-*/%&|^~!<>?=]"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.separator.grass",
+          "match": "[,;:.]"
+        },
+        {
+          "name": "punctuation.section.block.grass",
+          "match": "[{}]"
+        },
+        {
+          "name": "punctuation.section.parens.grass",
+          "match": "[()]"
+        },
+        {
+          "name": "punctuation.section.brackets.grass",
+          "match": "[\\[\\]]"
+        }
+      ]
+    }
+  }
+}

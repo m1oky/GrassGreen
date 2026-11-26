@@ -194,6 +194,17 @@ void RegisterFileAssociations(const std::wstring& grgExePath, const std::wstring
         }
     }
 
+    // Регистрация в Applications для grg.exe / grassc.exe на случай выбора через "Открыть с помощью"
+    std::vector<std::wstring> appIds = { L"grg.exe", L"grassc.exe" };
+    for (const auto& app : appIds) {
+        std::wstring appCmdKey = L"Software\\Classes\\Applications\\" + app + L"\\shell\\open\\command";
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, appCmdKey.c_str(), 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+            std::wstring cmdVal = L"\"" + grgExePath + L"\" \"%1\"";
+            RegSetValueExW(hKey, NULL, 0, REG_SZ, (const BYTE*)cmdVal.c_str(), (DWORD)((cmdVal.size() + 1) * sizeof(wchar_t)));
+            RegCloseKey(hKey);
+        }
+    }
+
     // 2. Ассоциация .gdb (GrassDB)
     if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\.gdb", 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
         const wchar_t* progId = L"GrassGreen.Database";
@@ -373,11 +384,13 @@ DWORD WINAPI InstallWorkerThread(LPVOID lpParam) {
     Sleep(60);
 
     // 4. Запись bat/cmd лаунчеров и примеров
+    std::wstring grassRunCmdPath = binDir + L"\\grass-run.cmd";
     writeTextFile(binDir + L"\\grg.cmd", G_PAYLOAD_GRG_CMD);
     writeTextFile(binDir + L"\\grass.cmd", G_PAYLOAD_GRASS_CMD);
     writeTextFile(binDir + L"\\gg.cmd", G_PAYLOAD_GG_CMD);
+    writeTextFile(grassRunCmdPath, G_PAYLOAD_GRASS_RUN_CMD);
     writeTextFile(examplesDir + L"\\io_test.grass", G_PAYLOAD_IO_TEST);
-    AddLogMessage(g_hListLog, L"[4/6] Установлены командные лаунчеры (grg.cmd, grass.cmd, gg.cmd)...");
+    AddLogMessage(g_hListLog, L"[4/6] Установлены командные лаунчеры (grg.cmd, grass.cmd, gg.cmd, grass-run.cmd)...");
     SendMessageW(g_hProgress, PBM_SETPOS, 75, 0);
     Sleep(60);
 
@@ -394,7 +407,7 @@ DWORD WINAPI InstallWorkerThread(LPVOID lpParam) {
     // 6. Ассоциации файлов и ярлыки
     AddLogMessage(g_hListLog, L"[6/6] Настройка ассоциаций Проводника Windows...");
     if (optAssoc) {
-        RegisterFileAssociations(grgPath, iconsDir, g_hListLog);
+        RegisterFileAssociations(grassRunCmdPath, iconsDir, g_hListLog);
     }
     if (optDesktop) {
         CreateDesktopConsoleShortcut(binDir, g_hListLog);
@@ -476,13 +489,15 @@ void PerformSilentInstall() {
     writeTextFile(iconsDir + L"\\logo.svg", G_PAYLOAD_LOGO_SVG);
     writeTextFile(iconsDir + L"\\gdb_logo.svg", G_PAYLOAD_GDB_LOGO_SVG);
 
+    std::wstring grassRunCmdPath = binDir + L"\\grass-run.cmd";
     writeTextFile(binDir + L"\\grg.cmd", G_PAYLOAD_GRG_CMD);
     writeTextFile(binDir + L"\\grass.cmd", G_PAYLOAD_GRASS_CMD);
     writeTextFile(binDir + L"\\gg.cmd", G_PAYLOAD_GG_CMD);
+    writeTextFile(grassRunCmdPath, G_PAYLOAD_GRASS_RUN_CMD);
     writeTextFile(examplesDir + L"\\io_test.grass", G_PAYLOAD_IO_TEST);
 
     AddDirectoryToSystemPath(binDir, NULL);
-    RegisterFileAssociations(grgPath, iconsDir, NULL);
+    RegisterFileAssociations(grassRunCmdPath, iconsDir, NULL);
     CreateDesktopConsoleShortcut(binDir, NULL);
 }
 

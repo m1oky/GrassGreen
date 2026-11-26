@@ -3,7 +3,7 @@
   <Metadata>
     <Identity Id="GrassGreen.VisualStudio.e58f0c97-6c84-4c55-bbf0-8914b4fcf771" Version="4.3.0" Language="en-US" Publisher="m1oky" />
     <DisplayName>GrassGreen Language Support</DisplayName>
-    <Description xml:space="preserve">Full language support for the GrassGreen (G&amp;G) programming language (.grass) in Visual Studio 2022 / 2026: syntax highlighting, real-time error squiggles, and smart IntelliSense completion.</Description>
+    <Description xml:space="preserve">Full language support for the GrassGreen (G&amp;G) programming language (.grass) in Visual Studio 2022 / 2026: multi-color TextMate &amp; MEF syntax highlighting, real-time error squiggles, and smart IntelliSense completion.</Description>
     <Icon>Resources\icon.png</Icon>
     <PreviewImage>Resources\icon.png</PreviewImage>
     <Tags>GrassGreen;grass;gout;gin;language</Tags>

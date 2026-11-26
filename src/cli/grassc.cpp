@@ -3744,10 +3744,58 @@ void InstallGrassGreenEcosystem() {
         ofstream ggcmd(root_dir / "gg.cmd");
         ggcmd << "@echo off\n\"%~dp0bin\\grassc.exe\" ./! %*\n";
     }
+    fs::create_directories(root_dir / "bin");
+    fs::path run_cmd_path = root_dir / "bin" / "grass-run.cmd";
+    {
+        ofstream runcmd(run_cmd_path, ios::binary);
+        runcmd << "@echo off\r\n"
+               << "chcp 65001 >nul\r\n"
+               << "if \"%~1\"==\"\" goto :eof\r\n"
+               << "cd /d \"%~dp1\"\r\n"
+               << "title GrassGreen - %~nx1\r\n"
+               << "if exist \"%~dp0grassc.exe\" (\r\n"
+               << "    \"%~dp0grassc.exe\" -r \"%~1\"\r\n"
+               << ") else (\r\n"
+               << "    \"%~dp0grg.exe\" -r \"%~1\"\r\n"
+               << ")\r\n"
+               << "set \"GG_EXIT=%ERRORLEVEL%\"\r\n"
+               << "echo.\r\n"
+               << "echo ========================================================\r\n"
+               << "echo [GrassGreen] Process exited with code %GG_EXIT%.\r\n"
+               << "echo ========================================================\r\n"
+               << "pause\r\n"
+               << "exit /b %GG_EXIT%\r\n";
+    }
     try {
         fs::copy_file(exe_path, root_dir / "bin" / "grg.exe", fs::copy_options::overwrite_existing);
     } catch (...) {}
-    cout << "[+] Созданы системные команды: grg <файл.grass>, grass <файл.grass> и gg <файл.grass>\n";
+
+    // Регистрация ассоциации .grass в Проводнике Windows (HKCU\Software\Classes)
+    {
+        std::string cmd_str = "\"" + run_cmd_path.string() + "\" \"%1\"";
+        HKEY hk = NULL;
+        if (RegCreateKeyExA(HKEY_CURRENT_USER, "Software\\Classes\\.grass", 0, NULL, 0, KEY_WRITE, NULL, &hk, NULL) == ERROR_SUCCESS) {
+            const char* pid = "GrassGreenFile";
+            RegSetValueExA(hk, NULL, 0, REG_SZ, (const BYTE*)pid, (DWORD)(strlen(pid) + 1));
+            RegCloseKey(hk);
+        }
+        for (const char* pid : { "GrassGreenFile", "GrassGreen.Source", "grass_auto_file" }) {
+            std::string openKey = std::string("Software\\Classes\\") + pid + "\\shell\\open\\command";
+            if (RegCreateKeyExA(HKEY_CURRENT_USER, openKey.c_str(), 0, NULL, 0, KEY_WRITE, NULL, &hk, NULL) == ERROR_SUCCESS) {
+                RegSetValueExA(hk, NULL, 0, REG_SZ, (const BYTE*)cmd_str.c_str(), (DWORD)(cmd_str.size() + 1));
+                RegCloseKey(hk);
+            }
+        }
+        for (const char* app : { "grg.exe", "grassc.exe" }) {
+            std::string appKey = std::string("Software\\Classes\\Applications\\") + app + "\\shell\\open\\command";
+            if (RegCreateKeyExA(HKEY_CURRENT_USER, appKey.c_str(), 0, NULL, 0, KEY_WRITE, NULL, &hk, NULL) == ERROR_SUCCESS) {
+                RegSetValueExA(hk, NULL, 0, REG_SZ, (const BYTE*)cmd_str.c_str(), (DWORD)(cmd_str.size() + 1));
+                RegCloseKey(hk);
+            }
+        }
+    }
+    cout << "[+] Созданы системные команды: grg <файл.grass>, grass <файл.grass>, gg <файл.grass> и bin/grass-run.cmd\n";
+    cout << "[+] Ассоциация Проводника Windows для .grass настроена с паузой после завершения.\n";
     cout << "[+] Бинарник grg.exe продублирован в bin/grg.exe для интеграции в PATH.\n";
 #else
     try {
@@ -4652,6 +4700,15 @@ bool ProcessCompilation(CompilerOptions& opt) {
         if (!nres.exe_file_created.empty()) {
             if (opt.lang_ru) cout << "[GrassNativeCompiler]: Успешно слинкован исполняемый файл -> " << nres.exe_file_created << "\n";
             else cout << "[GrassNativeCompiler]: Executable linked successfully -> " << nres.exe_file_created << "\n";
+            if (!opt.run_after_build) {
+                if (opt.lang_ru) {
+                    cout << "[GrassNativeCompiler]: Сборка завершена без запуска. Укажите -r для немедленного запуска или выполните: "
+                         << nres.exe_file_created << "\n";
+                } else {
+                    cout << "[GrassNativeCompiler]: Build complete (not executed). Use -r to run immediately, or execute: "
+                         << nres.exe_file_created << "\n";
+                }
+            }
         }
 
         auto t_native_end = chrono::high_resolution_clock::now();
@@ -5024,12 +5081,38 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
+#if defined(_WIN32)
+        // Если .grass запущен напрямую из Проводника (отдельное новое окно консоли только с одним процессом),
+        // переключаем рабочую папку на каталог файла, включаем запуск (-r) и не закрываем консоль сразу.
+        DWORD consoleProcs[4] = { 0 };
+        bool launchedStandalone = (argc == 2 && GetConsoleProcessList(consoleProcs, 4) <= 1);
+        if (launchedStandalone) {
+            std::error_code ec;
+            fs::path inp(opt.input_file);
+            if (!inp.parent_path().empty() && fs::exists(inp.parent_path(), ec)) {
+                fs::current_path(inp.parent_path(), ec);
+                opt.input_file = inp.filename().string();
+            }
+            if (!opt.explicit_run && !opt.emit_bytecode_only && !opt.emit_exe && opt.output_file.empty()) {
+                opt.run_after_build = true;
+            }
+        }
+#endif
+
         bool comp_ok = ProcessCompilation(opt);
+        int exit_code = comp_ok ? 0 : 1;
 
 #if defined(_WIN32)
+        if (launchedStandalone) {
+            cout << "\n========================================================\n"
+                 << "[GrassGreen] Process exited with code " << exit_code << ".\n"
+                 << "========================================================\n";
+            cout.flush();
+            std::system("pause");
+        }
         if (hIn != INVALID_HANDLE_VALUE) SetConsoleMode(hIn, origInMode);
 #endif
-        return comp_ok ? 0 : 1;
+        return exit_code;
     }
 
     cout << "========================================================\n";

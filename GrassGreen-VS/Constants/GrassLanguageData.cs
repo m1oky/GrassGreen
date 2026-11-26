@@ -37,7 +37,7 @@ namespace GrassGreen.VisualStudio.Constants
     {
         public static readonly HashSet<string> Directives = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "!GrassGreen!", "!baremetal!", "!bm!", "!kernel!", "!BareMetal!",
+            "!GrassGreen!", "!disp!", "!baremetal!", "!bm!", "!kernel!", "!BareMetal!",
             "!hardware!", "!hw!", "!sysinfo!", "!device!",
             "!time!", "!interface!", "!gui!", "!GrassGUI!",
             "!FastMath!", "!CoreMath!", "!memory!", "!random!",
@@ -47,23 +47,44 @@ namespace GrassGreen.VisualStudio.Constants
             "!asm!", "!GrassASM!", "!assembler!", "!audio!", "!sound!", "!GrassAudio!",
             "!mmio!", "!io!", "!thread!", "!vd!", "!vd+!", "!VD+!",
             "!ffi!", "!langgen!", "!languages!", "!lang!",
-            "!math3d!", "!Math3D!", "!gfx3d!", "!Gfx3D!", "!physics!", "!Physics!"
+            "!math3d!", "!Math3D!", "!gfx3d!", "!Gfx3D!", "!3d!", "!3D!", "!physics!", "!Physics!"
         };
 
         public static readonly HashSet<string> Keywords = new HashSet<string>(StringComparer.Ordinal)
         {
-            "take", "set", "volatile", "static", "const", "struct", "array",
+            "take", "set", "volatile", "static", "const", "struct", "enum", "array",
             "thread", "async", "return", "if", "else", "while", "for", "break",
-            "continue", "switch", "tab", "use", "utf", "not_clear", "clear", "cls",
+            "continue", "match", "switch", "case", "default", "tab", "use", "utf", "not_clear", "clear", "cls",
             "clearable", "virtual_struct", "physical_struct", "reboot", "poweroff",
-            "folder", "dir", "file", "import", "include",
-            "fn", "fun", "func", "var", "let", "check", "void", "this"
+            "folder", "dir", "file", "import", "include", "using",
+            "fn", "fun", "func", "var", "let", "check", "this"
         };
 
         public static readonly HashSet<string> Types = new HashSet<string>(StringComparer.Ordinal)
         {
             "int", "void", "string", "float", "double", "u8", "u16", "u32", "u64",
-            "bool", "char", "array", "num", "str", "auto"
+            "i8", "i16", "i32", "i64", "f32", "f64", "byte", "ptr", "const",
+            "bool", "char", "array", "num", "str", "auto", "Vec3", "Mat4"
+        };
+
+        public static readonly HashSet<string> UiProperties = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "window", "label", "button", "enter", "icon", "iconP", "video",
+            "border-radius-app", "border_radius_app", "window-ob", "ob-window",
+            "text-color", "font-size", "font-style", "font-family",
+            "header-color", "header_color", "header-text-color", "header_text_color",
+            "bg-color", "border-color", "hover-color", "active-color", "focus-color",
+            "cursor-color", "button-color", "auto_size_display", "z-index", "z_index",
+            "clock", "clock-format", "click-ob", "set-text", "set-val", "clear-val",
+            "repaint-color", "repaint-bg", "play-anim", "script-start", "script-end",
+            "on-click", "end-click", "on-input", "end-input", "on-hover", "end-hover",
+            "on-key", "end-key", "every", "end-every", "table", "end-table",
+            "box-start", "box-end", "row-start", "row-end", "col-start", "col-end",
+            "shadow", "radius", "glass", "pad", "middle", "left", "right", "center",
+            "align", "placeholder", "title", "size-top", "theme", "fon", "surface",
+            "layer", "gradient", "glow", "border", "header", "size", "text", "switch",
+            "hide", "show", "toggle", "fullscreen", "fullscrean", "animation", "animate",
+            "particles", "svg", "image", "vd_plus", "engine"
         };
 
         public static readonly HashSet<string> Streams = new HashSet<string>(StringComparer.Ordinal)

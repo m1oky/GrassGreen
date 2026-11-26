@@ -11,7 +11,11 @@ namespace GrassGreen.VisualStudio.Classification
         public const string Directive = "grassgreen.directive";
         public const string Type = "grassgreen.type";
         public const string Builtin = "grassgreen.builtin";
+        public const string Function = "grassgreen.function";
+        public const string UiProperty = "grassgreen.uiproperty";
         public const string String = "grassgreen.string";
+        public const string Escape = "grassgreen.escape";
+        public const string HexColor = "grassgreen.hexcolor";
         public const string Number = "grassgreen.number";
         public const string Comment = "grassgreen.comment";
         public const string Operator = "grassgreen.operator";
@@ -34,13 +38,33 @@ namespace GrassGreen.VisualStudio.Classification
 
         [Export(typeof(ClassificationTypeDefinition))]
         [Name(Builtin)]
-        [BaseDefinition(PredefinedClassificationTypeNames.SymbolDefinition)]
+        [BaseDefinition(PredefinedClassificationTypeNames.MarkupNode)]
         public static ClassificationTypeDefinition BuiltinDefinition = null;
+
+        [Export(typeof(ClassificationTypeDefinition))]
+        [Name(Function)]
+        [BaseDefinition(PredefinedClassificationTypeNames.MarkupNode)]
+        public static ClassificationTypeDefinition FunctionDefinition = null;
+
+        [Export(typeof(ClassificationTypeDefinition))]
+        [Name(UiProperty)]
+        [BaseDefinition(PredefinedClassificationTypeNames.MarkupAttribute)]
+        public static ClassificationTypeDefinition UiPropertyDefinition = null;
 
         [Export(typeof(ClassificationTypeDefinition))]
         [Name(String)]
         [BaseDefinition(PredefinedClassificationTypeNames.String)]
         public static ClassificationTypeDefinition StringDefinition = null;
+
+        [Export(typeof(ClassificationTypeDefinition))]
+        [Name(Escape)]
+        [BaseDefinition(PredefinedClassificationTypeNames.Literal)]
+        public static ClassificationTypeDefinition EscapeDefinition = null;
+
+        [Export(typeof(ClassificationTypeDefinition))]
+        [Name(HexColor)]
+        [BaseDefinition(PredefinedClassificationTypeNames.MarkupAttributeValue)]
+        public static ClassificationTypeDefinition HexColorDefinition = null;
 
         [Export(typeof(ClassificationTypeDefinition))]
         [Name(Number)]
@@ -59,7 +83,7 @@ namespace GrassGreen.VisualStudio.Classification
 
         [Export(typeof(ClassificationTypeDefinition))]
         [Name(Constant)]
-        [BaseDefinition(PredefinedClassificationTypeNames.Keyword)]
+        [BaseDefinition(PredefinedClassificationTypeNames.Literal)]
         public static ClassificationTypeDefinition ConstantDefinition = null;
     }
 }

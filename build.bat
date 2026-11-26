@@ -55,6 +55,7 @@ if %ERRORLEVEL% equ 0 (
         if not exist "C:\GrassGreen\bin" mkdir "C:\GrassGreen\bin"
         if not exist "C:\GrassGreen\stdlib" mkdir "C:\GrassGreen\stdlib"
         copy /Y bin\*.exe "C:\GrassGreen\bin\" >nul
+        if exist "bin\*.cmd" copy /Y bin\*.cmd "C:\GrassGreen\bin\" >nul
         if exist "bin\grassvm.dll" copy /Y bin\grassvm.dll "C:\GrassGreen\bin\" >nul
         if exist "bin\grassvm.lib" copy /Y bin\grassvm.lib "C:\GrassGreen\bin\" >nul
         xcopy /Y /E /I stdlib\* "C:\GrassGreen\stdlib\" >nul

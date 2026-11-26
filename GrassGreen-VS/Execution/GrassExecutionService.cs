@@ -237,7 +237,7 @@ namespace GrassGreen.VisualStudio.Execution
             Log($"Исполняемый файл: {compiler} \"{filePath}\"");
 
             // Запуск в отдельном окне командной строки для полноценного консольного I/O
-            string cmdArgs = $"/c title GrassGreen: {fileName} && \"{compiler}\" \"{filePath}\" & pause";
+            string cmdArgs = $"/c title GrassGreen: {fileName} && \"{compiler}\" -r \"{filePath}\" & echo. & echo [GrassGreen] Exit code: %ERRORLEVEL% & pause";
 
             var psi = new ProcessStartInfo
             {

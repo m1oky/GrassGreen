@@ -116,7 +116,25 @@ int main() {
 
     out << "const char* const G_PAYLOAD_GRG_CMD = \"@echo off\\r\\n\\\"%~dp0grg.exe\\\" %*\\r\\n\";\n";
     out << "const char* const G_PAYLOAD_GRASS_CMD = \"@echo off\\r\\n\\\"%~dp0grg.exe\\\" %*\\r\\n\";\n";
-    out << "const char* const G_PAYLOAD_GG_CMD = \"@echo off\\r\\n\\\"%~dp0grg.exe\\\" %*\\r\\n\";\n\n";
+    out << "const char* const G_PAYLOAD_GG_CMD = \"@echo off\\r\\n\\\"%~dp0grg.exe\\\" %*\\r\\n\";\n";
+    out << "const char* const G_PAYLOAD_GRASS_RUN_CMD =\n"
+           "    \"@echo off\\r\\n\"\n"
+           "    \"chcp 65001 >nul\\r\\n\"\n"
+           "    \"if \\\"%~1\\\"==\\\"\\\" goto :eof\\r\\n\"\n"
+           "    \"cd /d \\\"%~dp1\\\"\\r\\n\"\n"
+           "    \"title GrassGreen - %~nx1\\r\\n\"\n"
+           "    \"if exist \\\"%~dp0grassc.exe\\\" (\\r\\n\"\n"
+           "    \"    \\\"%~dp0grassc.exe\\\" -r \\\"%~1\\\"\\r\\n\"\n"
+           "    \") else (\\r\\n\"\n"
+           "    \"    \\\"%~dp0grg.exe\\\" -r \\\"%~1\\\"\\r\\n\"\n"
+           "    \")\\r\\n\"\n"
+           "    \"set \\\"GG_EXIT=%ERRORLEVEL%\\\"\\r\\n\"\n"
+           "    \"echo.\\r\\n\"\n"
+           "    \"echo ========================================================\\r\\n\"\n"
+           "    \"echo [GrassGreen] Process exited with code %GG_EXIT%.\\r\\n\"\n"
+           "    \"echo ========================================================\\r\\n\"\n"
+           "    \"pause\\r\\n\"\n"
+           "    \"exit /b %GG_EXIT%\\r\\n\";\n\n";
 
     out << "const char* const G_PAYLOAD_LOGO_SVG = \"" << EscapeString(logoSvgText) << "\";\n";
     out << "const char* const G_PAYLOAD_GDB_LOGO_SVG = \"" << EscapeString(gdbSvgText) << "\";\n\n";
