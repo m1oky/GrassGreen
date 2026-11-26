@@ -56,7 +56,7 @@ float tan(float x) {
 }
 
 // Fast quadratic discriminant: b*b - 4*a*c
-take discor(take a, take b, take c) {
+take discor3(take a, take b, take c) {
     return b * b - 4 * a * c;
 }
 

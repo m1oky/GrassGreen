@@ -1013,7 +1013,19 @@ int64_t memory_free_block(int64_t block_addr) {
 
         bool lower_declaration(std::string& error) {
             if (peek().kind == TOK_LIB) {
-                advance();
+                std::string lib = advance().text;
+                if (lib == "!GrassWeb!" || lib == "!GREEN_WWW1!") {
+                    while (peek().kind != TOK_EOF) advance();
+                    if (!module_.get_function("main")) {
+                        ir::IRFunction* mfn = module_.create_function("main", ctx_.get_i32_type());
+                        builder_.set_function(mfn);
+                        builder_.set_insert_point(mfn->create_block("entry"));
+                        ir::ValueId src_str = builder_.create_call(add_rodata_string(source_path_), ctx_.get_ptr_type(ctx_.get_i8_type()), {});
+                        builder_.create_call("web_start", ctx_.get_void_type(), { src_str });
+                        builder_.create_ret(builder_.create_const_int(ctx_.get_i32_type(), 0));
+                        mfn->rebuild_cfg();
+                    }
+                }
                 return true;
             }
             if (peek().kind == TOK_SEMI) {
@@ -1111,7 +1123,7 @@ int64_t memory_free_block(int64_t block_addr) {
 
     private:
         static bool is_type_or_func_keyword(const std::string& s) {
-            return s == "int" || s == "take" || s == "void" || s == "fn" ||
+            return s == "int" || s == "take" || s == "void" || s == "fn" || s == "fun" ||
                    s == "double" || s == "float" || s == "string" || s == "bool" ||
                    s == "uint8" || s == "uint16" || s == "uint32" || s == "uint64" ||
                    s == "int8" || s == "int16" || s == "int32" || s == "int64" ||
@@ -1228,6 +1240,30 @@ int64_t memory_free_block(int64_t block_addr) {
                     continue;
                 }
 
+                if (peek().kind == TOK_IDENT && (peek(1).kind == TOK_COLON || peek(1).kind == TOK_ASSIGN)) {
+                    std::string mname = advance().text;
+                    advance(); // ':' or '='
+                    ir::IRType* ftype = ctx_.get_i64_type();
+                    if (is_vec_type_start()) {
+                        ir::IRType* ve = nullptr;
+                        std::string ves, vsn;
+                        ftype = parse_vec_ir_type(ve, ves, vsn);
+                        if (!match(TOK_STAR) && oop_mgr_) {
+                            oop_mgr_->add_destructor();
+                        } else {
+                            ftype = ctx_.get_ptr_type(ftype);
+                        }
+                    } else if (peek().kind == TOK_IDENT) {
+                        ftype = parse_type_name(advance().text);
+                        while (match(TOK_STAR)) ftype = ctx_.get_ptr_type(ftype);
+                    }
+                    field_types.push_back(ftype);
+                    field_names.push_back(mname);
+                    if (oop_mgr_) oop_mgr_->add_field(mname, ftype);
+                    match(TOK_COMMA);
+                    match(TOK_SEMI);
+                    continue;
+                }
                 bool is_struct_field_or_ret = (oop_mgr_ && oop_mgr_->has_class(peek().text));
                 bool is_vec_field_or_ret = is_vec_type_start();
                 if (peek().kind == TOK_IDENT && (is_var_keyword(peek().text) || is_type_or_func_keyword(peek().text) || is_struct_field_or_ret || is_vec_field_or_ret)) {
@@ -1562,6 +1598,88 @@ int64_t memory_free_block(int64_t block_addr) {
         bool parse_statement(std::string& error) {
             last_struct_name_.clear();
             if (match(TOK_SEMI)) return true;
+            if (match_ident("volatile")) return parse_statement(error);
+
+            if (match_ident("clear")) {
+                if (match(TOK_LPAREN)) match(TOK_RPAREN);
+                match(TOK_SEMI);
+                builder_.create_call("clear", ctx_.get_void_type(), {});
+                return true;
+            }
+            if (match_ident("not_clear")) {
+                if (peek().kind == TOK_LBRACE) {
+                    builder_.create_call("not_clear_on", ctx_.get_void_type(), {});
+                    bool ok = parse_statement(error);
+                    builder_.create_call("not_clear_off", ctx_.get_void_type(), {});
+                    return ok;
+                }
+                if (match(TOK_LPAREN)) {
+                    if (peek().kind != TOK_RPAREN) parse_expression(error);
+                    match(TOK_RPAREN);
+                }
+                match(TOK_SEMI);
+                builder_.create_call("not_clear_on", ctx_.get_void_type(), {});
+                return true;
+            }
+            if (peek().kind == TOK_IDENT && peek().text == "window" && peek(1).kind == TOK_LBRACE) {
+                advance(); advance(); // 'window', '{'
+                int depth = 1;
+                while (depth > 0 && peek().kind != TOK_EOF) {
+                    if (peek().kind == TOK_LBRACE) depth++;
+                    else if (peek().kind == TOK_RBRACE) depth--;
+                    advance();
+                }
+                match(TOK_SEMI);
+                builder_.create_call("gui_show", ctx_.get_void_type(), {});
+                return true;
+            }
+            if (peek().kind == TOK_IDENT && peek().text == "agent" && peek(1).kind == TOK_LBRACE) {
+                advance(); advance(); // 'agent', '{'
+                int depth = 1;
+                while (depth > 0 && peek().kind != TOK_EOF) {
+                    if (peek().kind == TOK_LBRACE) depth++;
+                    else if (peek().kind == TOK_RBRACE) depth--;
+                    advance();
+                }
+                match(TOK_SEMI);
+                return true;
+            }
+            if (peek().kind == TOK_IDENT && peek().text == "create_serv" && peek(1).kind == TOK_LPAREN) {
+                advance(); advance(); // 'create_serv', '('
+                int pdepth = 1;
+                while (pdepth > 0 && peek().kind != TOK_EOF) {
+                    if (peek().kind == TOK_LPAREN) pdepth++;
+                    else if (peek().kind == TOK_RPAREN) pdepth--;
+                    advance();
+                }
+                if (peek().kind == TOK_LBRACE) {
+                    advance();
+                    int bdepth = 1;
+                    while (bdepth > 0 && peek().kind != TOK_EOF) {
+                        if (peek().kind == TOK_LBRACE) bdepth++;
+                        else if (peek().kind == TOK_RBRACE) bdepth--;
+                        advance();
+                    }
+                }
+                match(TOK_SEMI);
+                ir::ValueId ip_s = builder_.create_call(add_rodata_string("127.0.0.1"), ctx_.get_ptr_type(ctx_.get_i8_type()), {});
+                ir::ValueId empty_s = builder_.create_call(add_rodata_string(""), ctx_.get_ptr_type(ctx_.get_i8_type()), {});
+                builder_.create_call("create_serv", ctx_.get_i64_type(), { ip_s, builder_.create_const_i64(8443), empty_s, empty_s });
+                return true;
+            }
+            if (peek().kind == TOK_IDENT && peek().text == "async" && peek(1).kind == TOK_SEMI) {
+                advance();
+                match(TOK_SEMI);
+                return true;
+            }
+            if (peek().kind == TOK_IDENT && peek().text == "async" && peek(1).kind == TOK_IDENT) {
+                advance();
+                std::string expr_err;
+                parse_expression(expr_err);
+                if (!expr_err.empty()) { error = expr_err; return false; }
+                match(TOK_SEMI);
+                return true;
+            }
 
             // Block { ... }
             if (match(TOK_LBRACE)) {
@@ -3304,6 +3422,83 @@ int64_t memory_free_block(int64_t block_addr) {
                         args.insert(args.begin(), builder_.create_const_int(ctx_.get_i64_type(), 1));
                     } else if ((ident == "phys_set_pos" || ident == "phys_set_vel" || ident == "phys_impulse") && args.size() == 4) {
                         args.insert(args.begin(), builder_.create_const_int(ctx_.get_i64_type(), 1));
+                    } else if (ident == "g2d_clear" && args.size() >= 3) {
+                        ident = "g2d_clear_rgb";
+                        target_call_name = ident;
+                    } else if (ident == "g2d_key_down" && args.size() == 1) {
+                        ir::IRType* at0 = builder_.get_function()->has_value(args[0]) ? builder_.get_function()->get_value(args[0]).type : nullptr;
+                        if (at0 && at0->is_pointer()) {
+                            ident = "g2d_key_down_str";
+                            target_call_name = ident;
+                        }
+                    } else if (ident == "g2d_mouse_btn" && args.empty()) {
+                        args.push_back(builder_.create_const_i64(0));
+                    } else if (ident == "g2d_cam_set") {
+                        while (args.size() < 2) args.push_back(builder_.create_const_f64(0.0));
+                        if (args.size() == 2) args.push_back(builder_.create_const_f64(1.0));
+                        if (args.size() == 3) args.push_back(builder_.create_const_f64(0.0));
+                    } else if (ident == "g2d_emit_particles") {
+                        if (args.size() == 3) args.push_back(builder_.create_const_i64(0xFFFF00));
+                        if (args.size() >= 5) {
+                            ident = "g2d_emit_particles_ex";
+                            target_call_name = ident;
+                            if (args.size() == 5) args.push_back(builder_.create_const_f64(1.0));
+                        }
+                    } else if (ident == "g2d_update_particles" && args.empty()) {
+                        args.push_back(builder_.create_const_f64(1.0 / 60.0));
+                    } else if (ident == "g2d_draw_sprite") {
+                        if (args.size() == 5) args.push_back(builder_.create_const_f64(0.0));
+                        if (args.size() == 6) args.push_back(builder_.create_const_f64(1.0));
+                    } else if (ident == "g2d_bind_framebuffer" && args.size() == 3) {
+                        args.push_back(builder_.create_const_i64(0));
+                    } else if (ident == "g2d_line" && args.size() == 5) {
+                        args.push_back(builder_.create_const_i64(1));
+                    } else if (ident == "gfx_line" && args.size() == 5) {
+                        args.push_back(builder_.create_const_i64(1));
+                    } else if (ident == "gfx_frame" && args.empty()) {
+                        args.push_back(builder_.create_const_i64(60));
+                    } else if ((ident == "synth_play" || ident == "synth") && args.size() == 3) {
+                        args.push_back(builder_.create_const_f64(80.0));
+                    } else if (ident == "tone" && args.size() == 2) {
+                        args.push_back(builder_.create_const_f64(80.0));
+                    } else if (ident == "beep") {
+                        if (args.empty()) args.push_back(builder_.create_const_f64(750.0));
+                        if (args.size() == 1) args.push_back(builder_.create_const_i64(300));
+                    } else if (ident == "sound_play" && args.size() == 1) {
+                        args.push_back(builder_.create_const_i64(0));
+                    } else if (ident == "bind_synth" && args.size() == 4) {
+                        args.push_back(builder_.create_const_f64(80.0));
+                    } else if (ident == "attach_sound" && args.size() == 4) {
+                        args.push_back(builder_.create_const_f64(80.0));
+                    } else if (ident == "tg_poll" && args.empty()) {
+                        args.push_back(builder_.create_const_i64(2));
+                    } else if (ident == "tg_send_photo" && args.size() == 2) {
+                        args.push_back(builder_.create_call(add_rodata_string(""), ctx_.get_ptr_type(ctx_.get_i8_type()), {}));
+                    } else if (ident == "sleep") {
+                        ident = "grass_sleep_sec";
+                        target_call_name = ident;
+                        if (args.empty()) args.push_back(builder_.create_const_i64(0));
+                    } else if (ident == "ping" && args.size() == 1) {
+                        args.push_back(builder_.create_const_i64(80));
+                    } else if (ident == "connect" && args.size() == 2) {
+                        ident = "net_connect_host";
+                        target_call_name = ident;
+                    } else if (ident == "accept" && args.empty()) {
+                        ident = "net_accept_srv";
+                        target_call_name = ident;
+                    } else if (ident == "net_close" && args.empty()) {
+                        ident = "net_close_srv";
+                        target_call_name = ident;
+                    } else if (ident == "web_compile" && args.size() == 1) {
+                        args.push_back(builder_.create_call(add_rodata_string(""), ctx_.get_ptr_type(ctx_.get_i8_type()), {}));
+                    } else if ((ident == "thread_join" || ident == "mutex_lock") && args.size() == 1) {
+                        args.push_back(builder_.create_const_i64(0));
+                    } else if ((ident == "thread" || ident == "async") && !args.empty()) {
+                        ir::ValueId fn_arg = args[0];
+                        ir::ValueId param_arg = (args.size() >= 2) ? coerce_type(args[1], ctx_.get_ptr_type()) : builder_.create_const_int(ctx_.get_ptr_type(), 0);
+                        args = { coerce_type(fn_arg, ctx_.get_ptr_type()), param_arg };
+                        ident = "grass_native_thread_spawn";
+                        target_call_name = ident;
                     }
 
                     const native::NativeFunctionDesc* std_fn = native::GrassNativeStdlib::instance().find_function(ident);
@@ -3357,8 +3552,17 @@ int64_t memory_free_block(int64_t block_addr) {
                 }
 
                 // Variable access
+                if (ident == "proc_mem") {
+                    last_struct_name_.clear();
+                    return builder_.create_call("hw_ram_used", ctx_.get_i64_type(), {});
+                }
                 const VarBinding* var = lookup_var(ident);
                 if (!var) {
+                    if (ir::IRFunction* fn_ref = module_.get_function(ident)) {
+                        (void)fn_ref;
+                        last_struct_name_.clear();
+                        return builder_.create_const_int(ctx_.get_ptr_type(ctx_.get_void_type()), 0);
+                    }
                     error = "Undeclared identifier: " + ident;
                     return 0;
                 }

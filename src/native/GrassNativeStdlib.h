@@ -89,6 +89,7 @@ namespace grass::native {
         void populate_memory(ir::IRContext& ctx);
         void populate_thread(ir::IRContext& ctx);
         void populate_ffi(ir::IRContext& ctx);
+        void populate_extra(ir::IRContext& ctx);
     };
 
 } // namespace grass::native

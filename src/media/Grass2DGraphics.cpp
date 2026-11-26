@@ -438,6 +438,164 @@ void update_particles(float delta) {
     }
 }
 
+static uint32_t g_active_fill_color = 0xFFFFFF;
+
+static uint32_t parse_hex_color_u32(const std::string& hex) {
+    if (hex.empty()) return 0xFFFFFF;
+    const char* s = hex.c_str();
+    if (s[0] == '#') s++;
+    else if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) s += 2;
+    return static_cast<uint32_t>(strtoul(s, nullptr, 16)) & 0x00FFFFFFu;
+}
+
+static inline void put_pixel_2d(int x, int y, uint32_t color) {
+    if (!g_framebuffer || x < 0 || x >= g_width || y < 0 || y >= g_height) return;
+    g_framebuffer[y * g_width + x] = color;
+}
+
+void draw_rect(int x, int y, int w, int h, uint32_t color) {
+    if (!g_framebuffer || w <= 0 || h <= 0) return;
+    int x0 = max(0, x);
+    int y0 = max(0, y);
+    int x1 = min(g_width, x + w);
+    int y1 = min(g_height, y + h);
+    for (int py = y0; py < y1; ++py) {
+        for (int px = x0; px < x1; ++px) {
+            g_framebuffer[py * g_width + px] = color;
+        }
+    }
+}
+
+void draw_circle(int cx, int cy, int r, uint32_t color) {
+    if (!g_framebuffer || r <= 0) return;
+    int r2 = r * r;
+    int y0 = max(0, cy - r);
+    int y1 = min(g_height - 1, cy + r);
+    int x0 = max(0, cx - r);
+    int x1 = min(g_width - 1, cx + r);
+    for (int py = y0; py <= y1; ++py) {
+        int dy = py - cy;
+        for (int px = x0; px <= x1; ++px) {
+            int dx = px - cx;
+            if (dx * dx + dy * dy <= r2) {
+                g_framebuffer[py * g_width + px] = color;
+            }
+        }
+    }
+}
+
+void draw_line(int x1, int y1, int x2, int y2, uint32_t color, int width) {
+    if (!g_framebuffer) return;
+    int dx = abs(x2 - x1), sx = (x1 < x2) ? 1 : -1;
+    int dy = -abs(y2 - y1), sy = (y1 < y2) ? 1 : -1;
+    int err = dx + dy;
+    int half = max(0, (width - 1) / 2);
+    while (true) {
+        if (half == 0) {
+            put_pixel_2d(x1, y1, color);
+        } else {
+            draw_rect(x1 - half, y1 - half, width, width, color);
+        }
+        if (x1 == x2 && y1 == y2) break;
+        int e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x1 += sx; }
+        if (e2 <= dx) { err += dx; y1 += sy; }
+    }
+}
+
+void draw_text(int x, int y, const std::string& str, int size, uint32_t color) {
+#if defined(_WIN32)
+    if (g_hdc && !str.empty()) {
+        int r = (color >> 16) & 0xFF;
+        int g = (color >> 8) & 0xFF;
+        int b = color & 0xFF;
+        SetBkMode(g_hdc, TRANSPARENT);
+        SetTextColor(g_hdc, RGB(r, g, b));
+        HFONT hFont = CreateFontA(-(size > 0 ? size : 16), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                                  DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                  DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, "Consolas");
+        HFONT oldFont = (HFONT)SelectObject(g_hdc, hFont);
+        TextOutA(g_hdc, x, y, str.c_str(), (int)str.size());
+        SelectObject(g_hdc, oldFont);
+        DeleteObject(hFont);
+    }
+#else
+    (void)x; (void)y; (void)str; (void)size; (void)color;
+#endif
+}
+
+void close_window() {
+    g_is_open = false;
+#if defined(_WIN32)
+    if (g_hwnd) {
+        DestroyWindow(g_hwnd);
+        g_hwnd = NULL;
+    }
+#endif
+}
+
+bool create_canvas(int w, int h) {
+    if (w <= 0) w = 800;
+    if (h <= 0) h = 600;
+    g_width = w;
+    g_height = h;
+    g_pitch = w * 4;
+    if (g_framebuffer) {
+        delete[] g_framebuffer;
+    }
+    g_framebuffer = new uint32_t[w * h];
+    clear(0.0f, 0.0f, 0.0f);
+    return true;
+}
+
+void fill_color(const std::string& hex_color) {
+    g_active_fill_color = parse_hex_color_u32(hex_color);
+}
+
+void canvas_rect(int x, int y, int w, int h) {
+    draw_rect(x, y, w, h, g_active_fill_color);
+}
+
+void canvas_circle(int cx, int cy, int r) {
+    draw_circle(cx, cy, r, g_active_fill_color);
+}
+
+void canvas_line(int x1, int y1, int x2, int y2) {
+    draw_line(x1, y1, x2, y2, g_active_fill_color, 1);
+}
+
+bool save_image(const std::string& path) {
+    if (!g_framebuffer || g_width <= 0 || g_height <= 0 || path.empty()) return false;
+    FILE* f = fopen(path.c_str(), "wb");
+    if (!f) return false;
+    uint32_t row_size = (uint32_t)(g_width * 3);
+    uint32_t pad = (4 - (row_size % 4)) % 4;
+    uint32_t data_size = (row_size + pad) * (uint32_t)g_height;
+    uint32_t file_size = 54 + data_size;
+    uint8_t hdr[54] = {0};
+    hdr[0] = 'B'; hdr[1] = 'M';
+    hdr[2] = file_size & 0xFF; hdr[3] = (file_size >> 8) & 0xFF;
+    hdr[4] = (file_size >> 16) & 0xFF; hdr[5] = (file_size >> 24) & 0xFF;
+    hdr[10] = 54; hdr[14] = 40;
+    hdr[18] = g_width & 0xFF; hdr[19] = (g_width >> 8) & 0xFF;
+    hdr[20] = (g_width >> 16) & 0xFF; hdr[21] = (g_width >> 24) & 0xFF;
+    hdr[22] = g_height & 0xFF; hdr[23] = (g_height >> 8) & 0xFF;
+    hdr[24] = (g_height >> 16) & 0xFF; hdr[25] = (g_height >> 24) & 0xFF;
+    hdr[26] = 1; hdr[28] = 24;
+    fwrite(hdr, 1, 54, f);
+    uint8_t zeros[3] = {0, 0, 0};
+    for (int y = g_height - 1; y >= 0; --y) {
+        for (int x = 0; x < g_width; ++x) {
+            uint32_t c = g_framebuffer[y * g_width + x];
+            uint8_t bgr[3] = { (uint8_t)(c & 0xFF), (uint8_t)((c >> 8) & 0xFF), (uint8_t)((c >> 16) & 0xFF) };
+            fwrite(bgr, 1, 3, f);
+        }
+        if (pad > 0) fwrite(zeros, 1, pad, f);
+    }
+    fclose(f);
+    return true;
+}
+
 }
 
 // Backward compatibility implementations
@@ -445,12 +603,26 @@ bool Grass2DGraphics::init(const std::string& title, int width, int height) {
     return Grass2D::init_window(width, height, title);
 }
 bool Grass2DGraphics::running() { return Grass2D::is_open(); }
-void Grass2DGraphics::clear(const std::string& hex) { Grass2D::clear(0, 0, 0); }
-void Grass2DGraphics::rect(int x, int y, int w, int h, const std::string& hex) {}
-void Grass2DGraphics::circle(int x, int y, int r, const std::string& hex) {}
-void Grass2DGraphics::line(int x1, int y1, int x2, int y2, const std::string& hex, int w) {}
-void Grass2DGraphics::text(int x, int y, const std::string& str, int sz, const std::string& hex) {}
-void Grass2DGraphics::draw_svg(const std::string& p, int x, int y, int w, int h) {}
+void Grass2DGraphics::clear(const std::string& hex) {
+    uint32_t c = Grass2D::parse_hex_color_u32(hex);
+    Grass2D::clear(((c >> 16) & 0xFF) / 255.0f, ((c >> 8) & 0xFF) / 255.0f, (c & 0xFF) / 255.0f);
+}
+void Grass2DGraphics::rect(int x, int y, int w, int h, const std::string& hex) {
+    Grass2D::draw_rect(x, y, w, h, Grass2D::parse_hex_color_u32(hex));
+}
+void Grass2DGraphics::circle(int x, int y, int r, const std::string& hex) {
+    Grass2D::draw_circle(x, y, r, Grass2D::parse_hex_color_u32(hex));
+}
+void Grass2DGraphics::line(int x1, int y1, int x2, int y2, const std::string& hex, int w) {
+    Grass2D::draw_line(x1, y1, x2, y2, Grass2D::parse_hex_color_u32(hex), w);
+}
+void Grass2DGraphics::text(int x, int y, const std::string& str, int sz, const std::string& hex) {
+    Grass2D::draw_text(x, y, str, sz, Grass2D::parse_hex_color_u32(hex));
+}
+void Grass2DGraphics::draw_svg(const std::string& p, int x, int y, int w, int h) {
+    (void)p;
+    Grass2D::draw_rect(x, y, w, h, Grass2D::g_active_fill_color);
+}
 bool Grass2DGraphics::key(const std::string& k) { return Grass2D::key_down(k); }
 int Grass2DGraphics::mouse_x() { return Grass2D::mouse_x(); }
 int Grass2DGraphics::mouse_y() { return Grass2D::mouse_y(); }
@@ -458,5 +630,5 @@ bool Grass2DGraphics::mouse_down(const std::string& b) { return Grass2D::mouse_b
 bool Grass2DGraphics::collide(double x1, double y1, double w1, double h1, double x2, double y2, double w2, double h2) {
     return (x1 < x2 + w2 && x1 + w1 > x2 && y1 < y2 + h2 && y1 + h1 > y2);
 }
-void Grass2DGraphics::frame(int target_fps) { Grass2D::present(); }
-void Grass2DGraphics::close() {}
+void Grass2DGraphics::frame(int target_fps) { (void)target_fps; Grass2D::present(); }
+void Grass2DGraphics::close() { Grass2D::close_window(); }

@@ -40,6 +40,19 @@ namespace Grass2D {
     void emit_particles(float x, float y, int count, uint32_t color, float speed, float lifetime);
     void update_particles(float delta);
     void bind_framebuffer(void* addr, int w, int h, int pitch);
+
+    void draw_rect(int x, int y, int w, int h, uint32_t color);
+    void draw_circle(int cx, int cy, int r, uint32_t color);
+    void draw_line(int x1, int y1, int x2, int y2, uint32_t color, int width = 1);
+    void draw_text(int x, int y, const std::string& str, int size, uint32_t color);
+    void close_window();
+
+    bool create_canvas(int w, int h);
+    void fill_color(const std::string& hex_color);
+    void canvas_rect(int x, int y, int w, int h);
+    void canvas_circle(int cx, int cy, int r);
+    void canvas_line(int x1, int y1, int x2, int y2);
+    bool save_image(const std::string& path);
 }
 
 // Backward compatibility class wrapper

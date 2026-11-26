@@ -157,9 +157,26 @@ def main():
     # 3. Build grassvm.dll if needed or out of date
     vm_srcs = [
         "src/vm/grassvm_capi.cpp",
+        "src/media/Grass2DGraphics.cpp",
         "src/media/GrassGfx3D.cpp",
         "src/media/GrassPhysics.cpp",
-        "src/media/GrassMath3D.cpp"
+        "src/media/GrassMath3D.cpp",
+        "src/media/GrassAudio.cpp",
+        "src/media/gui_engine.cpp",
+        "src/runtime/GrassJson.cpp",
+        "src/runtime/GrassSys.cpp",
+        "src/runtime/GrassProc.cpp",
+        "src/runtime/GrassHardware.cpp",
+        "src/runtime/GrassTg.cpp",
+        "src/runtime/GrassNet.cpp",
+        "src/runtime/GrassTime.cpp",
+        "src/runtime/GrassFsys.cpp",
+        "src/runtime/GrassWeb.cpp",
+        "src/vm/GrassMemory.cpp",
+        "src/baremetal/GrassHAL.cpp",
+        "src/baremetal/GrassMMIO.cpp",
+        "src/baremetal/GrassBaremetal.cpp",
+        "src/frontend/GrassLangGen.cpp"
     ]
     vm_dll = os.path.join(BIN_DIR, "grassvm.dll")
     vm_lib = os.path.join(BIN_DIR, "grassvm.lib")
@@ -168,7 +185,7 @@ def main():
     )
     if os.path.exists(vm_srcs[0]) and vm_needs_build:
         print("[GrassCompiler] Building libgrassvm embedded library...")
-        subprocess.run(["g++", "-std=c++17", "-O3", "-shared"] + vm_srcs + ["-Isrc", "-Iinclude", "-o", vm_dll, f"-Wl,--out-implib,{vm_lib}", "-lgdi32", "-luser32"], check=False)
+        subprocess.run(["g++", "-std=c++17", "-O3", "-shared"] + vm_srcs + ["-Isrc", "-Iinclude", "-o", vm_dll, f"-Wl,--out-implib,{vm_lib}"] + LIBS + ["-luser32", "-ladvapi32"], check=False)
 
     # 4. Synchronize and deploy to C:\GrassGreen if directory exists
     install_root = r"C:\GrassGreen"

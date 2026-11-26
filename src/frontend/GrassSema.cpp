@@ -352,6 +352,245 @@ void GrassSema::registerBuiltins() {
     add_builtin("phys_get_rot", vec3_t, {SemaType::Int()}, true);
     add_builtin("phys_set_pos", SemaType::Void(), {SemaType::Int(), SemaType::Any()}, true);
     add_builtin("phys_set_vel", SemaType::Void(), {SemaType::Int(), SemaType::Any()}, true);
+
+    // 2D Graphics (!2d! / !gfx2d! / !2DGraphics!)
+    add_builtin("g2d_window", SemaType::Int(), {SemaType::Any()}, true);
+    add_builtin("g2d_is_open", SemaType::Bool(), {});
+    add_builtin("g2d_clear", SemaType::Void(), {SemaType::Any()}, true);
+    add_builtin("g2d_present", SemaType::Void(), {});
+    add_builtin("g2d_dt", SemaType::Float(), {});
+    add_builtin("g2d_key_down", SemaType::Bool(), {SemaType::Any()});
+    add_builtin("g2d_mouse_x", SemaType::Int(), {});
+    add_builtin("g2d_mouse_y", SemaType::Int(), {});
+    add_builtin("g2d_mouse_btn", SemaType::Bool(), {}, true);
+    add_builtin("g2d_load_tex", SemaType::Int(), {SemaType::String()});
+    add_builtin("g2d_draw_sprite", SemaType::Void(), {SemaType::Int(), SemaType::Float(), SemaType::Float(), SemaType::Float(), SemaType::Float()}, true);
+    add_builtin("g2d_draw_frame", SemaType::Void(), {SemaType::Int(), SemaType::Float(), SemaType::Float(), SemaType::Float(), SemaType::Float(), SemaType::Float(), SemaType::Float(), SemaType::Float(), SemaType::Float()});
+    add_builtin("g2d_cam_set", SemaType::Void(), {SemaType::Float(), SemaType::Float()}, true);
+    add_builtin("g2d_cam_shake", SemaType::Void(), {SemaType::Float(), SemaType::Float()});
+    add_builtin("g2d_emit_particles", SemaType::Void(), {SemaType::Float(), SemaType::Float(), SemaType::Int()}, true);
+    add_builtin("g2d_update_particles", SemaType::Void(), {}, true);
+    add_builtin("g2d_bind_framebuffer", SemaType::Void(), {SemaType::Any(), SemaType::Int(), SemaType::Int()}, true);
+    add_builtin("g2d_rect", SemaType::Void(), {SemaType::Int(), SemaType::Int(), SemaType::Int(), SemaType::Int(), SemaType::Int()});
+    add_builtin("g2d_circle", SemaType::Void(), {SemaType::Int(), SemaType::Int(), SemaType::Int(), SemaType::Int()});
+    add_builtin("g2d_line", SemaType::Void(), {SemaType::Int(), SemaType::Int(), SemaType::Int(), SemaType::Int(), SemaType::Int()}, true);
+    add_builtin("g2d_text", SemaType::Void(), {SemaType::Int(), SemaType::Int(), SemaType::String(), SemaType::Int(), SemaType::Int()});
+    add_builtin("g2d_close", SemaType::Void(), {});
+
+    add_builtin("gfx_init", SemaType::Bool(), {SemaType::String(), SemaType::Int(), SemaType::Int()});
+    add_builtin("gfx_running", SemaType::Bool(), {});
+    add_builtin("gfx_clear", SemaType::Void(), {SemaType::String()});
+    add_builtin("gfx_rect", SemaType::Void(), {SemaType::Int(), SemaType::Int(), SemaType::Int(), SemaType::Int(), SemaType::String()});
+    add_builtin("gfx_circle", SemaType::Void(), {SemaType::Int(), SemaType::Int(), SemaType::Int(), SemaType::String()});
+    add_builtin("gfx_line", SemaType::Void(), {SemaType::Int(), SemaType::Int(), SemaType::Int(), SemaType::Int(), SemaType::String()}, true);
+    add_builtin("gfx_text", SemaType::Void(), {SemaType::Int(), SemaType::Int(), SemaType::String(), SemaType::Int(), SemaType::String()});
+    add_builtin("gfx_key", SemaType::Bool(), {SemaType::String()});
+    add_builtin("gfx_mouse_x", SemaType::Int(), {});
+    add_builtin("gfx_mouse_y", SemaType::Int(), {});
+    add_builtin("gfx_mouse_down", SemaType::Bool(), {SemaType::String()});
+    add_builtin("gfx_collide", SemaType::Int(), {SemaType::Float(), SemaType::Float(), SemaType::Float(), SemaType::Float(), SemaType::Float(), SemaType::Float(), SemaType::Float(), SemaType::Float()});
+    add_builtin("gfx_frame", SemaType::Void(), {}, true);
+    add_builtin("gfx_close", SemaType::Void(), {});
+
+    add_builtin("create_canvas", SemaType::Int(), {SemaType::Int(), SemaType::Int()});
+    add_builtin("fill_color", SemaType::Void(), {SemaType::String()});
+    add_builtin("draw_rectangle", SemaType::Void(), {SemaType::Int(), SemaType::Int(), SemaType::Int(), SemaType::Int()});
+    add_builtin("draw_circle", SemaType::Void(), {SemaType::Int(), SemaType::Int(), SemaType::Int()});
+    add_builtin("draw_line", SemaType::Void(), {SemaType::Int(), SemaType::Int(), SemaType::Int(), SemaType::Int()});
+    add_builtin("save_image", SemaType::Int(), {SemaType::String()});
+
+    // Audio (!audio!)
+    add_builtin("audio_init", SemaType::Void(), {});
+    add_builtin("synth_play", SemaType::Void(), {SemaType::String(), SemaType::Float(), SemaType::Int()}, true);
+    add_builtin("synth", SemaType::Void(), {SemaType::String(), SemaType::Float(), SemaType::Int()}, true);
+    add_builtin("tone", SemaType::Void(), {SemaType::Float(), SemaType::Int()}, true);
+    add_builtin("beep", SemaType::Void(), {}, true);
+    add_builtin("sound_play", SemaType::Int(), {SemaType::String()}, true);
+    add_builtin("sound_stop", SemaType::Void(), {});
+    add_builtin("sound_pause", SemaType::Void(), {});
+    add_builtin("sound_resume", SemaType::Void(), {});
+    add_builtin("sound_volume", SemaType::Void(), {SemaType::Int()});
+    add_builtin("sound_is_playing", SemaType::Bool(), {});
+    add_builtin("bind_synth", SemaType::Void(), {SemaType::String(), SemaType::String(), SemaType::Float(), SemaType::Int()}, true);
+    add_builtin("bind_sound", SemaType::Void(), {SemaType::String(), SemaType::String()});
+    add_builtin("attach_sound", SemaType::Void(), {SemaType::Any(), SemaType::String(), SemaType::Float(), SemaType::Int()}, true);
+
+    // JSON (!json!)
+    add_builtin("json_clear", SemaType::Void(), {});
+    add_builtin("json_add", SemaType::Void(), {SemaType::String(), SemaType::String()});
+    add_builtin("json_add_num", SemaType::Void(), {SemaType::String(), SemaType::Float()});
+    add_builtin("json_build", SemaType::String(), {});
+    add_builtin("json_valid", SemaType::Int(), {SemaType::String()});
+    add_builtin("json_get", SemaType::String(), {SemaType::String(), SemaType::String()});
+    add_builtin("json_set", SemaType::String(), {SemaType::String(), SemaType::String(), SemaType::String()});
+    add_builtin("json_minify", SemaType::String(), {SemaType::String()});
+
+    // Proc (!proc!) & Sys extended (!sys!)
+    add_builtin("proc_find", SemaType::Int(), {SemaType::String()});
+    add_builtin("proc_kill", SemaType::Int(), {SemaType::Int()});
+    add_builtin("proc_mem", SemaType::Int(), {SemaType::Int()});
+    add_builtin("proc_exists", SemaType::Int(), {SemaType::Int()});
+    add_builtin("proc_list", SemaType::String(), {});
+    add_builtin("find", SemaType::Int(), {SemaType::String()});
+    add_builtin("kill", SemaType::Int(), {SemaType::Int()});
+    add_builtin("mem", SemaType::Int(), {SemaType::Int()});
+    add_builtin("list", SemaType::String(), {});
+    add_builtin("cpu_cores", SemaType::Int(), {});
+    add_builtin("ram_total_mb", SemaType::Float(), {});
+    add_builtin("ram_free_mb", SemaType::Float(), {});
+    add_builtin("ram_used_mb", SemaType::Float(), {});
+    add_builtin("uptime_sec", SemaType::Float(), {});
+    add_builtin("clip_set", SemaType::Int(), {SemaType::String()});
+    add_builtin("clip_get", SemaType::String(), {});
+
+    // Hardware (!hardware!)
+    add_builtin("hw_cpu_vendor", SemaType::String(), {});
+    add_builtin("hw_cpu_brand", SemaType::String(), {});
+    add_builtin("hw_cpu_cores", SemaType::Int(), {});
+    add_builtin("hw_cpu_threads", SemaType::Int(), {});
+    add_builtin("hw_cpu_sockets", SemaType::Int(), {});
+    add_builtin("hw_cpu_family", SemaType::Int(), {});
+    add_builtin("hw_cpu_freq", SemaType::Int(), {});
+    add_builtin("hw_cpu_base_freq", SemaType::Int(), {});
+    add_builtin("hw_cpu_usage", SemaType::Int(), {});
+    add_builtin("hw_cpu_temp", SemaType::Int(), {});
+    add_builtin("hw_cpu_cache_l1", SemaType::Int(), {});
+    add_builtin("hw_cpu_cache_l2", SemaType::Int(), {});
+    add_builtin("hw_cpu_cache_l3", SemaType::Int(), {});
+    add_builtin("hw_cpu_virt", SemaType::String(), {});
+    add_builtin("hw_uptime_sec", SemaType::Int(), {});
+    add_builtin("hw_uptime_str", SemaType::String(), {});
+    add_builtin("hw_ram_total", SemaType::Int(), {});
+    add_builtin("hw_ram_used", SemaType::Int(), {});
+    add_builtin("hw_ram_free", SemaType::Int(), {});
+    add_builtin("hw_ram_cached", SemaType::Int(), {});
+    add_builtin("hw_ram_speed", SemaType::Int(), {});
+    add_builtin("hw_ram_temp", SemaType::Int(), {});
+    add_builtin("hw_ram_model", SemaType::String(), {});
+    add_builtin("hw_ram_form", SemaType::String(), {});
+    add_builtin("hw_disk_size", SemaType::Int(), {});
+    add_builtin("hw_disk_free", SemaType::Int(), {});
+    add_builtin("hw_disk_format", SemaType::String(), {});
+    add_builtin("hw_disk_model", SemaType::String(), {});
+    add_builtin("hw_disk_type", SemaType::String(), {});
+    add_builtin("hw_disk_temp", SemaType::Int(), {});
+    add_builtin("hw_disk_read_speed", SemaType::Int(), {});
+    add_builtin("hw_disk_write_speed", SemaType::Int(), {});
+    add_builtin("hw_disk_resp_time", SemaType::Int(), {});
+    add_builtin("hw_disk_usage", SemaType::Int(), {});
+    add_builtin("hw_disk_is_system", SemaType::Int(), {});
+    add_builtin("hw_pagefile_total", SemaType::Int(), {});
+    add_builtin("hw_pagefile_used", SemaType::Int(), {});
+    add_builtin("hw_net_adapter", SemaType::String(), {});
+    add_builtin("hw_net_type", SemaType::String(), {});
+    add_builtin("hw_net_ipv4", SemaType::String(), {});
+    add_builtin("hw_net_ipv6", SemaType::String(), {});
+    add_builtin("hw_net_recv_speed", SemaType::Int(), {});
+    add_builtin("hw_net_send_speed", SemaType::Int(), {});
+    add_builtin("hw_net_recv_total", SemaType::Int(), {});
+    add_builtin("hw_net_send_total", SemaType::Int(), {});
+    add_builtin("hw_gpu_name", SemaType::String(), {});
+    add_builtin("hw_gpu_usage", SemaType::Int(), {});
+    add_builtin("hw_gpu_temp", SemaType::Int(), {});
+    add_builtin("hw_gpu_vram_total", SemaType::Int(), {});
+    add_builtin("hw_gpu_vram_used", SemaType::Int(), {});
+    add_builtin("hw_gpu_vram_shared", SemaType::Int(), {});
+    add_builtin("hw_board_vendor", SemaType::String(), {});
+    add_builtin("hw_board_model", SemaType::String(), {});
+    add_builtin("hw_bios_vendor", SemaType::String(), {});
+    add_builtin("hw_bios_date", SemaType::String(), {});
+    add_builtin("hw_bios_version", SemaType::String(), {});
+    add_builtin("hw_pci_count", SemaType::Int(), {});
+    add_builtin("hw_rdtsc", SemaType::Int(), {});
+    add_builtin("hw_reboot", SemaType::Void(), {});
+
+    // Telegram (!tg!)
+    add_builtin("tg_init", SemaType::Void(), {SemaType::String()});
+    add_builtin("tg_poll", SemaType::String(), {}, true);
+    add_builtin("tg_get_user", SemaType::String(), {});
+    add_builtin("tg_get_chat_id", SemaType::String(), {});
+    add_builtin("tg_get_msg_id", SemaType::String(), {});
+    add_builtin("tg_get_callback", SemaType::String(), {});
+    add_builtin("tg_send", SemaType::Int(), {SemaType::String(), SemaType::String()});
+    add_builtin("tg_reply", SemaType::Int(), {SemaType::String()});
+    add_builtin("tg_send_btn", SemaType::Int(), {SemaType::String(), SemaType::String(), SemaType::String()});
+    add_builtin("tg_send_inline", SemaType::Int(), {SemaType::String(), SemaType::String(), SemaType::String()});
+    add_builtin("tg_send_webapp", SemaType::Int(), {SemaType::String(), SemaType::String(), SemaType::String(), SemaType::String()});
+    add_builtin("tg_send_photo", SemaType::Int(), {SemaType::String(), SemaType::String()}, true);
+    add_builtin("tg_send_dice", SemaType::Int(), {SemaType::String(), SemaType::String()});
+    add_builtin("tg_edit", SemaType::Int(), {SemaType::String(), SemaType::String(), SemaType::String()});
+    add_builtin("tg_del", SemaType::Int(), {SemaType::String(), SemaType::String()});
+    add_builtin("telegram_init", SemaType::Void(), {SemaType::String()});
+    add_builtin("send_message", SemaType::Int(), {SemaType::Any(), SemaType::String()});
+    add_builtin("send_photo", SemaType::Int(), {SemaType::Any(), SemaType::String()}, true);
+    add_builtin("send_document", SemaType::Int(), {SemaType::Any(), SemaType::String()});
+
+    // LangGen (!langgen!)
+    add_builtin("lang_new", SemaType::Int(), {SemaType::String()});
+    add_builtin("lang_comment", SemaType::Int(), {SemaType::Int(), SemaType::String()});
+    add_builtin("lang_rule", SemaType::Int(), {SemaType::Int(), SemaType::String(), SemaType::String()});
+    add_builtin("lang_parse", SemaType::Int(), {SemaType::Int(), SemaType::String()});
+    add_builtin("lang_count", SemaType::Int(), {SemaType::Int()});
+    add_builtin("lang_cmd", SemaType::String(), {SemaType::Int(), SemaType::Int()});
+    add_builtin("lang_arg", SemaType::String(), {SemaType::Int(), SemaType::Int(), SemaType::Int()});
+    add_builtin("lang_eval", SemaType::Any(), {SemaType::Int(), SemaType::String()});
+    add_builtin("lang_set_var", SemaType::Void(), {SemaType::Int(), SemaType::Any(), SemaType::Any()});
+    add_builtin("lang_get_var", SemaType::Any(), {SemaType::Int(), SemaType::Any()});
+
+    // Net high-level (!GrassNet!) & Backlog & MMIO 16/32 & GUI & Threads
+    add_builtin("local_ip", SemaType::String(), {});
+    add_builtin("resolve_ip", SemaType::String(), {SemaType::String()});
+    add_builtin("ping", SemaType::Float(), {SemaType::String()}, true);
+    add_builtin("net_status", SemaType::Int(), {});
+    add_builtin("net_set_agent", SemaType::Int(), {SemaType::String(), SemaType::String()});
+    add_builtin("API", SemaType::Void(), {SemaType::String()});
+    add_builtin("create_serv", SemaType::Int(), {}, true);
+    add_builtin("download", SemaType::Int(), {SemaType::String(), SemaType::String()});
+    add_builtin("connect", SemaType::Int(), {SemaType::Any(), SemaType::Any()}, true);
+    add_builtin("accept", SemaType::Any(), {}, true);
+    add_builtin("net_close", SemaType::Int(), {}, true);
+
+    add_builtin("fat_status", SemaType::Int(), {});
+    add_builtin("ticks", SemaType::Int(), {});
+    add_builtin("sleep", SemaType::Void(), {SemaType::Int()});
+    add_builtin("threads", SemaType::Int(), {});
+    add_builtin("clear", SemaType::Void(), {});
+    add_builtin("not_clear_on", SemaType::Void(), {});
+    add_builtin("not_clear_off", SemaType::Void(), {});
+
+    add_builtin("inw", SemaType::Int(), {SemaType::Int()});
+    add_builtin("inl", SemaType::Int(), {SemaType::Int()});
+    add_builtin("outw", SemaType::Void(), {SemaType::Int(), SemaType::Int()});
+    add_builtin("outl", SemaType::Void(), {SemaType::Int(), SemaType::Int()});
+    add_builtin("io_in16", SemaType::Int(), {SemaType::Int()});
+    add_builtin("io_in32", SemaType::Int(), {SemaType::Int()});
+    add_builtin("io_out16", SemaType::Void(), {SemaType::Int(), SemaType::Int()});
+    add_builtin("io_out32", SemaType::Void(), {SemaType::Int(), SemaType::Int()});
+
+    add_builtin("surface", SemaType::Void(), {SemaType::String()});
+    add_builtin("auto_size_display", SemaType::Void(), {});
+    add_builtin("gui_cmd", SemaType::Void(), {SemaType::String()});
+    add_builtin("gui_show", SemaType::Void(), {});
+    add_builtin("gui_get", SemaType::String(), {SemaType::String()});
+    add_builtin("gui_set", SemaType::Void(), {SemaType::String(), SemaType::String()});
+    add_builtin("set_text", SemaType::Void(), {SemaType::String(), SemaType::String()});
+    add_builtin("get_text", SemaType::String(), {SemaType::String()});
+    add_builtin("set_val", SemaType::Void(), {SemaType::String(), SemaType::Any()});
+    add_builtin("get_val", SemaType::Float(), {SemaType::String()});
+    add_builtin("set_color", SemaType::Void(), {SemaType::String(), SemaType::String()});
+    add_builtin("set_bg", SemaType::Void(), {SemaType::String(), SemaType::String()});
+    add_builtin("set_visible", SemaType::Void(), {SemaType::String(), SemaType::Any()});
+    add_builtin("is_checked", SemaType::Int(), {SemaType::String()});
+    add_builtin("add_item", SemaType::Void(), {SemaType::String(), SemaType::String()});
+    add_builtin("clear_list", SemaType::Void(), {SemaType::String()});
+    add_builtin("get_selected", SemaType::String(), {SemaType::String()});
+    add_builtin("switch_tab", SemaType::Void(), {SemaType::String()});
+    add_builtin("fullscreen", SemaType::Void(), {});
+    add_builtin("web_start", SemaType::Void(), {SemaType::String()});
+    add_builtin("web_compile", SemaType::String(), {SemaType::String()}, true);
+
+    add_builtin("thread", SemaType::Int(), {SemaType::Any()}, true);
+    add_builtin("async", SemaType::Int(), {SemaType::Any()}, true);
 }
 
 void GrassSema::enterScope(Scope::Kind kind) {
@@ -551,7 +790,9 @@ SemaType GrassSema::resolveType(const std::string& type_name, int ptr_depth, con
         base = SemaType::Void();
     } else if (type_name == "nullptr" || type_name == "null") {
         return SemaType::Nullptr();
-    } else if (type_name == "var" || type_name == "auto" || type_name == "take" || type_name.empty()) {
+    } else if (type_name == "var" || type_name == "auto" || type_name == "take" ||
+               type_name == "set" || type_name == "let" || type_name == "fany" ||
+               type_name == "invent" || type_name.empty()) {
         base = SemaType::Any();
     } else {
         const StructSymbol* st = findStruct(type_name);
@@ -844,7 +1085,7 @@ void GrassSema::checkFunctionDecl(const FunctionDeclAST* func) {
         checkBlockStmt(func->body.get());
 
         // Check return on all control paths for non-void functions
-        if (!sym.return_type.is_void() && !sym.return_type.is_any()) {
+        if (!sym.return_type.is_void() && !sym.return_type.is_any() && (func->name != "main" || strict_mode_)) {
             if (!returnsOnAllPaths(func->body.get())) {
                 reportError(func->loc,
                     "Not all control paths return a value in function '" + func->name + "'.",
@@ -1326,12 +1567,17 @@ SemaType GrassSema::checkLiteralExpr(const LiteralExprAST* lit) {
 
 SemaType GrassSema::checkVariableExpr(const VariableExprAST* var) {
     if (var->name == "endl" || var->name == "std::endl") return SemaType::String();
+    if (var->name == "proc_mem") return SemaType::Int();
     VariableSymbol* sym = current_scope_->lookupVariable(var->name);
     if (!sym) {
         // Check if it's a field of 'this' when inside a method
         if (current_struct_) {
             auto fit = current_struct_->fields.find(var->name);
             if (fit != current_struct_->fields.end()) return fit->second;
+        }
+        // Check if passing a function reference (e.g. thread(fn, ...), attach_sound(fn, ...))
+        if (functions_.count(var->name)) {
+            return SemaType::Ptr(SemaType::Void());
         }
         reportError(var->loc, "Undeclared variable '" + var->name + "'.", "Declare variable with type before using it");
         return SemaType::Unknown();
@@ -1558,7 +1804,10 @@ SemaType GrassSema::checkCallExpr(const CallExprAST* call) {
     }
 
     // Argument count check
-    if (!func->is_variadic && call->args.size() != func->params.size()) {
+    bool flex_thread_arity = ((call->callee == "thread_join" || call->callee == "mutex_lock") &&
+                              (call->args.size() >= 1 && call->args.size() <= 2)) ||
+                             (call->callee == "net_close" && call->args.size() <= 1);
+    if (!func->is_variadic && !flex_thread_arity && call->args.size() != func->params.size()) {
         reportError(call->loc,
             "Function '" + call->callee + "' expects " + std::to_string(func->params.size()) +
             " arguments, but " + std::to_string(call->args.size()) + " were provided.",

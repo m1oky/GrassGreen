@@ -1,4 +1,5 @@
 !GrassGreen!
+!baremetal!
 
 int main() {
     not_clear {

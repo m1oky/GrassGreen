@@ -2421,8 +2421,33 @@ namespace grass::backend {
         };
         if (crt_syms.find(s) != crt_syms.end()) return "msvcrt.dll";
 
-        if (s.rfind("g3d_", 0) == 0 || s.rfind("phys_", 0) == 0 ||
-            s.rfind("v3_", 0) == 0 || s.rfind("m4_", 0) == 0) {
+        static const std::unordered_set<std::string> vm_dll_syms = {
+            "create_canvas", "fill_color", "draw_rectangle", "draw_circle", "draw_line", "save_image",
+            "audio_init", "synth_play", "synth", "tone", "beep", "sound_play", "sound_stop", "sound_pause",
+            "sound_resume", "sound_volume", "sound_is_playing", "bind_synth", "bind_sound", "attach_sound",
+            "pc_name", "user_name", "screen_w", "screen_h", "cpu_cores", "ram_total_mb", "ram_free_mb",
+            "ram_used_mb", "uptime_sec", "clip_set", "clip_get", "get_env",
+            "find", "kill", "mem", "list",
+            "telegram_init", "send_message", "send_photo", "send_document",
+            "local_ip", "resolve_ip", "ping", "net_status", "net_set_agent", "API", "create_serv",
+            "net_connect_host", "net_accept_srv", "net_close_srv", "download",
+            "fat_status", "ticks", "threads", "grass_sleep_sec", "clear", "not_clear_on", "not_clear_off",
+            "get_date", "get_time_str", "memory_usit", "memory_free", "memory_clean",
+            "fs_mkdir", "fs_is_dir", "fs_size", "fs_copy", "fs_list", "fs_read", "fs_write", "fs_exists", "fs_remove",
+            "inw", "inl", "outw", "outl", "inb", "outb",
+            "memory_barrier", "read_barrier", "write_barrier",
+            "surface", "auto_size_display", "set_text", "get_text", "set_val", "get_val",
+            "set_color", "set_bg", "set_visible", "is_checked", "add_item", "clear_list",
+            "get_selected", "switch_tab", "fullscreen", "web_start", "web_compile",
+            "grass_native_thread_spawn", "grass_native_thread_id"
+        };
+        if (s.rfind("g2d_", 0) == 0 || s.rfind("gfx_", 0) == 0 ||
+            s.rfind("g3d_", 0) == 0 || s.rfind("phys_", 0) == 0 ||
+            s.rfind("v3_", 0) == 0 || s.rfind("m4_", 0) == 0 ||
+            s.rfind("hw_", 0) == 0 || s.rfind("json_", 0) == 0 ||
+            s.rfind("proc_", 0) == 0 || s.rfind("tg_", 0) == 0 ||
+            s.rfind("lang_", 0) == 0 || s.rfind("gui_", 0) == 0 ||
+            s.rfind("mmio_", 0) == 0 || vm_dll_syms.find(s) != vm_dll_syms.end()) {
             return "grassvm.dll";
         }
 
@@ -3701,14 +3726,16 @@ namespace grass::backend {
             append_function("sleep_ms", code, rels);
         }
 
-        // 16. Math intrinsics: sqrt, abs/fabs, floor, ceil, sin, cos, pow
-        if (needed_symbols.count("sqrt") > 0 && defined_symbols.count("sqrt") == 0) {
+        // 16. Math intrinsics: sqrt, discor, abs/fabs, floor, ceil, sin, cos, pow
+        if ((needed_symbols.count("sqrt") > 0 && defined_symbols.count("sqrt") == 0) ||
+            (needed_symbols.count("discor") > 0 && defined_symbols.count("discor") == 0)) {
             std::vector<uint8_t> code = {
                 0xF2, 0x0F, 0x51, 0xC0,             // sqrtsd xmm0, xmm0
                 0xC3                                // ret
             };
             std::vector<RelocEntry> rels;
-            append_function("sqrt", code, rels);
+            if (needed_symbols.count("sqrt") > 0 && defined_symbols.count("sqrt") == 0) append_function("sqrt", code, rels);
+            if (needed_symbols.count("discor") > 0 && defined_symbols.count("discor") == 0) append_function("discor", code, rels);
         }
 
         if ((needed_symbols.count("abs") > 0 && defined_symbols.count("abs") == 0) ||

@@ -515,7 +515,8 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
              fn == "tg_get_chat_id" || fn == "tg_get_msg_id" || fn == "tg_get_callback" ||
              fn == "tg_send" || fn == "tg_reply" || fn == "tg_send_btn" ||
              fn == "tg_send_inline" || fn == "tg_send_webapp" || fn == "tg_send_photo" ||
-             fn == "tg_send_dice" || fn == "tg_edit" || fn == "tg_del") {
+             fn == "tg_send_dice" || fn == "tg_edit" || fn == "tg_del" ||
+             fn == "telegram_init" || fn == "send_message" || fn == "send_photo" || fn == "send_document") {
         requireLib("tg", "!tg!", fn + "()", line);
     }
     // 14. Проверка библиотеки !2DGraphics!
@@ -524,8 +525,10 @@ void BytecodeCompiler::checkBuiltinLibraryRequirement(const string& fn, int line
              fn == "gfx_rect" || fn == "gfx_circle"  || fn == "gfx_line" ||
              fn == "gfx_text" || fn == "gfx_key"     || fn == "gfx_mouse_x" ||
              fn == "gfx_mouse_y" || fn == "gfx_mouse_down" || fn == "gfx_collide" ||
-             fn == "gfx_frame" || fn == "gfx_close") {
-        requireLib("2DGraphics", "!2DGraphics!", fn + "()", line);
+             fn == "gfx_frame" || fn == "gfx_close" ||
+             fn == "create_canvas" || fn == "fill_color" || fn == "draw_rectangle" ||
+             fn == "draw_circle" || fn == "draw_line" || fn == "save_image") {
+        requireLib("2DGraphics", "!2DGraphics! / !2d!", fn + "()", line);
     }
     // 15. Проверка библиотеки !thread!
     else if (fn == "thread_join" || fn == "thread_detach" || fn == "thread_id" ||
@@ -2058,7 +2061,7 @@ void BytecodeCompiler::parseStatement() {
             included_libs.insert("json");
         } else if (lib == "!tg!") {
             included_libs.insert("tg");
-        } else if (lib == "!2DGraphics!" || lib == "!2dgraphics!") {
+        } else if (lib == "!2DGraphics!" || lib == "!2dgraphics!" || lib == "!2d!" || lib == "!2D!" || lib == "!gfx2d!" || lib == "!Gfx2D!") {
             included_libs.insert("2DGraphics");
         } else if (lib == "!math3d!" || lib == "!Math3D!") {
             included_libs.insert("math3d");
@@ -4825,6 +4828,92 @@ std::unique_ptr<StmtAST> GrassParser::parseStatement() {
     if (match(TOK_SEMI)) return nullptr;
     if (check(TOK_LBRACE)) return parseBlock();
 
+    if (checkIdent("volatile")) {
+        advance();
+        return parseStatement();
+    }
+    if (checkIdent("clear") && (peek(1).kind == TOK_SEMI || peek(1).kind == TOK_LPAREN)) {
+        auto loc = advance().loc(filename);
+        if (match(TOK_LPAREN)) match(TOK_RPAREN);
+        match(TOK_SEMI);
+        std::vector<std::unique_ptr<ExprAST>> args;
+        return std::make_unique<ExprStmtAST>(loc, std::make_unique<CallExprAST>(loc, "clear", std::move(args)));
+    }
+    if (checkIdent("not_clear")) {
+        auto loc = advance().loc(filename);
+        if (check(TOK_LBRACE)) {
+            return parseBlock();
+        }
+        if (match(TOK_LPAREN)) {
+            if (!check(TOK_RPAREN)) parseExpression();
+            match(TOK_RPAREN);
+        }
+        match(TOK_SEMI);
+        std::vector<std::unique_ptr<ExprAST>> args;
+        return std::make_unique<ExprStmtAST>(loc, std::make_unique<CallExprAST>(loc, "not_clear_on", std::move(args)));
+    }
+    if (checkIdent("window") && peek(1).kind == TOK_LBRACE) {
+        auto loc = advance().loc(filename);
+        advance(); // '{'
+        int depth = 1;
+        while (depth > 0 && !isAtEnd()) {
+            if (peek().kind == TOK_LBRACE) depth++;
+            else if (peek().kind == TOK_RBRACE) depth--;
+            advance();
+        }
+        match(TOK_SEMI);
+        std::vector<std::unique_ptr<ExprAST>> args;
+        return std::make_unique<ExprStmtAST>(loc, std::make_unique<CallExprAST>(loc, "gui_show", std::move(args)));
+    }
+    if (checkIdent("agent") && peek(1).kind == TOK_LBRACE) {
+        auto loc = advance().loc(filename);
+        advance(); // '{'
+        int depth = 1;
+        while (depth > 0 && !isAtEnd()) {
+            if (peek().kind == TOK_LBRACE) depth++;
+            else if (peek().kind == TOK_RBRACE) depth--;
+            advance();
+        }
+        match(TOK_SEMI);
+        (void)loc;
+        return nullptr;
+    }
+    if (checkIdent("create_serv") && peek(1).kind == TOK_LPAREN) {
+        auto loc = advance().loc(filename);
+        advance(); // '('
+        int pdepth = 1;
+        while (pdepth > 0 && !isAtEnd()) {
+            if (peek().kind == TOK_LPAREN) pdepth++;
+            else if (peek().kind == TOK_RPAREN) pdepth--;
+            advance();
+        }
+        if (peek().kind == TOK_LBRACE) {
+            advance(); // '{'
+            int bdepth = 1;
+            while (bdepth > 0 && !isAtEnd()) {
+                if (peek().kind == TOK_LBRACE) bdepth++;
+                else if (peek().kind == TOK_RBRACE) bdepth--;
+                advance();
+            }
+        }
+        match(TOK_SEMI);
+        std::vector<std::unique_ptr<ExprAST>> args;
+        return std::make_unique<ExprStmtAST>(loc, std::make_unique<CallExprAST>(loc, "create_serv", std::move(args)));
+    }
+    if (checkIdent("async") && peek(1).kind == TOK_SEMI) {
+        advance();
+        match(TOK_SEMI);
+        return nullptr;
+    }
+    if (checkIdent("async") && peek(1).kind == TOK_IDENT) {
+        auto loc = advance().loc(filename);
+        auto inner = parseExpression();
+        match(TOK_SEMI);
+        std::vector<std::unique_ptr<ExprAST>> args;
+        if (inner) args.push_back(std::move(inner));
+        return std::make_unique<ExprStmtAST>(loc, std::make_unique<CallExprAST>(loc, "async", std::move(args)));
+    }
+
     if (checkIdent("if") || checkIdent("check")) return parseIf();
     if (checkIdent("while") || checkIdent("loop")) return parseWhile();
     if (checkIdent("for") || checkIdent("again")) return parseFor();
@@ -5142,6 +5231,17 @@ std::unique_ptr<StructDeclAST> GrassParser::parseStruct() {
             methods.push_back(std::move(fn));
             continue;
         }
+        if (peek().kind == TOK_IDENT && (peek(1).kind == TOK_COLON || peek(1).kind == TOK_ASSIGN)) {
+            std::string fname = advance().text;
+            advance(); // ':' or '='
+            std::string tname;
+            int ptr = 0;
+            parseTypeSpec(tname, ptr);
+            fields.emplace_back(tname, fname, ptr, peek(-1).loc(filename));
+            match(TOK_COMMA);
+            match(TOK_SEMI);
+            continue;
+        }
         if (isTypeName(peek().text)) {
             std::string tname;
             int ptr = 0;
@@ -5229,6 +5329,17 @@ std::unique_ptr<ClassDeclAST> GrassParser::parseClass() {
             auto fn = parseFunction("auto", 0, fname);
             fn->is_method = true;
             methods.push_back(std::move(fn));
+            continue;
+        }
+        if (peek().kind == TOK_IDENT && (peek(1).kind == TOK_COLON || peek(1).kind == TOK_ASSIGN)) {
+            std::string fname = advance().text;
+            advance(); // ':' or '='
+            std::string tname;
+            int ptr = 0;
+            parseTypeSpec(tname, ptr);
+            fields.emplace_back(tname, fname, ptr, peek(-1).loc(filename));
+            match(TOK_COMMA);
+            match(TOK_SEMI);
             continue;
         }
         if (isTypeName(peek().text)) {
@@ -5431,7 +5542,12 @@ std::unique_ptr<ProgramAST> GrassParser::parseProgram() {
             continue;
         }
         if (peek().kind == TOK_LIB) {
-            program->included_libs.push_back(advance().text);
+            std::string lib = advance().text;
+            program->included_libs.push_back(lib);
+            if (lib == "!GrassWeb!" || lib == "!GREEN_WWW1!") {
+                while (!isAtEnd()) advance();
+                break;
+            }
             continue;
         }
         if (peek().kind == TOK_IDENT && peek().text == "@strict") {
@@ -5456,7 +5572,7 @@ std::unique_ptr<ProgramAST> GrassParser::parseProgram() {
             } else if (checkIdent("module")) {
                 auto mod = parseModule();
                 if (mod) program->declarations.push_back(std::move(mod));
-            } else if (checkIdent("fn")) {
+            } else if (checkIdent("fn") || checkIdent("fun")) {
                 advance();
                 std::string fname = advance().text;
                 auto fn = parseFunction("auto", 0, fname);

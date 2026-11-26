@@ -49,7 +49,7 @@ if %ERRORLEVEL% equ 0 (
     g++ -std=c++17 -O3 -Isrc -Iinclude src/cli/gpm.cpp -o bin/gpm.exe
 
     echo [GrassCompiler] Building libgrassvm embedded library...
-    g++ -std=c++17 -O3 -shared src/vm/grassvm_capi.cpp src/media/GrassGfx3D.cpp src/media/GrassPhysics.cpp src/media/GrassMath3D.cpp -Isrc -Iinclude -o bin/grassvm.dll "-Wl,--out-implib,bin/grassvm.lib" -lgdi32 -luser32
+    g++ -std=c++17 -O3 -shared src/vm/grassvm_capi.cpp src/media/Grass2DGraphics.cpp src/media/GrassGfx3D.cpp src/media/GrassPhysics.cpp src/media/GrassMath3D.cpp src/media/GrassAudio.cpp src/media/gui_engine.cpp src/runtime/GrassJson.cpp src/runtime/GrassSys.cpp src/runtime/GrassProc.cpp src/runtime/GrassHardware.cpp src/runtime/GrassTg.cpp src/runtime/GrassNet.cpp src/runtime/GrassTime.cpp src/runtime/GrassFsys.cpp src/runtime/GrassWeb.cpp src/vm/GrassMemory.cpp src/baremetal/GrassHAL.cpp src/baremetal/GrassMMIO.cpp src/baremetal/GrassBaremetal.cpp src/frontend/GrassLangGen.cpp -Isrc -Iinclude -o bin/grassvm.dll "-Wl,--out-implib,bin/grassvm.lib" -lgdiplus -lgdi32 -luser32 -lcomctl32 -lwinmm -lws2_32 -lwininet -lurlmon -lpsapi -liphlpapi -ldxgi -lpdh -ladvapi32
 
     if exist "C:\GrassGreen" (
         if not exist "C:\GrassGreen\bin" mkdir "C:\GrassGreen\bin"

@@ -11,10 +11,10 @@ take calc_sum(a, b) {
     return res;
 }
 
-take counter_worker(steps, mtx) {
+take counter_worker(steps, mtx, int* counter_ptr) {
     for (take i = 0; i < steps; i++) {
         mutex_lock(mtx);
-        g_counter = g_counter + 1;
+        *counter_ptr = *counter_ptr + 1;
         mutex_unlock(mtx);
     }
     return steps;
@@ -44,10 +44,10 @@ int main() {
 
     gout << "[Test Thread]: 2. Mutex synchronization & shared variable..." << endl;
     take g_mtx = mutex_create();
-    take g_counter = 0;
+    int g_counter = 0;
 
-    take w1 = thread(counter_worker, 500, g_mtx);
-    take w2 = thread(counter_worker, 500, g_mtx);
+    take w1 = thread(counter_worker, 500, g_mtx, &g_counter);
+    take w2 = thread(counter_worker, 500, g_mtx, &g_counter);
 
     take w1_res = thread_join(w1);
     take w2_res = thread_join(w2);

@@ -77,7 +77,7 @@ take sys_user_name(take buf, take size_ptr) {
     return GetUserNameA(buf, size_ptr);
 }
 
-take user_name(take buf, take size_ptr) {
+take sys_user_name_buf(take buf, take size_ptr) {
     return sys_user_name(buf, size_ptr);
 }
 
@@ -89,7 +89,7 @@ take sys_pc_name(take buf, take size_ptr) {
     return GetComputerNameA(buf, size_ptr);
 }
 
-take pc_name(take buf, take size_ptr) {
+take sys_pc_name_buf(take buf, take size_ptr) {
     return sys_pc_name(buf, size_ptr);
 }
 

@@ -1782,6 +1782,19 @@ public:
                     else if (fn == "tg_del" && argc >= 2) {
                         push(GrassValue::Num(GrassTg::del(args[0].toString(), args[1].toString()) ? 1.0 : 0.0));
                     }
+                    else if (fn == "telegram_init" && argc >= 1) {
+                        GrassTg::init(args[0].toString());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "send_message" && argc >= 2) {
+                        push(GrassValue::Num(GrassTg::send(args[0].toString(), args[1].toString()) ? 1.0 : 0.0));
+                    }
+                    else if (fn == "send_photo" && argc >= 2) {
+                        push(GrassValue::Num(GrassTg::send_photo(args[0].toString(), args[1].toString(), argc >= 3 ? args[2].toString() : "") ? 1.0 : 0.0));
+                    }
+                    else if (fn == "send_document" && argc >= 2) {
+                        push(GrassValue::Num(GrassTg::send(args[0].toString(), args[1].toString()) ? 1.0 : 0.0));
+                    }
 
                     // ===== БИБЛИОТЕКА !fsys! =====
                     else if (fn == "fs_mkdir" && argc >= 1) {
@@ -2315,6 +2328,49 @@ public:
                         int pitch = (argc >= 4) ? (int)args[3].toNumber() : 0;
                         Grass2D::bind_framebuffer((void*)(uintptr_t)args[0].toNumber(), (int)args[1].toNumber(), (int)args[2].toNumber(), pitch);
                         push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "g2d_rect" && argc >= 5) {
+                        Grass2D::draw_rect((int)args[0].toNumber(), (int)args[1].toNumber(), (int)args[2].toNumber(), (int)args[3].toNumber(), (uint32_t)args[4].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "g2d_circle" && argc >= 4) {
+                        Grass2D::draw_circle((int)args[0].toNumber(), (int)args[1].toNumber(), (int)args[2].toNumber(), (uint32_t)args[3].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "g2d_line" && argc >= 5) {
+                        int w = (argc >= 6) ? (int)args[5].toNumber() : 1;
+                        Grass2D::draw_line((int)args[0].toNumber(), (int)args[1].toNumber(), (int)args[2].toNumber(), (int)args[3].toNumber(), (uint32_t)args[4].toNumber(), w);
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "g2d_text" && argc >= 5) {
+                        Grass2D::draw_text((int)args[0].toNumber(), (int)args[1].toNumber(), args[2].toString(), (int)args[3].toNumber(), (uint32_t)args[4].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "g2d_close") {
+                        Grass2D::close_window();
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "create_canvas" && argc >= 2) {
+                        push(GrassValue::Num(Grass2D::create_canvas((int)args[0].toNumber(), (int)args[1].toNumber()) ? 1.0 : 0.0));
+                    }
+                    else if (fn == "fill_color" && argc >= 1) {
+                        Grass2D::fill_color(args[0].toString());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "draw_rectangle" && argc >= 4) {
+                        Grass2D::canvas_rect((int)args[0].toNumber(), (int)args[1].toNumber(), (int)args[2].toNumber(), (int)args[3].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "draw_circle" && argc >= 3) {
+                        Grass2D::canvas_circle((int)args[0].toNumber(), (int)args[1].toNumber(), (int)args[2].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "draw_line" && argc >= 4) {
+                        Grass2D::canvas_line((int)args[0].toNumber(), (int)args[1].toNumber(), (int)args[2].toNumber(), (int)args[3].toNumber());
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "save_image" && argc >= 1) {
+                        push(GrassValue::Num(Grass2D::save_image(args[0].toString()) ? 1.0 : 0.0));
                     }
 
                     // ===== !gfx3d! (g3d_) =====
@@ -3288,6 +3344,15 @@ public:
                     }
                     else if (fn == "kbd_wait_ack") {
                         push(GrassValue::Num(GrassKeyboard::wait_ack() ? 1.0 : 0.0));
+                    }
+                    else if (fn == "fat_status") {
+                        push(GrassValue::Num(1.0));
+                    }
+                    else if (fn == "ticks") {
+                        push(GrassValue::Num((double)GrassTime::now_ms()));
+                    }
+                    else if (fn == "threads") {
+                        push(GrassValue::Num(1.0));
                     }
                     else if (vars.count(fn + "()")) push(vars[fn + "()"]);
                     else if (vars.count(fn)) push(vars[fn]);

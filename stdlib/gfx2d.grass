@@ -1,0 +1,21 @@
+!GrassGreen!
+
+// =============================================================================
+// GrassGreen Standard Library: 2D Graphics (!2d! / !gfx2d! / !2DGraphics!)
+// Software/GDI 2D Framebuffer, Sprites, Camera, Particles, Primitives, Input.
+// Builtin functions:
+//   g2d_window(title, w, h) -> int, g2d_is_open() -> bool
+//   g2d_clear(hex | r, g, b), g2d_present(), g2d_dt() -> float
+//   g2d_key_down(key_or_name) -> bool, g2d_mouse_x() -> int, g2d_mouse_y() -> int, g2d_mouse_btn(btn) -> bool
+//   g2d_load_tex(path) -> int, g2d_draw_sprite(tex, x, y, w, h [, angle, alpha])
+//   g2d_draw_frame(tex, fx, fy, fw, fh, x, y, w, h)
+//   g2d_cam_set(x, y [, zoom, angle]), g2d_cam_shake(intensity, duration)
+//   g2d_emit_particles(x, y, count [, color, speed, lifetime]), g2d_update_particles([dt])
+//   g2d_bind_framebuffer(addr, w, h [, pitch])
+//   g2d_rect(x, y, w, h, hex), g2d_circle(x, y, r, hex), g2d_line(x1, y1, x2, y2, hex [, width])
+//   g2d_text(x, y, text, size, hex), g2d_close()
+//   gfx_init(title, w, h) -> bool, gfx_running() -> bool, gfx_clear(hex)
+//   gfx_rect(x, y, w, h, hex), gfx_circle(x, y, r, hex), gfx_line(x1, y1, x2, y2, hex [, width])
+//   gfx_text(x, y, text, size, hex), gfx_key(name) -> bool, gfx_mouse_x() -> int, gfx_mouse_y() -> int
+//   gfx_mouse_down(btn) -> bool, gfx_collide(x1, y1, w1, h1, x2, y2, w2, h2) -> int, gfx_frame(fps), gfx_close()
+// =============================================================================

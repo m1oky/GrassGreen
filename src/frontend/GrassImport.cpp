@@ -309,6 +309,9 @@ namespace GrassImport {
                     requested_modules.push_back("stdlib/algo.grass");
                 } else if (lib == "!math3d!" || lib == "!Math3D!") {
                     requested_modules.push_back("stdlib/math3d.grass");
+                } else if (lib == "!2d!" || lib == "!2D!" || lib == "!gfx2d!" || lib == "!Gfx2D!" ||
+                           lib == "!2DGraphics!" || lib == "!2dgraphics!") {
+                    requested_modules.push_back("stdlib/gfx2d.grass");
                 } else if (lib == "!gfx3d!" || lib == "!Gfx3D!" || lib == "!3d!" || lib == "!3D!") {
                     requested_modules.push_back("stdlib/gfx3d.grass");
                 } else if (lib == "!physics!" || lib == "!Physics!") {
@@ -331,6 +334,7 @@ namespace GrassImport {
                 "stdlib/thread.grass",
                 "stdlib/algo.grass",
                 "stdlib/math3d.grass",
+                "stdlib/gfx2d.grass",
                 "stdlib/gfx3d.grass",
                 "stdlib/physics.grass"
             };
@@ -355,6 +359,7 @@ namespace GrassImport {
                                lower_root.find("stdlib/thread.grass") != std::string::npos ||
                                lower_root.find("stdlib/algo.grass") != std::string::npos ||
                                lower_root.find("stdlib/math3d.grass") != std::string::npos ||
+                               lower_root.find("stdlib/gfx2d.grass") != std::string::npos ||
                                lower_root.find("stdlib/gfx3d.grass") != std::string::npos ||
                                lower_root.find("stdlib/physics.grass") != std::string::npos);
 
