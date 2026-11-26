@@ -384,6 +384,8 @@ namespace grass::ir {
         TargetABI abi = TargetABI::Win64;
         TargetArch arch = TargetArch::X86_64;
         std::vector<std::unique_ptr<IRFunction>> functions;
+        std::unordered_map<std::string, uint64_t> data_globals;
+        uint64_t data_globals_size = 0;
 
         explicit IRModule(std::string name = "module");
 

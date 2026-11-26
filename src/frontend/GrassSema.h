@@ -59,6 +59,11 @@ struct SemaType {
         t.element_type = std::make_shared<SemaType>(elem);
         return t;
     }
+    static SemaType Array(const SemaType& elem) {
+        SemaType t(SemaTypeKind::Array, elem.toString(), 0);
+        t.element_type = std::make_shared<SemaType>(elem);
+        return t;
+    }
 
     bool is_pointer() const { return kind == SemaTypeKind::Pointer || pointer_depth > 0; }
     bool is_numeric() const { return (kind == SemaTypeKind::Int || kind == SemaTypeKind::Float) && !is_pointer(); }
@@ -77,7 +82,7 @@ struct SemaType {
         if (pointer_depth != other.pointer_depth) return false;
         if (kind != other.kind) return false;
         if (kind == SemaTypeKind::Struct) return name == other.name;
-        if (kind == SemaTypeKind::Pointer || kind == SemaTypeKind::Vec) {
+        if (kind == SemaTypeKind::Pointer || kind == SemaTypeKind::Vec || kind == SemaTypeKind::Array) {
             if (element_type && other.element_type) return element_type->equals(*other.element_type);
             return name == other.name;
         }

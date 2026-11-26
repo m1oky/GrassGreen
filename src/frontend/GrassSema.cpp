@@ -1390,6 +1390,7 @@ void GrassSema::checkVarDeclStmt(const VarDeclStmtAST* vdecl) {
     sym.loc = vdecl->loc;
     sym.is_const = vdecl->is_const;
     sym.is_initialized = (vdecl->init_expr != nullptr);
+    vdecl->inferred_type = decl_type.toString();
     current_scope_->declareVariable(sym);
 
     if (decl_type.is_vec()) {
@@ -2054,27 +2055,42 @@ SemaType GrassSema::checkIndexExpr(const IndexExprAST* idx) {
         reportError(idx->loc, "Array index must be integer, got '" + idx_type.toString() + "'.", "Use integer value for indexing");
     }
 
-    if (target_type.is_vec()) {
-        return target_type.element_type ? *target_type.element_type : SemaType::Any();
-    }
-    if (target_type.is_pointer() && target_type.element_type) {
+    SemaType res = SemaType::Any();
+    if (target_type.kind == SemaTypeKind::Array || target_type.is_vec()) {
+        res = target_type.element_type ? *target_type.element_type : SemaType::Any();
+    } else if (target_type.is_pointer() && target_type.element_type) {
         if (target_type.element_type->is_void()) {
-            return SemaType::Int();
+            res = SemaType::Int();
+        } else {
+            res = *target_type.element_type;
         }
-        return *target_type.element_type;
+    } else if (target_type.is_string()) {
+        res = SemaType::Int(); // char
     }
-    if (target_type.is_string()) {
-        return SemaType::Int(); // char
-    }
-    return SemaType::Any();
+    idx->inferred_type = res.toString();
+    return res;
 }
 
 SemaType GrassSema::checkArrayLiteralExpr(const ArrayLiteralExprAST* arr) {
-    SemaType elem_type = SemaType::Any();
+    SemaType elem_type = SemaType::Unknown();
     for (const auto& elem : arr->elements) {
-        checkExpr(elem.get());
+        SemaType et = checkExpr(elem.get());
+        if (elem_type.is_unknown()) {
+            elem_type = et;
+        } else if (!elem_type.equals(et)) {
+            if (elem_type.is_numeric() && et.is_numeric()) {
+                elem_type = SemaType::Float();
+            } else {
+                elem_type = SemaType::Any();
+            }
+        }
     }
-    return SemaType(SemaTypeKind::Array, elem_type.name);
+    if (elem_type.is_unknown()) {
+        elem_type = SemaType::Any();
+    }
+    SemaType res = SemaType::Array(elem_type);
+    arr->inferred_type = res.toString();
+    return res;
 }
 
 SemaType GrassSema::checkAllocExpr(const AllocExprAST* alloc) {

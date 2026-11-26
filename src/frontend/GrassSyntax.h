@@ -667,6 +667,7 @@ struct ASTNode {
 };
 
 struct ExprAST : public ASTNode {
+    mutable std::string inferred_type;
     explicit ExprAST(NodeKind k, const SourceLocation& l = SourceLocation()) : ASTNode(k, l) {}
 };
 
@@ -822,6 +823,7 @@ struct VarDeclStmtAST : public StmtAST {
     int pointer_depth = 0;
     bool is_const = false;
     std::unique_ptr<ExprAST> init_expr;
+    mutable std::string inferred_type;
 
     VarDeclStmtAST(const SourceLocation& l, const std::string& tname, const std::string& vname,
                    int ptr_depth = 0, bool c = false, std::unique_ptr<ExprAST> init = nullptr)

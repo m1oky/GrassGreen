@@ -414,12 +414,34 @@ int64_t memory_free_block(int64_t block_addr) {
             bool is_vec = false;
             ir::IRType* vec_elem_type = nullptr;
             std::string vec_elem_struct;
+            bool is_array = false;
+            ir::IRType* array_elem_type = nullptr;
+            std::string array_elem_struct;
+            bool is_global = false;
+            std::string global_sym;
         };
         struct ScopeFrame {
             std::unordered_map<std::string, VarBinding> vars;
             std::vector<std::string> raii_vars;
         };
         std::vector<ScopeFrame> scopes_;
+        std::unordered_map<ir::ValueId, ir::IRType*> expr_array_elem_types_;
+        std::unordered_map<ir::ValueId, std::string> expr_array_elem_structs_;
+
+        struct GlobalDeclSpec {
+            std::string global_sym;
+            std::string var_name;
+            std::string type_name;
+            bool is_explicit_ptr = false;
+            ir::IRType* decl_type = nullptr;
+            std::string struct_name;
+            bool has_init = false;
+            size_t init_start_pos = 0;
+            size_t init_end_pos = 0;
+        };
+        std::vector<GlobalDeclSpec> global_decls_;
+        std::unordered_map<std::string, VarBinding> global_vars_;
+        bool globals_initialized_ = false;
 
         struct LoopContext {
             ir::BasicBlock* b_step = nullptr;
@@ -618,9 +640,21 @@ int64_t memory_free_block(int64_t block_addr) {
 
         bool declare_var(const std::string& name, ir::ValueId alloca_id, ir::IRType* type,
                          const std::string& struct_name = "", bool is_raii = false,
-                         bool is_vec = false, ir::IRType* vec_elem_t = nullptr, const std::string& vec_elem_struct = "") {
+                         bool is_vec = false, ir::IRType* vec_elem_t = nullptr, const std::string& vec_elem_struct = "",
+                         bool is_array = false, ir::IRType* arr_elem_t = nullptr, const std::string& arr_elem_struct = "") {
             if (scopes_.empty()) push_scope();
-            scopes_.back().vars[name] = { alloca_id, type, struct_name, is_raii, is_vec, vec_elem_t, vec_elem_struct };
+            VarBinding vb;
+            vb.alloca_id = alloca_id;
+            vb.type = type;
+            vb.struct_type_name = struct_name;
+            vb.is_raii = is_raii;
+            vb.is_vec = is_vec;
+            vb.vec_elem_type = vec_elem_t;
+            vb.vec_elem_struct = vec_elem_struct;
+            vb.is_array = is_array;
+            vb.array_elem_type = arr_elem_t;
+            vb.array_elem_struct = arr_elem_struct;
+            scopes_.back().vars[name] = vb;
             if (is_raii) {
                 scopes_.back().raii_vars.push_back(name);
             }
@@ -632,7 +666,114 @@ int64_t memory_free_block(int64_t block_addr) {
                 auto f = it->vars.find(name);
                 if (f != it->vars.end()) return &f->second;
             }
+            auto gf = global_vars_.find(name);
+            if (gf != global_vars_.end()) return &gf->second;
             return nullptr;
+        }
+
+        VarBinding* lookup_var_mut(const std::string& name) {
+            for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
+                auto f = it->vars.find(name);
+                if (f != it->vars.end()) return &f->second;
+            }
+            auto gf = global_vars_.find(name);
+            if (gf != global_vars_.end()) return &gf->second;
+            return nullptr;
+        }
+
+        ir::ValueId var_addr(const VarBinding* var) {
+            if (!var) return 0;
+            if (var->is_global) {
+                ir::IRType* pt = ctx_.get_ptr_type(var->type ? var->type : ctx_.get_i64_type());
+                return builder_.create_call(var->global_sym, pt, {});
+            }
+            return var->alloca_id;
+        }
+
+        ir::IRType* predict_array_elem_from_tokens(const std::vector<GrassToken>& toks, size_t start, size_t end) {
+            ir::IRType* deduced = nullptr;
+            size_t i = start;
+            if (i < end && toks[i].kind == TOK_LBRACKET) i++;
+            int bdepth = 0, pdepth = 0;
+            while (i < end) {
+                const auto& tk = toks[i];
+                if (tk.kind == TOK_LBRACKET) { bdepth++; i++; continue; }
+                if (tk.kind == TOK_RBRACKET) {
+                    if (bdepth == 0) break;
+                    bdepth--; i++; continue;
+                }
+                if (tk.kind == TOK_LPAREN) { pdepth++; i++; continue; }
+                if (tk.kind == TOK_RPAREN) { if (pdepth > 0) pdepth--; i++; continue; }
+                if (bdepth == 0 && pdepth == 0) {
+                    ir::IRType* et = nullptr;
+                    if (tk.kind == TOK_STRING) {
+                        et = ctx_.get_ptr_type(ctx_.get_i8_type());
+                    } else if (tk.kind == TOK_NUMBER) {
+                        bool is_fp = (tk.text.find('.') != std::string::npos ||
+                                      tk.text.find('e') != std::string::npos ||
+                                      tk.text.find('E') != std::string::npos);
+                        et = is_fp ? ctx_.get_f64_type() : ctx_.get_i64_type();
+                    } else if (tk.kind == TOK_IDENT && (tk.text == "true" || tk.text == "false")) {
+                        et = ctx_.get_i1_type();
+                    } else if (tk.kind == TOK_IDENT) {
+                        if (const VarBinding* vb = lookup_var(tk.text)) {
+                            et = vb->type;
+                        }
+                    }
+                    if (et) {
+                        if (!deduced) deduced = et;
+                        else if (!deduced->equals(et)) {
+                            if (deduced->is_numeric() && et->is_numeric() &&
+                                (deduced->is_floating_point() || et->is_floating_point())) {
+                                deduced = ctx_.get_f64_type();
+                            }
+                        }
+                    }
+                }
+                i++;
+            }
+            return deduced ? deduced : ctx_.get_i64_type();
+        }
+
+        ir::ValueId encode_array_slot(ir::ValueId val, ir::IRType* target_elem_t) {
+            if (!builder_.get_function() || !builder_.get_function()->has_value(val)) return val;
+            ir::IRType* vt = builder_.get_function()->get_value(val).type;
+            ir::IRType* use_t = target_elem_t ? target_elem_t : vt;
+            if (use_t && use_t->is_floating_point()) {
+                ir::ValueId fv = coerce_type(val, ctx_.get_f64_type());
+                return builder_.create_bitcast(fv, ctx_.get_i64_type(), "arr_f2i");
+            }
+            if (vt && vt->is_pointer()) {
+                return builder_.create_ptrtoint(val, ctx_.get_i64_type());
+            }
+            return coerce_type(val, ctx_.get_i64_type());
+        }
+
+        ir::ValueId decode_array_slot(ir::ValueId raw_i64, ir::IRType* elem_t, const std::string& elem_struct = "") {
+            if (!elem_t) {
+                last_struct_name_.clear();
+                return raw_i64;
+            }
+            if (elem_t->is_floating_point()) {
+                last_struct_name_.clear();
+                return builder_.create_bitcast(raw_i64, ctx_.get_f64_type(), "arr_i2f");
+            }
+            if (elem_t->is_pointer()) {
+                if (!elem_struct.empty()) {
+                    last_struct_name_ = elem_struct;
+                } else if (elem_t->element_type && elem_t->element_type->is_struct()) {
+                    last_struct_name_ = elem_t->element_type->struct_name;
+                } else {
+                    last_struct_name_.clear();
+                }
+                return builder_.create_inttoptr(raw_i64, elem_t, "arr_i2p");
+            }
+            if (elem_t->is_bool()) {
+                last_struct_name_.clear();
+                return builder_.create_icmp_ne(raw_i64, builder_.create_const_i64(0), "arr_i2b");
+            }
+            last_struct_name_.clear();
+            return coerce_type(raw_i64, elem_t);
         }
 
         void emit_zero_struct(ir::ValueId struct_alloca, ir::IRType* st_type) {
@@ -1103,6 +1244,75 @@ int64_t memory_free_block(int64_t block_addr) {
                 if (!parse_function(error)) return false;
                 return true;
             }
+            if (is_var_keyword(peek().text) || is_type_or_func_keyword(peek().text) || (oop_mgr_ && oop_mgr_->has_class(peek().text))) {
+                std::string tname = advance().text;
+                bool is_explicit_ptr = false;
+                ir::IRType* dt = (oop_mgr_ && oop_mgr_->has_class(tname))
+                    ? (oop_mgr_->get_class(tname)->ir_struct_type ? oop_mgr_->get_class(tname)->ir_struct_type : ctx_.get_i64_type())
+                    : parse_type_name(tname);
+                std::string sname = (oop_mgr_ && oop_mgr_->has_class(tname)) ? tname : "";
+                while (match(TOK_STAR)) {
+                    dt = ctx_.get_ptr_type(dt);
+                    is_explicit_ptr = true;
+                }
+                while (peek().kind == TOK_IDENT) {
+                    std::string vname = advance().text;
+                    std::string gsym = "__grass_g_" + std::to_string(global_decls_.size()) + "_" + vname;
+                    module_.data_globals[gsym] = module_.data_globals_size;
+                    module_.data_globals_size += 8;
+
+                    GlobalDeclSpec spec;
+                    spec.global_sym = gsym;
+                    spec.var_name = vname;
+                    spec.type_name = tname;
+                    spec.is_explicit_ptr = is_explicit_ptr;
+                    spec.decl_type = dt;
+                    spec.struct_name = sname;
+
+                    VarBinding gvb;
+                    gvb.type = dt;
+                    gvb.struct_type_name = sname;
+                    gvb.is_global = true;
+                    gvb.global_sym = gsym;
+
+                    if (match(TOK_ASSIGN)) {
+                        spec.has_init = true;
+                        spec.init_start_pos = pos_;
+                        int bdepth = 0, pdepth = 0;
+                        while (peek().kind != TOK_EOF) {
+                            if (bdepth == 0 && pdepth == 0 && (peek().kind == TOK_SEMI || peek().kind == TOK_COMMA)) break;
+                            if (peek().kind == TOK_LBRACKET) bdepth++;
+                            else if (peek().kind == TOK_RBRACKET && bdepth > 0) bdepth--;
+                            else if (peek().kind == TOK_LPAREN) pdepth++;
+                            else if (peek().kind == TOK_RPAREN && pdepth > 0) pdepth--;
+                            advance();
+                        }
+                        spec.init_end_pos = pos_;
+                        if ((tname == "take" || tname == "var" || tname == "set") && spec.init_start_pos < spec.init_end_pos) {
+                            const auto& first = tokens_[spec.init_start_pos];
+                            if (first.kind == TOK_LBRACKET) {
+                                gvb.type = ctx_.get_ptr_type();
+                                gvb.is_array = true;
+                                gvb.array_elem_type = predict_array_elem_from_tokens(tokens_, spec.init_start_pos, spec.init_end_pos);
+                            } else if (first.kind == TOK_STRING) {
+                                gvb.type = ctx_.get_ptr_type(ctx_.get_i8_type());
+                            } else if (first.kind == TOK_NUMBER) {
+                                bool is_fp = (first.text.find('.') != std::string::npos ||
+                                              first.text.find('e') != std::string::npos ||
+                                              first.text.find('E') != std::string::npos);
+                                gvb.type = is_fp ? ctx_.get_f64_type() : ctx_.get_i64_type();
+                            } else if (first.kind == TOK_IDENT && (first.text == "true" || first.text == "false")) {
+                                gvb.type = ctx_.get_i1_type();
+                            }
+                        }
+                    }
+                    global_vars_[vname] = gvb;
+                    global_decls_.push_back(std::move(spec));
+                    if (!match(TOK_COMMA)) break;
+                }
+                match(TOK_SEMI);
+                return true;
+            }
             advance();
             return true;
         }
@@ -1498,6 +1708,8 @@ int64_t memory_free_block(int64_t block_addr) {
 
             builder_.set_function(fn);
             scopes_.clear();
+            expr_array_elem_types_.clear();
+            expr_array_elem_structs_.clear();
             push_scope();
 
             if (!consume(TOK_LPAREN, "Expected '(' in function signature!", error)) return false;
@@ -1564,6 +1776,41 @@ int64_t memory_free_block(int64_t block_addr) {
                 builder_.create_store(fn->arguments[i].id, alloca_id);
                 declare_var(params[i].name, alloca_id, params[i].type, params[i].struct_name, false,
                             params[i].is_vec, params[i].vec_elem_t, params[i].vec_elem_struct);
+            }
+
+            if (mangled_name == "main" && !globals_initialized_ && !global_decls_.empty()) {
+                globals_initialized_ = true;
+                size_t saved_pos = pos_;
+                for (const auto& gd : global_decls_) {
+                    VarBinding* gvb = lookup_var_mut(gd.var_name);
+                    if (!gvb) continue;
+                    if (gd.has_init && gd.init_start_pos < gd.init_end_pos) {
+                        pos_ = gd.init_start_pos;
+                        last_struct_name_.clear();
+                        ir::ValueId init_val = parse_expression(error);
+                        if (!init_val) {
+                            pos_ = saved_pos;
+                            return false;
+                        }
+                        if (gd.type_name == "take" || gd.type_name == "var" || gd.type_name == "set") {
+                            ir::IRType* actual_t = builder_.get_function()->get_value(init_val).type;
+                            if (actual_t && !actual_t->is_void()) gvb->type = actual_t;
+                            auto arr_it = expr_array_elem_types_.find(init_val);
+                            if (arr_it != expr_array_elem_types_.end()) {
+                                gvb->is_array = true;
+                                gvb->array_elem_type = arr_it->second;
+                                if (expr_array_elem_structs_.count(init_val)) {
+                                    gvb->array_elem_struct = expr_array_elem_structs_[init_val];
+                                }
+                            }
+                        } else {
+                            init_val = coerce_type(init_val, gvb->type);
+                        }
+                        ir::ValueId gaddr = var_addr(gvb);
+                        builder_.create_store(init_val, gaddr);
+                    }
+                }
+                pos_ = saved_pos;
             }
 
             while (peek().kind != TOK_RBRACE && peek().kind != TOK_EOF) {
@@ -1832,7 +2079,7 @@ int64_t memory_free_block(int64_t block_addr) {
                         if (b->type->is_i32()) {
                             read_val = builder_.create_trunc(read_val, ctx_.get_i32_type());
                         }
-                        builder_.create_store(read_val, b->alloca_id);
+                        builder_.create_store(read_val, var_addr(b));
                     }
                 }
                 in_stream_io_ = prev_io;
@@ -1944,8 +2191,11 @@ int64_t memory_free_block(int64_t block_addr) {
                         }
                         bool is_ptr_or_borrowed = cur_vtype->is_pointer() || last_expr_is_borrowed_ptr_;
                         bool raii = has_raii_dtor(struct_name, is_ptr_or_borrowed);
+                        bool is_arr = expr_array_elem_types_.count(init_val) > 0;
+                        ir::IRType* arr_et = is_arr ? expr_array_elem_types_[init_val] : nullptr;
+                        std::string arr_es = expr_array_elem_structs_.count(init_val) ? expr_array_elem_structs_[init_val] : "";
                         ir::ValueId alloca_id = builder_.create_alloca(cur_vtype, 1, 0, var_name);
-                        declare_var(var_name, alloca_id, cur_vtype, struct_name, raii);
+                        declare_var(var_name, alloca_id, cur_vtype, struct_name, raii, false, nullptr, "", is_arr, arr_et, arr_es);
                         builder_.create_store(init_val, alloca_id);
                     } else if (match(TOK_ASSIGN)) {
                         last_struct_name_.clear();
@@ -1968,8 +2218,11 @@ int64_t memory_free_block(int64_t block_addr) {
                         }
                         bool is_ptr_or_borrowed = cur_explicit_ptr || (cur_vtype && cur_vtype->is_pointer()) || last_expr_is_borrowed_ptr_;
                         bool raii = has_raii_dtor(struct_name, is_ptr_or_borrowed);
+                        bool is_arr = expr_array_elem_types_.count(init_val) > 0;
+                        ir::IRType* arr_et = is_arr ? expr_array_elem_types_[init_val] : nullptr;
+                        std::string arr_es = expr_array_elem_structs_.count(init_val) ? expr_array_elem_structs_[init_val] : "";
                         ir::ValueId alloca_id = builder_.create_alloca(cur_vtype, 1, 0, var_name);
-                        declare_var(var_name, alloca_id, cur_vtype, struct_name, raii);
+                        declare_var(var_name, alloca_id, cur_vtype, struct_name, raii, false, nullptr, "", is_arr, arr_et, arr_es);
                         ir::IRType* init_t = builder_.get_function()->get_value(init_val).type;
                         if (cur_vtype && cur_vtype->is_struct() && init_t && init_t->is_pointer()) {
                             emit_copy_struct(alloca_id, init_val, cur_vtype);
@@ -2463,10 +2716,11 @@ int64_t memory_free_block(int64_t block_addr) {
                         error = "Undeclared array: " + arr_name;
                         return 0;
                     }
-                    ir::ValueId arr_ptr = builder_.create_load(var->alloca_id, arr_name + "_ptr");
+                    ir::ValueId vaddr = var_addr(var);
+                    ir::ValueId arr_ptr = builder_.create_load(vaddr, arr_name + "_ptr");
                     bool is_typed_ptr = (var->type && var->type->is_pointer() &&
                                          var->type->element_type && !var->type->element_type->is_void() &&
-                                         !var->is_vec);
+                                         !var->is_vec && !var->is_array);
                     if (var->is_vec && var->vec_elem_type) {
                         ir::IRType* elem_t = var->vec_elem_type;
                         ir::ValueId vec_p = (var->type && var->type->is_pointer()) ? arr_ptr : var->alloca_id;
@@ -2531,17 +2785,31 @@ int64_t memory_free_block(int64_t block_addr) {
                             return computed;
                         }
                     } else {
+                        ir::ValueId idx64 = coerce_type(idx, ctx_.get_i64_type());
+                        ir::IRType* elem_t = var->is_array ? var->array_elem_type : nullptr;
                         if (op == TOK_ASSIGN) {
-                            builder_.create_call("grass_array_set", ctx_.get_void_type(), { arr_ptr, idx, rhs });
-                            return rhs;
+                            ir::ValueId enc = encode_array_slot(rhs, elem_t);
+                            builder_.create_call("grass_array_set", ctx_.get_void_type(), { arr_ptr, idx64, enc });
+                            return elem_t ? coerce_type(rhs, elem_t) : rhs;
                         } else {
-                            ir::ValueId cur = builder_.create_call("grass_array_get", ctx_.get_i64_type(), { arr_ptr, idx });
+                            ir::ValueId raw = builder_.create_call("grass_array_get", ctx_.get_i64_type(), { arr_ptr, idx64 });
+                            ir::ValueId cur = decode_array_slot(raw, elem_t, var->array_elem_struct);
+                            match_types(cur, rhs);
+                            ir::IRType* lt = builder_.get_function()->get_value(cur).type;
                             ir::ValueId computed = 0;
-                            if (op == TOK_PLUS_ASSIGN) computed = builder_.create_add(cur, rhs);
-                            else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_sub(cur, rhs);
-                            else if (op == TOK_MUL_ASSIGN) computed = builder_.create_mul(cur, rhs);
-                            else if (op == TOK_DIV_ASSIGN) computed = builder_.create_sdiv(cur, rhs);
-                            builder_.create_call("grass_array_set", ctx_.get_void_type(), { arr_ptr, idx, computed });
+                            if (lt && lt->is_floating_point()) {
+                                if (op == TOK_PLUS_ASSIGN) computed = builder_.create_fadd(cur, rhs);
+                                else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_fsub(cur, rhs);
+                                else if (op == TOK_MUL_ASSIGN) computed = builder_.create_fmul(cur, rhs);
+                                else computed = builder_.create_fdiv(cur, rhs);
+                            } else {
+                                if (op == TOK_PLUS_ASSIGN) computed = builder_.create_add(cur, rhs);
+                                else if (op == TOK_MINUS_ASSIGN) computed = builder_.create_sub(cur, rhs);
+                                else if (op == TOK_MUL_ASSIGN) computed = builder_.create_mul(cur, rhs);
+                                else computed = builder_.create_sdiv(cur, rhs);
+                            }
+                            ir::ValueId enc = encode_array_slot(computed, elem_t);
+                            builder_.create_call("grass_array_set", ctx_.get_void_type(), { arr_ptr, idx64, enc });
                             return computed;
                         }
                     }
@@ -2556,7 +2824,7 @@ int64_t memory_free_block(int64_t block_addr) {
                 std::string var_name = advance().text;
                 GrassTokenKind op = advance().kind;
 
-                const VarBinding* var = lookup_var(var_name);
+                VarBinding* var = lookup_var_mut(var_name);
                 if (!var) {
                     error = "Undeclared variable: " + var_name;
                     return 0;
@@ -2565,20 +2833,28 @@ int64_t memory_free_block(int64_t block_addr) {
                 ir::ValueId rhs = parse_assignment(error);
                 if (!rhs) return 0;
 
+                ir::ValueId vaddr = var_addr(var);
                 if (op == TOK_ASSIGN) {
                     if (var->is_raii) {
                         emit_var_dtor(*var);
                     }
+                    if (expr_array_elem_types_.count(rhs)) {
+                        var->is_array = true;
+                        var->array_elem_type = expr_array_elem_types_[rhs];
+                        if (expr_array_elem_structs_.count(rhs)) {
+                            var->array_elem_struct = expr_array_elem_structs_[rhs];
+                        }
+                    }
                     ir::IRType* rhs_t = builder_.get_function()->get_value(rhs).type;
                     if (var->type && var->type->is_struct() && rhs_t && rhs_t->is_pointer()) {
-                        emit_copy_struct(var->alloca_id, rhs, var->type);
+                        emit_copy_struct(vaddr, rhs, var->type);
                     } else {
                         rhs = coerce_type(rhs, var->type);
-                        builder_.create_store(rhs, var->alloca_id);
+                        builder_.create_store(rhs, vaddr);
                     }
                     return rhs;
                 } else {
-                    ir::ValueId cur = builder_.create_load(var->alloca_id, var_name);
+                    ir::ValueId cur = builder_.create_load(vaddr, var_name);
                     match_types(cur, rhs);
                     ir::IRType* lt = builder_.get_function()->get_value(cur).type;
                     ir::ValueId computed = 0;
@@ -2595,7 +2871,7 @@ int64_t memory_free_block(int64_t block_addr) {
                     }
 
                     computed = coerce_type(computed, var->type);
-                    builder_.create_store(computed, var->alloca_id);
+                    builder_.create_store(computed, vaddr);
                     return computed;
                 }
             }
@@ -3018,10 +3294,11 @@ int64_t memory_free_block(int64_t block_addr) {
                     std::string var_name = advance().text;
                     const VarBinding* var = lookup_var(var_name);
                     if (!var) { error = "Undeclared variable: " + var_name; return 0; }
-                    ir::ValueId cur = builder_.create_load(var->alloca_id, var_name);
+                    ir::ValueId vaddr = var_addr(var);
+                    ir::ValueId cur = builder_.create_load(vaddr, var_name);
                     ir::ValueId one = builder_.create_const_int(var->type, 1);
                     ir::ValueId next = builder_.create_add(cur, one);
-                    builder_.create_store(next, var->alloca_id);
+                    builder_.create_store(next, vaddr);
                     return next;
                 }
             }
@@ -3031,10 +3308,11 @@ int64_t memory_free_block(int64_t block_addr) {
                     std::string var_name = advance().text;
                     const VarBinding* var = lookup_var(var_name);
                     if (!var) { error = "Undeclared variable: " + var_name; return 0; }
-                    ir::ValueId cur = builder_.create_load(var->alloca_id, var_name);
+                    ir::ValueId vaddr = var_addr(var);
+                    ir::ValueId cur = builder_.create_load(vaddr, var_name);
                     ir::ValueId one = builder_.create_const_int(var->type, 1);
                     ir::ValueId next = builder_.create_sub(cur, one);
-                    builder_.create_store(next, var->alloca_id);
+                    builder_.create_store(next, vaddr);
                     return next;
                 }
             }
@@ -3198,7 +3476,8 @@ int64_t memory_free_block(int64_t block_addr) {
                             last_struct_name_.clear();
                             base = builder_.create_load(elem_ptr, "vec_idx_val");
                         }
-                    } else if (base_t && base_t->is_pointer() && base_t->element_type && !base_t->element_type->is_void()) {
+                    } else if (base_t && base_t->is_pointer() && base_t->element_type &&
+                               !base_t->element_type->is_void() && !expr_array_elem_types_.count(base)) {
                         ir::IRType* elem_t = base_t->element_type;
                         ir::ValueId idx64 = coerce_type(idx, ctx_.get_i64_type());
                         ir::ValueId elem_ptr = builder_.create_gep(base, { idx64 }, elem_t, "ptr_idx_gep");
@@ -3213,7 +3492,12 @@ int64_t memory_free_block(int64_t block_addr) {
                             base = builder_.create_load(elem_ptr, "ptr_idx_val");
                         }
                     } else {
-                        base = builder_.create_call("grass_array_get", ctx_.get_i64_type(), { base, idx });
+                        ir::ValueId idx64 = coerce_type(idx, ctx_.get_i64_type());
+                        ir::ValueId raw = builder_.create_call("grass_array_get", ctx_.get_i64_type(), { base, idx64 });
+                        auto arr_et_it = expr_array_elem_types_.find(base);
+                        ir::IRType* arr_et = (arr_et_it != expr_array_elem_types_.end()) ? arr_et_it->second : nullptr;
+                        std::string arr_es = expr_array_elem_structs_.count(base) ? expr_array_elem_structs_[base] : "";
+                        base = decode_array_slot(raw, arr_et, arr_es);
                     }
                     continue;
                 }
@@ -3235,15 +3519,49 @@ int64_t memory_free_block(int64_t block_addr) {
 
             // Array literal: [] or [elem1, elem2, ...]
             if (match(TOK_LBRACKET)) {
-                ir::ValueId arr = builder_.create_call("grass_array_create", ctx_.get_ptr_type(), {});
+                std::vector<ir::ValueId> elems;
+                std::vector<std::string> elem_structs;
+                ir::IRType* elem_t = nullptr;
+                std::string elem_struct;
                 if (!match(TOK_RBRACKET)) {
                     do {
-                        ir::ValueId elem = parse_expression(error);
-                        if (!elem) return 0;
-                        builder_.create_call("grass_array_push", ctx_.get_void_type(), { arr, elem });
+                        last_struct_name_.clear();
+                        ir::ValueId ev = parse_expression(error);
+                        if (!ev) return 0;
+                        elems.push_back(ev);
+                        elem_structs.push_back(last_struct_name_);
+                        ir::IRType* et = builder_.get_function()->has_value(ev)
+                            ? builder_.get_function()->get_value(ev).type : nullptr;
+                        if (et) {
+                            if (!elem_t) {
+                                elem_t = et;
+                                elem_struct = last_struct_name_;
+                            } else if (!elem_t->equals(et)) {
+                                if (elem_t->is_numeric() && et->is_numeric() &&
+                                    (elem_t->is_floating_point() || et->is_floating_point())) {
+                                    elem_t = ctx_.get_f64_type();
+                                    elem_struct.clear();
+                                } else {
+                                    elem_t = ctx_.get_i64_type();
+                                    elem_struct.clear();
+                                }
+                            }
+                        }
                     } while (match(TOK_COMMA));
                     if (!consume(TOK_RBRACKET, "Expected ']' closing array literal!", error)) return 0;
                 }
+                ir::ValueId arr = builder_.create_call("grass_array_create", ctx_.get_ptr_type(), {});
+                for (size_t ei = 0; ei < elems.size(); ++ei) {
+                    ir::ValueId pushed = encode_array_slot(elems[ei], elem_t);
+                    builder_.create_call("grass_array_push", ctx_.get_void_type(), { arr, pushed });
+                }
+                if (elem_t) {
+                    expr_array_elem_types_[arr] = elem_t;
+                    if (!elem_struct.empty()) {
+                        expr_array_elem_structs_[arr] = elem_struct;
+                    }
+                }
+                last_struct_name_.clear();
                 return arr;
             }
 
@@ -3631,29 +3949,37 @@ int64_t memory_free_block(int64_t block_addr) {
                     error = "Undeclared identifier: " + ident;
                     return 0;
                 }
+                ir::ValueId vaddr = var_addr(var);
                 if (!var->struct_type_name.empty()) {
                     last_struct_name_ = var->struct_type_name;
                     if (var->type && var->type->is_pointer()) {
-                        return builder_.create_load(var->alloca_id, ident + "_ptr");
+                        return builder_.create_load(vaddr, ident + "_ptr");
                     }
-                    return var->alloca_id;
+                    return vaddr;
                 }
                 last_struct_name_.clear();
                 if (match(TOK_INC)) {
-                    ir::ValueId cur = builder_.create_load(var->alloca_id, ident);
+                    ir::ValueId cur = builder_.create_load(vaddr, ident);
                     ir::ValueId one = builder_.create_const_int(var->type, 1);
                     ir::ValueId next = builder_.create_add(cur, one);
-                    builder_.create_store(next, var->alloca_id);
+                    builder_.create_store(next, vaddr);
                     return cur; // Postfix returns old value
                 }
                 if (match(TOK_DEC)) {
-                    ir::ValueId cur = builder_.create_load(var->alloca_id, ident);
+                    ir::ValueId cur = builder_.create_load(vaddr, ident);
                     ir::ValueId one = builder_.create_const_int(var->type, 1);
                     ir::ValueId next = builder_.create_sub(cur, one);
-                    builder_.create_store(next, var->alloca_id);
+                    builder_.create_store(next, vaddr);
                     return cur; // Postfix returns old value
                 }
-                return builder_.create_load(var->alloca_id, ident);
+                ir::ValueId loaded = builder_.create_load(vaddr, ident);
+                if (var->is_array && var->array_elem_type) {
+                    expr_array_elem_types_[loaded] = var->array_elem_type;
+                    if (!var->array_elem_struct.empty()) {
+                        expr_array_elem_structs_[loaded] = var->array_elem_struct;
+                    }
+                }
+                return loaded;
             }
 
             error = "Line " + std::to_string(peek().line) + ": Unexpected token in expression: " + peek().text;
@@ -3796,7 +4122,7 @@ int64_t memory_free_block(int64_t block_addr) {
         unit.abi = options_.abi;
         unit.text.clear();
         unit.rodata = rodata;
-        unit.data.clear();
+        unit.data.assign(static_cast<size_t>(module.data_globals_size), 0);
         unit.bss_size = 0;
         unit.symbols.clear();
         unit.relocations.clear();
@@ -3808,6 +4134,18 @@ int64_t memory_free_block(int64_t block_addr) {
             sym.section = backend::SectionKind::RoData;
             sym.offset = off;
             sym.size = 0;
+            sym.is_global = false;
+            sym.is_external = false;
+            unit.symbols.push_back(sym);
+        }
+
+        // Register writable global data symbols
+        for (const auto& [name, off] : module.data_globals) {
+            backend::SymbolDef sym;
+            sym.name = name;
+            sym.section = backend::SectionKind::Data;
+            sym.offset = off;
+            sym.size = 8;
             sym.is_global = false;
             sym.is_external = false;
             unit.symbols.push_back(sym);
@@ -4631,8 +4969,8 @@ int64_t memory_free_block(int64_t block_addr) {
                                 break;
                             }
 
-                            // Check if callee is a string symbol in rodata
-                            if (rodata_symbols.count(inst->callee_name)) {
+                            // Check if callee is a string/global symbol in rodata or writable data
+                            if (rodata_symbols.count(inst->callee_name) || module.data_globals.count(inst->callee_name)) {
                                 encoder.lea_symbol(backend::Reg::RAX, inst->callee_name);
                                 store_val(inst->result_id, backend::Reg::RAX);
                                 break;
@@ -4857,8 +5195,26 @@ int64_t memory_free_block(int64_t block_addr) {
                         case ir::IROp::PtrToInt:
                         case ir::IROp::IntToPtr:
                         case ir::IROp::Bitcast: {
-                            backend::Reg src = load_val(inst->operands[0], backend::Reg::R10);
-                            store_val(inst->result_id, src);
+                            ir::IRType* src_t = fn->get_value(inst->operands[0]).type;
+                            ir::IRType* dst_t = inst->type;
+                            bool src_fp = src_t && src_t->is_floating_point();
+                            bool dst_fp = dst_t && dst_t->is_floating_point();
+                            if (src_fp && !dst_fp) {
+                                backend::Reg src = load_val(inst->operands[0], backend::Reg::XMM0);
+                                backend::Reg dst = get_loc_reg(inst->result_id);
+                                backend::Reg out = (dst != backend::Reg::None && backend::reg_is_gpr(dst)) ? dst : backend::Reg::RAX;
+                                encoder.movq_rx(out, src);
+                                store_val(inst->result_id, out);
+                            } else if (!src_fp && dst_fp) {
+                                backend::Reg src = load_val(inst->operands[0], backend::Reg::RAX);
+                                backend::Reg dst = get_loc_reg(inst->result_id);
+                                backend::Reg out = (dst != backend::Reg::None && backend::reg_is_xmm(dst)) ? dst : backend::Reg::XMM0;
+                                encoder.movq_xr(out, src);
+                                store_val(inst->result_id, out);
+                            } else {
+                                backend::Reg src = load_val(inst->operands[0], backend::Reg::R10);
+                                store_val(inst->result_id, src);
+                            }
                             break;
                         }
                         case ir::IROp::Phi: {
