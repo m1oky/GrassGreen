@@ -16,10 +16,17 @@ where cl.exe >nul 2>&1
 if %ERRORLEVEL% equ 0 (
     echo [GrassCompiler] Compiling with MSVC /MP...
     cl /nologo /std:c++20 /O2 /MP /EHsc /utf-8 /Isrc /Iinclude ^
-      src/cli/grassc.cpp ^
-      src/frontend/GrassSyntax.cpp src/frontend/GrassSema.cpp src/frontend/GrassImport.cpp src/frontend/GrassLangGen.cpp ^
-      src/native/GrassIR.cpp src/native/GrassNativeCodegen.cpp src/native/GrassNativeOOP.cpp src/native/GrassNativeMemory.cpp src/native/GrassNativeStdlib.cpp src/native/GrassNativeDebug.cpp src/native/GrassAdvancedOpt.cpp src/native/GrassX86Encoder.cpp src/native/GrassObjWriter.cpp src/native/GrassElfWriter.cpp ^
-      src/vm/GrassOptimizer.cpp src/vm/GrassJIT.cpp src/vm/GrassMemory.cpp src/vm/GrassFFI.cpp ^
+      src/cli/grassc.cpp src/cli/GrassInstaller.cpp src/cli/GrassPacker.cpp src/cli/GrassDiag.cpp ^
+      src/frontend/GrassLexer.cpp src/frontend/GrassSyntax.cpp src/frontend/GrassBytecodeExpr.cpp src/frontend/GrassBytecodeUI.cpp src/frontend/GrassBytecodeStmt.cpp src/frontend/GrassBytecodeControl.cpp src/frontend/GrassBytecodeDecl.cpp src/frontend/GrassParserExpr.cpp src/frontend/GrassParserStmt.cpp src/frontend/GrassParserDecl.cpp ^
+      src/frontend/GrassSema.cpp src/frontend/sema/SemaBuiltinsCore.cpp src/frontend/sema/SemaBuiltinsMedia.cpp src/frontend/sema/SemaBuiltinsSys.cpp src/frontend/sema/SemaExpr.cpp src/frontend/sema/SemaStmt.cpp src/frontend/GrassImport.cpp src/frontend/GrassLangGen.cpp ^
+      src/native/GrassIR.cpp src/native/GrassIRModule.cpp src/native/GrassIRBuilder.cpp src/native/GrassIRSSA.cpp src/native/GrassIROptPasses.cpp ^
+      src/native/GrassNativeCodegen.cpp src/native/GrassASTLowererHelpers.cpp src/native/GrassASTLowererDecl.cpp src/native/GrassASTLowererStmt.cpp src/native/GrassASTLowererExpr.cpp src/native/GrassASTLowererOps.cpp src/native/GrassASTLowererPrimary.cpp ^
+      src/native/GrassNativeX86Backend.cpp src/native/GrassNativeX86Insts.cpp src/native/GrassNativeX86Vec.cpp ^
+      src/native/GrassNativeOOP.cpp src/native/GrassNativeMemory.cpp src/native/GrassNativeStdlib.cpp src/native/stdlib/NativeStdlibCore.cpp src/native/stdlib/NativeStdlibMedia.cpp src/native/stdlib/NativeStdlibSys.cpp src/native/GrassNativeDebug.cpp ^
+      src/native/GrassAdvancedOpt.cpp src/native/GrassAdvancedOptLoops.cpp src/native/GrassAdvancedOptVec.cpp ^
+      src/native/GrassX86Encoder.cpp src/native/GrassX86EncoderALU.cpp src/native/GrassX86EncoderFP.cpp src/native/GrassX86EncoderSIMD.cpp ^
+      src/native/GrassObjBase.cpp src/native/GrassObjWriter.cpp src/native/GrassObjELF.cpp src/native/GrassObjPE.cpp src/native/GrassObjRuntimeIO.cpp src/native/GrassObjRuntimeSys.cpp src/native/GrassElfWriter.cpp ^
+      src/vm/GrassVM.cpp src/vm/builtins/BuiltinCore.cpp src/vm/builtins/BuiltinMedia.cpp src/vm/builtins/BuiltinSys.cpp src/vm/builtins/BuiltinLowLevel.cpp src/vm/GrassOptimizer.cpp src/vm/GrassJIT.cpp src/vm/GrassMemory.cpp src/vm/GrassFFI.cpp ^
       src/baremetal/GrassBoot.cpp src/baremetal/GrassBaremetal.cpp src/baremetal/GrassHAL.cpp src/baremetal/GrassMMIO.cpp src/baremetal/GrassASM.cpp src/baremetal/GrassKeyboard.cpp src/baremetal/GSE.cpp ^
       src/runtime/GrassFsys.cpp src/runtime/GrassNet.cpp src/runtime/GrassWeb.cpp src/runtime/GrassThread.cpp src/runtime/GrassTime.cpp src/runtime/GrassProc.cpp src/runtime/GrassSys.cpp src/runtime/GrassRandom.cpp src/runtime/GrassJson.cpp src/runtime/GrassTg.cpp src/runtime/GrassHardware.cpp ^
       src/media/Grass2DGraphics.cpp src/media/GrassGfx3D.cpp src/media/gui_engine.cpp src/media/GrassAudio.cpp src/media/GrassPhysics.cpp src/media/CoreMath.cpp src/media/FastMath.cpp src/media/GrassMath3D.cpp ^
@@ -30,10 +37,17 @@ if %ERRORLEVEL% equ 0 (
 rem Fallback to sequential g++
 echo [GrassCompiler] Compiling with g++...
 g++ -std=c++20 -O3 -s -static -static-libgcc -static-libstdc++ -Isrc -Iinclude ^
-  src/cli/grassc.cpp ^
-  src/frontend/GrassSyntax.cpp src/frontend/GrassSema.cpp src/frontend/GrassImport.cpp src/frontend/GrassLangGen.cpp ^
-  src/native/GrassIR.cpp src/native/GrassNativeCodegen.cpp src/native/GrassNativeOOP.cpp src/native/GrassNativeMemory.cpp src/native/GrassNativeStdlib.cpp src/native/GrassNativeDebug.cpp src/native/GrassAdvancedOpt.cpp src/native/GrassX86Encoder.cpp src/native/GrassObjWriter.cpp src/native/GrassElfWriter.cpp ^
-  src/vm/GrassOptimizer.cpp src/vm/GrassJIT.cpp src/vm/GrassMemory.cpp src/vm/GrassFFI.cpp ^
+  src/cli/grassc.cpp src/cli/GrassInstaller.cpp src/cli/GrassPacker.cpp src/cli/GrassDiag.cpp ^
+  src/frontend/GrassLexer.cpp src/frontend/GrassSyntax.cpp src/frontend/GrassBytecodeExpr.cpp src/frontend/GrassBytecodeUI.cpp src/frontend/GrassBytecodeStmt.cpp src/frontend/GrassBytecodeControl.cpp src/frontend/GrassBytecodeDecl.cpp src/frontend/GrassParserExpr.cpp src/frontend/GrassParserStmt.cpp src/frontend/GrassParserDecl.cpp ^
+  src/frontend/GrassSema.cpp src/frontend/sema/SemaBuiltinsCore.cpp src/frontend/sema/SemaBuiltinsMedia.cpp src/frontend/sema/SemaBuiltinsSys.cpp src/frontend/sema/SemaExpr.cpp src/frontend/sema/SemaStmt.cpp src/frontend/GrassImport.cpp src/frontend/GrassLangGen.cpp ^
+  src/native/GrassIR.cpp src/native/GrassIRModule.cpp src/native/GrassIRBuilder.cpp src/native/GrassIRSSA.cpp src/native/GrassIROptPasses.cpp ^
+  src/native/GrassNativeCodegen.cpp src/native/GrassASTLowererHelpers.cpp src/native/GrassASTLowererDecl.cpp src/native/GrassASTLowererStmt.cpp src/native/GrassASTLowererExpr.cpp src/native/GrassASTLowererOps.cpp src/native/GrassASTLowererPrimary.cpp ^
+  src/native/GrassNativeX86Backend.cpp src/native/GrassNativeX86Insts.cpp src/native/GrassNativeX86Vec.cpp ^
+  src/native/GrassNativeOOP.cpp src/native/GrassNativeMemory.cpp src/native/GrassNativeStdlib.cpp src/native/stdlib/NativeStdlibCore.cpp src/native/stdlib/NativeStdlibMedia.cpp src/native/stdlib/NativeStdlibSys.cpp src/native/GrassNativeDebug.cpp ^
+  src/native/GrassAdvancedOpt.cpp src/native/GrassAdvancedOptLoops.cpp src/native/GrassAdvancedOptVec.cpp ^
+  src/native/GrassX86Encoder.cpp src/native/GrassX86EncoderALU.cpp src/native/GrassX86EncoderFP.cpp src/native/GrassX86EncoderSIMD.cpp ^
+  src/native/GrassObjBase.cpp src/native/GrassObjWriter.cpp src/native/GrassObjELF.cpp src/native/GrassObjPE.cpp src/native/GrassObjRuntimeIO.cpp src/native/GrassObjRuntimeSys.cpp src/native/GrassElfWriter.cpp ^
+  src/vm/GrassVM.cpp src/vm/builtins/BuiltinCore.cpp src/vm/builtins/BuiltinMedia.cpp src/vm/builtins/BuiltinSys.cpp src/vm/builtins/BuiltinLowLevel.cpp src/vm/GrassOptimizer.cpp src/vm/GrassJIT.cpp src/vm/GrassMemory.cpp src/vm/GrassFFI.cpp ^
   src/baremetal/GrassBoot.cpp src/baremetal/GrassBaremetal.cpp src/baremetal/GrassHAL.cpp src/baremetal/GrassMMIO.cpp src/baremetal/GrassASM.cpp src/baremetal/GrassKeyboard.cpp src/baremetal/GSE.cpp ^
   src/runtime/GrassFsys.cpp src/runtime/GrassNet.cpp src/runtime/GrassWeb.cpp src/runtime/GrassThread.cpp src/runtime/GrassTime.cpp src/runtime/GrassProc.cpp src/runtime/GrassSys.cpp src/runtime/GrassRandom.cpp src/runtime/GrassJson.cpp src/runtime/GrassTg.cpp src/runtime/GrassHardware.cpp ^
   src/media/Grass2DGraphics.cpp src/media/GrassGfx3D.cpp src/media/gui_engine.cpp src/media/GrassAudio.cpp src/media/GrassPhysics.cpp src/media/CoreMath.cpp src/media/FastMath.cpp src/media/GrassMath3D.cpp ^

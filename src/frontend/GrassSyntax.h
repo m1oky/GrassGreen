@@ -604,6 +604,9 @@ class BytecodeCompiler {
     void parseBlock();
     void parseStepStatement();
     void parseStatement();
+    bool parseStatementHeaderAndOS();
+    bool parseStatementUIAndMedia();
+    bool parseStatementControlAndVars();
     void parseStructDefinition();
     void parseVirtualStruct();
     void parseVFSBody();

@@ -269,6 +269,9 @@ private:
     void reportWarning(const SourceLocation& loc, const std::string& msg, const std::string& hint = "");
 
     void registerBuiltins();
+    void registerBuiltinsCore();
+    void registerBuiltinsMedia();
+    void registerBuiltinsSys();
     SemaType resolveType(const std::string& type_name, int ptr_depth = 0, const SourceLocation& loc = {});
 
     std::string currentNamespace() const;
