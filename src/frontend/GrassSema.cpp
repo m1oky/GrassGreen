@@ -32,6 +32,14 @@ void GrassSema::registerBuiltins() {
     add_builtin("io_print_ptr", SemaType::Int(), {SemaType::Any()});
     add_builtin("io_print_double", SemaType::Int(), {SemaType::Float()});
     add_builtin("io_print_newline", SemaType::Int(), {});
+    add_builtin("grass_print_int", SemaType::Void(), {SemaType::Int()});
+    add_builtin("grass_print_double", SemaType::Void(), {SemaType::Float()});
+    add_builtin("grass_print_str", SemaType::Void(), {SemaType::Any()});
+    add_builtin("grass_print_newline", SemaType::Void(), {});
+    add_builtin("grass_print_bool", SemaType::Void(), {SemaType::Any()});
+    add_builtin("grass_print_ptr", SemaType::Void(), {SemaType::Any()});
+    add_builtin("grass_print_char", SemaType::Void(), {SemaType::Int()});
+    add_builtin("gout_flush", SemaType::Void(), {});
     add_builtin("len", SemaType::Int(), {SemaType::Any()});
     add_builtin("discor", SemaType::Float(), {SemaType::Float()});
 

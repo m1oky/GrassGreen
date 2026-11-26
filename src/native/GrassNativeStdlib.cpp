@@ -171,6 +171,8 @@ namespace grass::native {
         register_function({ "grass_print_newline", "io", v_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "grass_print_bool", "io", v_t, { i64_t }, { "b" }, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "grass_print_ptr", "io", v_t, { i64_t }, { "p" }, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "grass_print_char", "io", v_t, { i64_t }, { "ch" }, false, true, false, "", backend::TargetABI::Win64 });
+        register_function({ "gout_flush", "io", v_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "grass_read_int", "io", i64_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
         register_function({ "grass_read_str", "io", ptr_t, {}, {}, false, true, false, "", backend::TargetABI::Win64 });
     }

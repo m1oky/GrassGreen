@@ -70,24 +70,24 @@ take io_read_raw(take handle, take buf, take max_len) {
     return bytes_read;
 }
 
-// Write string to standard output
+// Flush buffered standard output
+void io_flush() {
+    gout_flush();
+}
+
+// Write string to standard output (64KB buffered)
 take io_print(take str) {
     if (str == 0) {
         return 0;
     }
-    take hOut = io_stdout();
-    if (hOut == 0 || hOut == -1) {
-        return 0;
-    }
-    take len_val = io_strlen(str);
-    return io_write_raw(hOut, str, len_val);
+    grass_print_str(str);
+    return io_strlen(str);
 }
 
-// Write newline to standard output
+// Write newline to standard output and flush buffer
 take io_print_newline() {
-    take hOut = io_stdout();
-    take newline = "\r\n";
-    return io_write_raw(hOut, newline, 2);
+    grass_print_newline();
+    return 1;
 }
 
 // Write string followed by newline to standard output
@@ -97,121 +97,28 @@ take io_println(take str) {
     return w1 + w2;
 }
 
-// Print integer value to standard output without C-runtime sprintf
+// Print integer value to standard output (stack-formatted, 64KB buffered, zero HeapAlloc)
 take io_print_int(take val) {
-    take hOut = io_stdout();
-    if (val == 0) {
-        take zero = "0";
-        return io_write_raw(hOut, zero, 1);
-    }
-    take total_written = 0;
-    if (val < 0) {
-        take minus = "-";
-        total_written = total_written + io_write_raw(hOut, minus, 1);
-        val = 0 - val;
-    }
-
-    take digits = [];
-    while (val > 0) {
-        take rem = val % 10;
-        digits.push(rem);
-        val = val / 10;
-    }
-
-    take count = len(digits);
-    take idx = count - 1;
-    while (idx >= 0) {
-        take d = digits[idx];
-        take char_str = "0";
-        if (d == 1) { char_str = "1"; }
-        if (d == 2) { char_str = "2"; }
-        if (d == 3) { char_str = "3"; }
-        if (d == 4) { char_str = "4"; }
-        if (d == 5) { char_str = "5"; }
-        if (d == 6) { char_str = "6"; }
-        if (d == 7) { char_str = "7"; }
-        if (d == 8) { char_str = "8"; }
-        if (d == 9) { char_str = "9"; }
-
-        total_written = total_written + io_write_raw(hOut, char_str, 1);
-        idx = idx - 1;
-    }
-    return total_written;
+    grass_print_int(val);
+    return 0;
 }
 
 // Print boolean value (true / false)
 take io_print_bool(take b) {
-    if (b != 0) {
-        take s_true = "true";
-        return io_print(s_true);
-    }
-    take s_false = "false";
-    return io_print(s_false);
+    grass_print_bool(b);
+    return 0;
 }
 
 // Print pointer address in hexadecimal format (0x...)
 take io_print_ptr(take p) {
-    take hOut = io_stdout();
-    take prefix = "0x";
-    take written = io_write_raw(hOut, prefix, 2);
-    if (p == 0) {
-        take zero = "0";
-        return written + io_write_raw(hOut, zero, 1);
-    }
-    take hex_digits = [];
-    take cur = p;
-    while (cur != 0) {
-        take rem = cur & 15;
-        hex_digits.push(rem);
-        cur = (cur >> 4) & 1152921504606846975;
-    }
-    take count = len(hex_digits);
-    take idx = count - 1;
-    while (idx >= 0) {
-        take d = hex_digits[idx];
-        take char_str = "0";
-        if (d == 1) { char_str = "1"; }
-        if (d == 2) { char_str = "2"; }
-        if (d == 3) { char_str = "3"; }
-        if (d == 4) { char_str = "4"; }
-        if (d == 5) { char_str = "5"; }
-        if (d == 6) { char_str = "6"; }
-        if (d == 7) { char_str = "7"; }
-        if (d == 8) { char_str = "8"; }
-        if (d == 9) { char_str = "9"; }
-        if (d == 10) { char_str = "a"; }
-        if (d == 11) { char_str = "b"; }
-        if (d == 12) { char_str = "c"; }
-        if (d == 13) { char_str = "d"; }
-        if (d == 14) { char_str = "e"; }
-        if (d == 15) { char_str = "f"; }
-        written = written + io_write_raw(hOut, char_str, 1);
-        idx = idx - 1;
-    }
-    return written;
+    grass_print_ptr(p);
+    return 0;
 }
 
-// Print floating point value with decimal fraction
+// Print floating point value with decimal fraction (64KB buffered)
 take io_print_double(float v) {
-    take hOut = io_stdout();
-    take total = 0;
-    if (v < 0.0) {
-        take minus = "-";
-        total = total + io_write_raw(hOut, minus, 1);
-        v = 0.0 - v;
-    }
-    take int_part = (int64)v;
-    total = total + io_print_int(int_part);
-    take dot = ".";
-    total = total + io_write_raw(hOut, dot, 1);
-    float frac = v - (float)int_part;
-    for (take i = 0; i < 4; i++) {
-        frac = frac * 10.0;
-        take d = (int64)frac;
-        total = total + io_print_int(d);
-        frac = frac - (float)d;
-    }
-    return total;
+    grass_print_double(v);
+    return 0;
 }
 
 take io_print_str(take s) {

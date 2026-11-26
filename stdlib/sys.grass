@@ -8,6 +8,7 @@
 
 // Terminate current process with exit code
 void sys_exit(take code) {
+    gout_flush();
     ExitProcess(code);
 }
 
